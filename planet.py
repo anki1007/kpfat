@@ -158,12 +158,19 @@ resolution = RESOLUTIONS[res_label]
 chart_type = st.sidebar.radio("Price chart", ["Candlestick", "Close line"], horizontal=True)
 
 with st.sidebar.expander("Advanced", expanded=False):
-    use_topo      = st.checkbox("Topocentric (Mumbai)", value=False,
-                                help="Account for observer parallax at Mumbai. "
-                                     "Mainly visible as tiny daily ripples on the Moon.")
-    use_true_node = st.checkbox("True Node for Rahu/Ketu", value=False,
-                                help="Uses oscillating true node instead of the mean node.")
-    show_zero     = st.checkbox("Show latitude = 0 line", value=True)
+    use_topo        = st.checkbox("Topocentric (Mumbai)", value=False,
+                                  help="Account for observer parallax at Mumbai. "
+                                       "Mainly visible as tiny daily ripples on the Moon.")
+    use_true_node   = st.checkbox("True Node for Rahu/Ketu", value=False,
+                                  help="Uses oscillating true node instead of the mean node.")
+    show_zero       = st.checkbox("Show latitude = 0 line", value=True)
+    hide_weekends   = st.checkbox(
+        "Hide weekends on price axis",
+        value=False,
+        help="Collapses Sat/Sun on the price chart. "
+             "When OFF (recommended), planet curves stay mathematically continuous. "
+             "When ON, planet samples are filtered to weekdays so both panels align.",
+    )
 
 # ------------------------------------------------------------------
 # Load data
@@ -175,6 +182,13 @@ with st.spinner("Computing planetary positions…"):
     planet_df = compute_planet_latitudes(
         start_date, end_date, resolution, use_topo, use_true_node,
     )
+
+# If the user opted to collapse weekends on the price axis, drop weekend
+# samples from the planet frame too. Otherwise Plotly squeezes them into the
+# collapsed region and the line zig-zags across the chart.
+if hide_weekends:
+    dow = planet_df["datetime"].dt.dayofweek
+    planet_df = planet_df[dow < 5].reset_index(drop=True)
 
 if price_df.empty:
     st.error(f"No price data returned for {symbol}. Try a different date range.")
@@ -270,16 +284,14 @@ fig.update_yaxes(title_text="Price", row=1, col=1)
 fig.update_yaxes(title_text="Latitude (°)", row=2, col=1)
 fig.update_xaxes(title_text="Date", row=2, col=1)
 
-# Skip weekends/holidays on the price x-axis so candles are contiguous.
-# Planets still plot continuously, but the shared axis will snap to trading days.
-fig.update_xaxes(
-    rangebreaks=[dict(bounds=["sat", "mon"])],
-    row=1, col=1,
-)
-fig.update_xaxes(
-    rangebreaks=[dict(bounds=["sat", "mon"])],
-    row=2, col=1,
-)
+# Skip weekends/holidays on the price x-axis ONLY when the user opts in.
+# Default (off) keeps planet curves mathematically continuous, which is the
+# standard convention for astro-price overlays. When on, we ALSO drop weekend
+# samples from the planet series so Plotly doesn't compress them into the
+# collapsed range and produce vertical jitter.
+if hide_weekends:
+    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])], row=1, col=1)
+    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])], row=2, col=1)
 
 st.plotly_chart(fig, use_container_width=True)
 
