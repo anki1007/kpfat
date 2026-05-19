@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>KP Astro Analyst – NSE Intraday</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#04070e;--bg2:#070b14;--bg3:#090e18;
+  --brd:#101e30;--amber:#ffaa00;--amber2:#cc8800;
+  --cyan:#00d4ff;--green:#00ff88;--red:#ff3355;
+  --text:#b8cce0;--text2:#4a7090;
+  --mono:'Share Tech Mono',monospace;--disp:'Orbitron',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:10.5px}
+body::before{content:'';position:fixed;inset:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.04) 2px,rgba(0,0,0,.04) 4px);
+  pointer-events:none;z-index:9999}
+
+/* ── HEADER ── */
+#hdr{background:linear-gradient(135deg,#060c1a,#0d1e35);border-bottom:1px solid var(--amber);
+  padding:8px 14px;display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:300;
+  box-shadow:0 2px 24px rgba(255,170,0,.15);flex-wrap:wrap}
+.logo{font-family:var(--disp);font-size:13px;font-weight:900;color:var(--amber);
+  letter-spacing:2px;text-shadow:0 0 18px rgba(255,170,0,.5);white-space:nowrap}
+.logo span{color:var(--cyan)}
+.tagline{font-size:8px;color:var(--text2);letter-spacing:1px;margin-top:2px}
+.sep{width:1px;height:30px;background:var(--brd);margin:0 4px}
+.clbl{color:var(--text2);font-size:9px;letter-spacing:.8px}
+input[type=date]{background:var(--bg3);color:var(--amber);border:1px solid var(--amber2);
+  padding:5px 8px;border-radius:3px;font-family:var(--mono);font-size:11px;cursor:pointer;outline:none}
+input[type=date]:focus{border-color:var(--amber);box-shadow:0 0 8px rgba(255,170,0,.3)}
+select{background:var(--bg3);color:var(--amber);border:1px solid var(--amber2);
+  padding:5px 7px;border-radius:3px;font-family:var(--mono);font-size:10px;outline:none;cursor:pointer}
+.btn{background:var(--bg3);color:var(--cyan);border:1px solid var(--brd);padding:5px 10px;
+  border-radius:3px;cursor:pointer;font-family:var(--mono);font-size:10px;letter-spacing:.8px;transition:all .15s}
+.btn:hover{background:#0f2030;border-color:var(--cyan);box-shadow:0 0 8px rgba(0,212,255,.2)}
+.btn-go{background:#0a2040;color:var(--amber);border-color:var(--amber2)}
+.btn-go:hover{background:#142f55;box-shadow:0 0 12px rgba(255,170,0,.3)}
+.btn-nav{font-size:13px;padding:5px 11px}
+.btn-csv{color:var(--green);border-color:#00a855;margin-left:auto}
+.btn-csv:hover{background:#001a0a;box-shadow:0 0 8px rgba(0,255,136,.2)}
+#status{font-size:9px;letter-spacing:.8px;color:var(--text2);min-width:220px}
+#status.live{color:var(--amber)}
+
+#pgwrap{width:100%;background:var(--bg);padding:2px 0;display:none}
+#pgbar{height:2px;background:var(--amber);width:0%;box-shadow:0 0 8px rgba(255,170,0,.6);transition:width .08s}
+
+#ibar{background:var(--bg2);border-bottom:1px solid var(--brd);padding:5px 14px;
+  display:none;gap:20px;font-size:9px;color:var(--text2);letter-spacing:.4px;flex-wrap:wrap}
+.ii{display:flex;gap:6px}
+.ii .lbl{color:var(--text2)}.ii .val{color:var(--cyan)}
+
+#wrap{overflow:auto;height:calc(100vh - 108px)}
+#wrap::-webkit-scrollbar{width:5px;height:5px}
+#wrap::-webkit-scrollbar-track{background:var(--bg2)}
+#wrap::-webkit-scrollbar-thumb{background:#1a2a3a;border-radius:3px}
+
+/* ── TABLE ── */
+table{border-collapse:collapse;white-space:nowrap;font-family:var(--mono);font-size:9.8px}
+th,td{border:1px solid #0e1a28;padding:2px 5px;text-align:center;min-width:42px}
+thead th{position:sticky;z-index:15}
+thead tr:nth-child(1) th{top:0}
+thead tr:nth-child(2) th{top:26px}
+td:first-child,th:first-child{position:sticky;left:0;z-index:12;min-width:120px}
+thead th:first-child{z-index:22}
+
+.th0-date{background:#0a0c00;color:var(--amber);font-family:var(--disp);font-size:8px;letter-spacing:1.5px;border-bottom:1px solid var(--amber2)!important}
+.th0-kp{background:linear-gradient(135deg,#0a1e3a,#0c2245);color:var(--cyan);font-family:var(--disp);font-size:8px;letter-spacing:1.5px;border-bottom:2px solid var(--cyan)!important}
+.th0-planet{font-family:var(--disp);font-size:8px;letter-spacing:2px}
+.th1-kp{background:#060e1c;color:#3a8ab8}
+.th1-asp{background:#04060e;color:#3a5a70;font-size:9px}
+
+/* Date col */
+td:first-child{background:#04070d!important;color:var(--cyan)!important;font-size:9.5px;
+  text-align:left;padding-left:7px;border-right:1px solid var(--amber2)!important}
+
+/* Moon strength – KP weighted */
+.ms-vbull{background:#003b10;color:#00ff88;font-weight:bold}   /* ≥75 Bullish */
+.ms-bull {background:#004a14;color:#44ee88;font-weight:bold}   /* 55-74 */
+.ms-neut {background:#1a1a00;color:#cccc44;font-weight:bold}   /* 40-54 Neutral */
+.ms-bear {background:#3a1000;color:#ff8822;font-weight:bold}   /* 25-39 */
+.ms-vbear{background:#3a0010;color:#ff3355;font-weight:bold}   /* <25  Bearish */
+
+/* Paksha */
+.pk-s{color:#00ffaa;background:#001a0d}  /* Shukla (waxing) */
+.pk-k{color:#ff7744;background:#1a0a00}  /* Krishna (waning) */
+
+/* P N S */
+.tdP{background:#001e0c;color:#44dd88}
+.tdN{background:#181600;color:#cccc44}
+.tdS{background:#1e0008;color:#ee4466}
+
+/* Nadi */
+.tdNad{background:#050b15;color:#ffcc55;text-align:left;padding-left:6px;
+  min-width:200px;font-size:9.5px;border-right:1px solid #1a2a3a!important}
+
+/* Nadi lord benefic/malefic colour */
+.nd-bene{color:#44ffaa!important}
+.nd-male{color:#ff7744!important}
+.nd-neut{color:#ffcc55!important}
+
+/* ── ASPECT CELLS ── */
+.tdA{color:#2a4a66}
+/* Favourable (benefic–benefic or benefic aspect) */
+.a-conj-bb{background:#001800!important;color:#33ff66!important;font-weight:bold}
+.a-conj-bm{background:#221a00!important;color:#ffcc33!important}
+.a-conj-mm{background:#1a0400!important;color:#ff7733!important;font-weight:bold}
+.a-sext-bb{background:#001400!important;color:#22ee55!important}
+.a-sext-bm{background:#181800!important;color:#ccbb44!important}
+.a-sext-mm{background:#180600!important;color:#dd6633!important}
+.a-tri-bb {background:#001e00!important;color:#00ff88!important;font-weight:bold}
+.a-tri-bm {background:#1a1e00!important;color:#aaee44!important}
+.a-tri-mm {background:#1a0800!important;color:#ff8833!important}
+.a-sq-bb  {background:#002211!important;color:#33cc77!important}
+.a-sq-bm  {background:#221400!important;color:#dd9933!important;font-weight:bold}
+.a-sq-mm  {background:#220000!important;color:#ff3333!important;font-weight:bold}
+.a-opp-bb {background:#001a0a!important;color:#00ffaa!important;font-weight:bold}
+.a-opp-bm {background:#1a1000!important;color:#ffaa22!important;font-weight:bold}
+.a-opp-mm {background:#220000!important;color:#ff2244!important;font-weight:bold}
+.a-sesq   {background:#180900!important;color:#ff7722!important}
+.a-quin   {background:#110011!important;color:#cc44ff!important}
+
+/* pagation */
+#pgNav{background:var(--bg2);border-top:1px solid var(--brd);padding:6px 14px;
+  display:none;align-items:center;gap:8px;font-size:9px;color:var(--text2);flex-wrap:wrap}
+#pgNav span{color:var(--amber)}
+
+#ldg{display:flex;flex-direction:column;align-items:center;justify-content:center;height:300px;gap:16px;color:var(--text2)}
+.spin{width:36px;height:36px;border:2px solid var(--brd);border-top-color:var(--amber);
+  border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* legend */
+#leg{background:var(--bg2);border-top:1px solid var(--brd);padding:5px 14px;
+  display:flex;gap:12px;font-size:8px;color:var(--text2);flex-wrap:wrap;align-items:center}
+.lgi{display:flex;align-items:center;gap:3px}
+.lgd{width:10px;height:10px;border-radius:2px}
+
+/* tooltip */
+[title]{cursor:help}
+</style>
+</head>
+<body>
+
+<div id="hdr">
+  <div>
+    <div class="logo">KP<span>ASTRO</span> ANALYST</div>
+    <div class="tagline">NSE/BSE · KP MOON STRENGTH · TOPOCENTRIC (MUMBAI 18.90°N 72.82°E) · 66 ASPECT PAIRS</div>
+  </div>
+  <div class="sep"></div>
+  <span class="clbl">DATE</span>
+  <button class="btn btn-nav" id="btnPrev">◀</button>
+  <input type="date" id="dPick">
+  <button class="btn btn-nav" id="btnNext">▶</button>
+  <div class="sep"></div>
+  <span class="clbl">RANGE</span>
+  <select id="selMode">
+    <option value="day">Single Day</option>
+    <option value="week">7 Days</option>
+    <option value="month">Full Month</option>
+    <option value="year">Full Year</option>
+  </select>
+  <div class="sep"></div>
+  <span class="clbl">AYAN</span>
+  <select id="selAyan" title="Ayanamsha system">
+    <option value="LAHIRI">Lahiri</option>
+    <option value="KP_OLD" selected>KP Old</option>
+    <option value="KP_NEW">KP New</option>
+    <option value="RAMAN">Raman</option>
+    <option value="KHULLAR">Khullar</option>
+  </select>
+  <div class="sep"></div>
+  <span class="clbl">TOPO</span>
+  <select id="selTopo" title="Geocentric or Topocentric (Mumbai)">
+    <option value="topo" selected>Mumbai</option>
+    <option value="geo">Geocentric</option>
+  </select>
+  <button class="btn btn-go" id="btnGo">⚡ GENERATE</button>
+  <div class="sep"></div>
+  <span id="status">Select date → ⚡ GENERATE</span>
+  <button class="btn btn-csv" id="btnCSV">⬇ CSV</button>
+</div>
+
+<div id="pgwrap"><div id="pgbar"></div></div>
+
+<div id="ibar">
+  <div class="ii"><span class="lbl">AYANAMSHA</span><span class="val" id="ibAyan">—</span></div>
+  <div class="ii"><span class="lbl">SYSTEM</span><span class="val" id="ibSys">KP OLD</span></div>
+  <div class="ii"><span class="lbl">FRAME</span><span class="val" id="ibFrame">TOPO MUMBAI</span></div>
+  <div class="ii"><span class="lbl">STRENGTH</span><span class="val">KP WEIGHTED · 40% POS · 15% PAKSHA · 45% ASP</span></div>
+  <div class="ii"><span class="lbl">INTERVAL</span><span class="val">5 MIN · 09:00–23:45 IST</span></div>
+  <div class="ii"><span class="lbl">ROWS</span><span class="val" id="ibRows">—</span></div>
+  <div class="ii"><span class="lbl">PAIRS</span><span class="val">66</span></div>
+  <div class="ii"><span class="lbl">PAGE</span><span class="val" id="ibPage">1/1</span></div>
+</div>
+
+<div id="wrap">
+  <div id="ldg">
+    <div class="spin"></div>
+    <div style="font-family:var(--disp);font-size:11px;letter-spacing:2px;color:var(--amber)">SELECT DATE · CLICK ⚡</div>
+    <div style="font-size:9px;color:var(--text2);margin-top:8px;text-align:center;line-height:1.8">
+      Moon Strength = KP Nak/Sub/Nadi lord weights + Moon aspects weighted by planet nature + Paksha factor<br>
+      Opposition between malefics = BEARISH (not bullish) · Benefic trine = max bullish
+    </div>
+  </div>
+</div>
+
+<div id="pgNav">
+  <button class="btn" id="pgFirst">⏮</button>
+  <button class="btn" id="pgPrev">◀ Prev</button>
+  <span id="pgLbl">Page 1 of 1</span>
+  <button class="btn" id="pgNext">Next ▶</button>
+  <button class="btn" id="pgLast">⏭</button>
+  <span style="margin-left:8px">Rows <span id="pgRange">—</span> / <span id="pgTotal">—</span></span>
+</div>
+
+<div id="leg">
+  <span style="color:var(--amber);font-family:var(--disp);font-size:7px;letter-spacing:2px">MOON STRENGTH:</span>
+  <div class="lgi"><div class="lgd ms-vbull" style="background:#003b10"></div>≥75% Very Bullish</div>
+  <div class="lgi"><div class="lgd ms-bull"  style="background:#004a14"></div>55–74% Bullish</div>
+  <div class="lgi"><div class="lgd ms-neut"  style="background:#1a1a00"></div>40–54% Neutral</div>
+  <div class="lgi"><div class="lgd ms-bear"  style="background:#3a1000"></div>25–39% Bearish</div>
+  <div class="lgi"><div class="lgd ms-vbear" style="background:#3a0010"></div>&lt;25% Very Bearish</div>
+  <span style="margin-left:10px;color:var(--amber);font-family:var(--disp);font-size:7px;letter-spacing:2px">PAKSHA:</span>
+  <div class="lgi"><div class="lgd pk-s" style="background:#001a0d"></div>◑ Shukla (waxing)</div>
+  <div class="lgi"><div class="lgd pk-k" style="background:#1a0a00"></div>◐ Krishna (waning)</div>
+  <span style="margin-left:10px;color:var(--amber);font-family:var(--disp);font-size:7px;letter-spacing:2px">ASPECTS:</span>
+  <div class="lgi"><div class="lgd" style="background:#001e00"></div>Trine BB</div>
+  <div class="lgi"><div class="lgd" style="background:#001400"></div>Sextile BB</div>
+  <div class="lgi"><div class="lgd" style="background:#001a0a"></div>Opp BB</div>
+  <div class="lgi"><div class="lgd" style="background:#220000"></div>Sq/Opp MM</div>
+  <div class="lgi"><div class="lgd" style="background:#1a0400"></div>Conj MM</div>
+</div>
+
+<script>
+"use strict";
+// ═══════════════════════════════════════════════════════════════════
+//  MATH
+// ═══════════════════════════════════════════════════════════════════
+const D2R=Math.PI/180, R2D=180/Math.PI;
+const n360=x=>((x%360)+360)%360;
+const cosd=x=>Math.cos(x*D2R), sind=x=>Math.sin(x*D2R);
+const atand2=(y,x)=>Math.atan2(y,x)*R2D;
+
+function kepler(M,e){
+  let E=M=n360(M);
+  for(let i=0;i<60;i++){const dE=(M-E+R2D*e*sind(E))/(1-e*cosd(E));E+=dE;if(Math.abs(dE)<1e-12)break}
+  return E;
+}
+
+const J2000_MS=Date.UTC(2000,0,1,12,0,0);
+const jd=date=>(date.getTime()-J2000_MS)/86400000;
+
+// ═══════════════════════════════════════════════════════════════════
+//  AYANAMSHA  (calibrated against AstroSage 2026 reference values)
+//  Common precession rate: 50.2877"/yr = 3.8240e-5 °/day
+//  Epoch values (J2000.0) calibrated so spot value at 2026-05-06 12:00 UT
+//  matches AstroSage ayanamsha calculator within ~12 arc-seconds.
+// ═══════════════════════════════════════════════════════════════════
+const AYAN_RATE = 3.8240e-5;
+const AYAN_EPOCHS = {
+  LAHIRI : 23.85644,   // Chitrapaksha (default Vedic)
+  KP_OLD : 23.76200,   // Krishnamurti — Lahiri − 5'40"
+  KP_NEW : 23.76644,   // Lahiri − 5'24"
+  RAMAN  : 22.41256,   // Lahiri − 1°26'38"
+  KHULLAR: 23.84589    // Lahiri − 0'38"
+};
+let AYAN_SYS = 'KP_OLD';   // active system, set by UI dropdown
+const ayanFn = d => AYAN_EPOCHS[AYAN_SYS] + d * AYAN_RATE;
+
+// ═══════════════════════════════════════════════════════════════════
+//  OBSERVER  —  Mumbai (NSE/BSE)
+//  18°54'N  72°49'E  —  used for topocentric Moon parallax correction
+// ═══════════════════════════════════════════════════════════════════
+const OBS_LAT = 18.9000;
+const OBS_LON = 72.8167;
+const FLAT_FAC = 0.99664719;   // Earth flattening factor (Meeus 11.3)
+let TOPO = true;               // toggled by selTopo dropdown
+
+// Greenwich Mean Sidereal Time (degrees)  Meeus 12.4
+function gmst(d){
+  const T = d/36525;
+  return n360(280.46061837 + 360.98564736629*d
+              + 0.000387933*T*T - T*T*T/38710000);
+}
+
+// Topocentric correction for Moon — returns apparent ecliptic longitude.
+// Meeus Ch.40 equations 40.6/40.7 applied in equatorial coords, then back.
+//   d         : days from J2000
+//   geoLon    : geocentric ecliptic longitude (deg, tropical, perturbed)
+//   geoLat    : geocentric ecliptic latitude  (deg)
+//   r         : geocentric distance in Earth radii
+//   obsLat/Lon: observer (deg, +N / +E)
+function topoMoonLon(d, geoLon, geoLat, r, obsLat, obsLon){
+  // Mean obliquity of ecliptic
+  const T   = d/36525;
+  const eps = 23.439291 - 0.0130042*T;
+  const sE  = sind(eps), cE = cosd(eps);
+
+  // Ecliptic → Equatorial (RA, Dec)
+  const sLn = sind(geoLon), cLn = cosd(geoLon);
+  const sLt = sind(geoLat), cLt = cosd(geoLat);
+  const ra  = n360(atand2(sLn*cE - (sLt/cLt)*sE, cLn));
+  const dec = R2D*Math.asin(sLt*cE + cLt*sE*sLn);
+
+  // Local hour angle
+  const H = n360(gmst(d) + obsLon - ra);
+
+  // Horizontal parallax (sin π = 1/r when r in Earth radii)
+  const sinPi = 1/r;
+
+  // Reduced (geocentric) latitude — sea level, no elevation term
+  const phi   = obsLat*D2R;
+  const rhoSp = FLAT_FAC*Math.sin(phi);
+  const rhoCp = Math.cos(phi);
+
+  // Topocentric RA/Dec  (Meeus 40.6 / 40.7)
+  const A    = cosd(dec) - rhoCp*sinPi*cosd(H);
+  const dRA  = R2D*Math.atan2(-rhoCp*sinPi*sind(H), A);
+  const ra1  = n360(ra + dRA);
+  const dec1 = R2D*Math.atan2((sind(dec) - rhoSp*sinPi)*cosd(dRA), A);
+
+  // Equatorial → Ecliptic (longitude only; we don't need β here)
+  const sR1 = sind(ra1), cR1 = cosd(ra1);
+  const sD1 = sind(dec1), cD1 = cosd(dec1);
+  return n360(atand2(sR1*cE + (sD1/cD1)*sE, cR1));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  EPHEMERIS  (Schlyter VSOP – self-contained)
+// ═══════════════════════════════════════════════════════════════════
+function getPositions(utcDate){
+  const d=jd(utcDate), ayan=ayanFn(d);
+  const sid=lon=>n360(lon-ayan);
+
+  // SUN
+  const ws=n360(282.9404+4.70935e-5*d), Ms=n360(356.0470+0.9856002585*d), es=0.016709-1.151e-9*d;
+  const Es=kepler(Ms,es), xvs=cosd(Es)-es, yvs=Math.sqrt(1-es*es)*sind(Es);
+  const vs=n360(atand2(yvs,xvs)), rs=Math.sqrt(xvs*xvs+yvs*yvs);
+  const SL=n360(vs+ws);
+  const ex=rs*cosd(SL), ey=rs*sind(SL);
+  const geo=(xh,yh)=>n360(atand2(yh+ey,xh+ex));
+
+  function pl(N,i,w,a,e,M){
+    M=n360(M); const E=kepler(M,e);
+    const xv=a*(cosd(E)-e), yv=a*Math.sqrt(1-e*e)*sind(E);
+    const v=n360(atand2(yv,xv)), r=Math.sqrt(xv*xv+yv*yv);
+    const xh=r*(cosd(N)*cosd(v+w)-sind(N)*sind(v+w)*cosd(i));
+    const yh=r*(sind(N)*cosd(v+w)+cosd(N)*sind(v+w)*cosd(i));
+    return{xh,yh};
+  }
+
+  // MOON with Chapront perturbations
+  const N_m=n360(125.1228-0.0529538083*d), w_m=n360(318.0634+0.1643573223*d);
+  const M_m=n360(115.3654+13.0649929509*d);
+  const E_m=kepler(M_m,0.054900);
+  const xv_m=60.2666*(cosd(E_m)-0.054900), yv_m=60.2666*Math.sqrt(1-0.054900**2)*sind(E_m);
+  const v_m=n360(atand2(yv_m,xv_m)), r_m=Math.sqrt(xv_m**2+yv_m**2);
+  const xh_m=r_m*(cosd(N_m)*cosd(v_m+w_m)-sind(N_m)*sind(v_m+w_m)*cosd(5.1454));
+  const yh_m=r_m*(sind(N_m)*cosd(v_m+w_m)+cosd(N_m)*sind(v_m+w_m)*cosd(5.1454));
+  const zh_m=r_m*sind(v_m+w_m)*sind(5.1454);
+  let ML=n360(atand2(yh_m,xh_m));
+  let MB=R2D*Math.asin(zh_m/r_m);   // geocentric ecliptic latitude (basic)
+  const Lm=n360(M_m+w_m+N_m),Ls=n360(Ms+ws),D=n360(Lm-Ls),F=n360(Lm-N_m);
+
+  // Longitude perturbations (Chapront)
+  ML=n360(ML-1.274*sind(M_m-2*D)+0.658*sind(2*D)-0.186*sind(Ms)
+    -0.059*sind(2*M_m-2*D)-0.057*sind(M_m-2*D+Ms)+0.053*sind(M_m+2*D)
+    +0.046*sind(2*D-Ms)+0.041*sind(M_m-Ms)-0.035*sind(D)
+    -0.031*sind(M_m+Ms)+0.015*sind(2*F-2*D)+0.011*sind(M_m-4*D));
+
+  // Latitude perturbations (largest 5 terms — sub-arcminute accuracy)
+  MB = MB - 0.173*sind(F-2*D)
+        + 0.055*sind(M_m-F-2*D)
+        - 0.046*sind(M_m+F-2*D)
+        + 0.033*sind(F+2*D)
+        - 0.017*sind(2*M_m+F);
+
+  // Distance perturbations (small, but improves topocentric accuracy)
+  const r_corr = r_m - 0.58*cosd(M_m-2*D) - 0.46*cosd(2*D);
+
+  // Topocentric correction (Mumbai parallax) — KP-critical ±2-50' shift
+  let ML_app = ML;
+  if(TOPO){
+    ML_app = topoMoonLon(d, ML, MB, r_corr, OBS_LAT, OBS_LON);
+  }
+
+  // Inner planets
+  const{xh:xMe,yh:yMe}=pl(n360(48.3313+3.24587e-5*d),7.0047+5e-8*d,n360(29.1241+1.01444e-5*d),0.387098,0.205635+5.59e-10*d,n360(168.6562+4.0923344368*d));
+  const{xh:xVe,yh:yVe}=pl(n360(76.6799+2.46590e-5*d),3.3946+2.75e-8*d,n360(54.8910+1.38374e-5*d),0.723330,0.006773-1.302e-9*d,n360(48.1378+1.6021302244*d));
+  const{xh:xMa,yh:yMa}=pl(n360(49.5574+2.11081e-5*d),1.8497-1.78e-8*d,n360(286.5016+2.92961e-5*d),1.523688,0.093405+2.516e-9*d,n360(18.6021+0.5240207766*d));
+
+  // Outer with Ju/Sa perturbations
+  const M_ju=n360(19.8950+0.0830853001*d), M_sa=n360(316.9670+0.0334442282*d);
+  const{xh:xJu,yh:yJu}=pl(n360(100.4542+2.76854e-5*d),1.3030-1.557e-7*d,n360(273.8777+1.64505e-5*d),5.20256,0.048498+4.469e-9*d,M_ju);
+  let jupL=n360(geo(xJu,yJu)-0.332*sind(2*M_ju-5*M_sa-67.6)-0.056*sind(2*M_ju-2*M_sa+21)+0.042*sind(3*M_ju-5*M_sa+21)-0.036*sind(M_ju-2*M_sa)+0.022*cosd(M_ju-M_sa)+0.023*sind(2*M_ju-3*M_sa+52)-0.016*sind(M_ju-5*M_sa-69));
+  const{xh:xSa,yh:ySa}=pl(n360(113.6634+2.38980e-5*d),2.4886-1.081e-7*d,n360(339.3939+2.97661e-5*d),9.55475,0.055546-9.499e-9*d,M_sa);
+  let satL=n360(geo(xSa,ySa)+0.812*sind(2*M_ju-5*M_sa-67.6)-0.229*cosd(2*M_ju-4*M_sa-2)+0.119*sind(M_ju-2*M_sa-3)+0.046*sind(2*M_ju-6*M_sa-69)+0.014*sind(M_ju-3*M_sa+32));
+  const{xh:xUr,yh:yUr}=pl(n360(74.0005+1.3978e-5*d),0.7733+1.9e-8*d,n360(96.6612+3.0565e-5*d),19.18171-1.55e-8*d,0.047318+7.45e-9*d,n360(142.5905+0.011725806*d));
+  const{xh:xNe,yh:yNe}=pl(n360(131.7806+3.0173e-5*d),1.7700-2.55e-7*d,n360(272.8461-6.027e-6*d),30.05826+3.313e-8*d,0.008606+2.15e-9*d,n360(260.2471+0.005995147*d));
+  const{xh:xPl,yh:yPl}=pl(n360(110.3039+1.3529e-5*d),17.1420-4.16e-8*d,n360(113.7639+4.1e-5*d),39.48168-6.31e-8*d,0.248810-1.33e-9*d,n360(238.9508+0.003980649*d));
+
+  const rahuT=n360(125.04452-0.052954*d);
+
+  return{
+    SU:sid(SL), MO:sid(ML_app),
+    ME:sid(geo(xMe,yMe)), VE:sid(geo(xVe,yVe)), MA:sid(geo(xMa,yMa)),
+    JU:sid(n360(jupL)),   SA:sid(n360(satL)),
+    UR:sid(geo(xUr,yUr)), NE:sid(geo(xNe,yNe)), PL:sid(geo(xPl,yPl)),
+    RA:sid(rahuT), KE:sid(n360(rahuT+180)),
+    ayan,
+    // Raw tropical Moon-Sun angle for Paksha (uses topocentric Moon)
+    moonSunAngle: n360(ML_app - SL)
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  PLANET NATURE  (KP / Jyotish standard)
+//  +1 = Natural Benefic, -1 = Natural Malefic
+//  Scores: JU=3, VE=2, MO=2 (waxing), ME=1 (mixed), SU=-1,MA=-2,SA=-2,RA=-2,KE=-2,UR=-1,NE=-1,PL=-1
+// ═══════════════════════════════════════════════════════════════════
+const PNAT={SU:-1, MO:2, ME:1, VE:2, MA:-2, JU:3, SA:-2, UR:-1, NE:-1, PL:-1, RA:-2, KE:-2};
+
+// Normalised to [-1,+1]
+const PNORM={};
+const PMAX=Math.max(...Object.values(PNAT).map(Math.abs));
+for(const k in PNAT) PNORM[k]=PNAT[k]/PMAX;
+
+// ═══════════════════════════════════════════════════════════════════
+//  KP VIMSHOTTARI  — Nakshatra / Sub / Nadi lords
+// ═══════════════════════════════════════════════════════════════════
+const V_SEQ=['KE','VE','SU','MO','MA','RA','JU','SA','ME'];
+const V_YRS={KE:7,VE:20,SU:6,MO:10,MA:7,RA:18,JU:16,SA:19,ME:17};
+const V_TOT=120, NAK_SZ=360/27;
+
+const NAK_LORD='KE VE SU MO MA RA JU SA ME KE VE SU MO MA RA JU SA ME KE VE SU MO MA RA JU SA ME'.split(' ');
+const NAK_NAME=['Ashwini','Bharani','Krittika','Rohini','Mrigashira','Ardra','Punarvasu','Pushya','Ashlesha',
+  'Magha','P.Phalguni','U.Phalguni','Hasta','Chitra','Swati','Vishakha','Anuradha','Jyeshtha',
+  'Mula','P.Ashadha','U.Ashadha','Shravana','Dhanishtha','Shatabhisha','P.Bhadra','U.Bhadra','Revati'];
+
+function kpNadi(sidLon){
+  const lon=n360(sidLon);
+  const ni=Math.floor(lon/NAK_SZ);
+  const nakLord=NAK_LORD[ni], posIn=lon-ni*NAK_SZ;
+  const si0=V_SEQ.indexOf(nakLord);
+  let rem=posIn, subLord=nakLord, subNum=1, subSz=(V_YRS[nakLord]/V_TOT)*NAK_SZ, subRem=posIn;
+  for(let i=0;i<9;i++){
+    const lord=V_SEQ[(si0+i)%9], sz=(V_YRS[lord]/V_TOT)*NAK_SZ;
+    if(rem<=sz+1e-12){subLord=lord;subNum=i+1;subSz=sz;subRem=rem;break}
+    rem-=sz;
+  }
+  const si1=V_SEQ.indexOf(subLord);
+  let ssRem=subRem, nadiLord=subLord, nadiNum=1;
+  for(let i=0;i<9;i++){
+    const lord=V_SEQ[(si1+i)%9], sz=(V_YRS[lord]/V_TOT)*subSz;
+    if(ssRem<=sz+1e-12){nadiLord=lord;nadiNum=i+1;break}
+    ssRem-=sz;
+  }
+  return{ni:ni+1, nakName:NAK_NAME[ni], nakLord, subLord, subNum, nadiLord, nadiNum};
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  MOON KP STRENGTH  — Proper weighted formula
+//
+//  Components (each 0–100, then blended):
+//
+//  A) KP POSITIONAL SCORE  (40% weight)
+//     Nak lord nature × 0.50 + Sub lord nature × 0.35 + Nadi lord × 0.15
+//     Converted to 0–100 scale
+//
+//  B) PAKSHA SCORE  (15% weight)
+//     Moon 0°→180° from Sun (waxing) = 50→100
+//     Moon 180°→360° (waning)        = 50→0
+//
+//  C) MOON ASPECT SCORE  (45% weight)
+//     For each planet P aspecting Moon:
+//       aspect_strength = f(aspect_type, nat(MO), nat(P))
+//     Weighted sum, normalised to 0–100
+//
+//  Rules for opposition (OPP):
+//     Both benefic: OPP = moderate positive (55)
+//     Benefic-Malefic: OPP = moderate negative (35)
+//     Both malefic: OPP = strongly negative (10)  ← fixes Jan 8/9
+// ═══════════════════════════════════════════════════════════════════
+
+// Aspect type base scores vs planet pair nature
+// Returns 0–100 score
+function aspScore(aspType, natP1, natP2){
+  // natP1, natP2 in [-1,+1]
+  const avg=(natP1+natP2)/2;   // -1=both malefic, +1=both benefic, 0=mixed
+  const pos=(avg+1)/2;         // normalise to 0–1
+
+  switch(aspType){
+    case 'conj':
+      // Conjunction strength totally determined by planet natures
+      // Both benefic=85, mixed=50, both malefic=15
+      return 15+70*pos;
+    case 'sext':
+      // Sextile: moderately positive, reduced by malefics
+      return 40+40*pos;
+    case 'tri':
+      // Trine: most benefic aspect; both benefic=100, mixed=65, both malefic=30
+      return 30+70*pos;
+    case 'sq':
+      // Square: always stressful; both malefic=10, mixed=30, both benefic=50
+      return 10+40*pos;
+    case 'opp':
+      // Opposition: CRITICAL FIX
+      // Both benefic=60 (full, balanced but tense), mixed=35, both malefic=10
+      return 10+50*pos;
+    case 'sesq':
+      return 20+30*pos;
+    case 'quin':
+      return 30+30*pos;
+    default:
+      return 50; // no aspect = neutral
+  }
+}
+
+// Orbs for each aspect type
+const ORB={conj:8,sext:6,tri:7,sq:7,sesq:5,quin:4,opp:9};
+
+function classAspect(angle){
+  const defs=[
+    {t:'conj',deg:0},{t:'sext',deg:60},{t:'sq',deg:90},
+    {t:'tri',deg:120},{t:'sesq',deg:135},{t:'quin',deg:150},{t:'opp',deg:180}
+  ];
+  let best=null, bo=Infinity;
+  for(const a of defs){
+    const orb=Math.abs(angle-a.deg);
+    if(orb<=ORB[a.t]&&orb<bo){best=a.t;bo=orb}
+  }
+  return best;
+}
+
+function aspCSSClass(aspType, natP1, natP2){
+  // Determine BB/BM/MM for coloring
+  const avg=(natP1+natP2)/2;
+  const tier=avg>0.3?'bb':avg<-0.3?'mm':'bm';
+  if(aspType==='sesq')return'a-sesq';
+  if(aspType==='quin')return'a-quin';
+  return`a-${aspType}-${tier}`;
+}
+
+function angDiff(a,b){const d=Math.abs(a-b);return d>180?360-d:d}
+
+// Moon KP Strength (0–100)
+function moonKPStrength(lons, kp, paksha){
+  // A) KP Positional score (0–100)
+  const nakScore=(PNORM[kp.nakLord]+1)/2;    // 0–1
+  const subScore=(PNORM[kp.subLord]+1)/2;
+  const nadiScore=(PNORM[kp.nadiLord]+1)/2;
+  const posScore=(nakScore*0.50+subScore*0.35+nadiScore*0.15)*100;
+
+  // B) Paksha score (0–100)
+  // Moon-Sun angle: 0°=new moon(weak), 180°=full moon(strong), 360°=new moon again
+  const pAngle=n360(lons.MO-lons.SU); // 0-360
+  let pakshaScore;
+  if(pAngle<=180) pakshaScore=50+pAngle/180*50;      // waxing: 50→100
+  else            pakshaScore=100-(pAngle-180)/180*50; // waning: 100→50... wait:
+  // Actually waning goes from 100 at full to 50 at new — let's keep that
+  if(pAngle>180)  pakshaScore=100-(pAngle-180)/180*50; // 100→50
+  // Range: 50–100
+
+  // C) Moon aspect score (0–100)
+  const moNat=PNORM['MO'];
+  const planets=['SU','ME','VE','MA','JU','SA','UR','NE','PL','RA','KE'];
+  let aspSum=0, aspWeight=0;
+  for(const p of planets){
+    const angle=angDiff(lons.MO, lons[p]);
+    const aspType=classAspect(angle);
+    // Planet importance weight (outer planets slower, less frequent aspect changes)
+    const impW={SU:1.0,ME:0.8,VE:0.9,MA:1.0,JU:1.1,SA:1.1,UR:0.7,NE:0.6,PL:0.6,RA:1.0,KE:1.0}[p];
+    if(aspType){
+      const sc=aspScore(aspType, moNat, PNORM[p]);
+      aspSum+=sc*impW;
+    }else{
+      // No aspect = neutral 50
+      aspSum+=50*impW*0.5; // half weight for no-aspect
+    }
+    aspWeight+=impW;
+  }
+  const moonAspScore=aspWeight>0?aspSum/aspWeight:50;
+
+  // Blend: A=40%, B=15%, C=45%
+  const total=posScore*0.40 + pakshaScore*0.15 + moonAspScore*0.45;
+  return{
+    pct:Math.round(total),
+    posScore:Math.round(posScore),
+    pakshaScore:Math.round(pakshaScore),
+    moonAspScore:Math.round(moonAspScore),
+    paksha: pAngle<=180?'S':'K',  // Shukla/Krishna
+    pakshaAngle:Math.round(pAngle)
+  };
+}
+
+function strCls(p){
+  if(p>=75)return'ms-vbull'; if(p>=55)return'ms-bull';
+  if(p>=40)return'ms-neut';  if(p>=25)return'ms-bear';
+  return'ms-vbear';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  ALL 66 PAIRS
+// ═══════════════════════════════════════════════════════════════════
+const POINTS=['SU','MO','ME','VE','MA','JU','SA','UR','NE','PL','RA','KE'];
+const PAIRS=[];
+const PAIR_GROUPS=[];
+for(let i=0;i<POINTS.length;i++){
+  const grp={key:POINTS[i],pairs:[]};
+  for(let j=i+1;j<POINTS.length;j++){grp.pairs.push([POINTS[i],POINTS[j]]);PAIRS.push([POINTS[i],POINTS[j]])}
+  if(grp.pairs.length)PAIR_GROUPS.push(grp);
+}
+
+const PCOL={SU:'#ffaa00',MO:'#00ccff',ME:'#88ee88',VE:'#ff88bb',MA:'#ff4455',JU:'#ffdd44',
+  SA:'#aaaaee',UR:'#33ffee',NE:'#8899ff',PL:'#cc88ff',RA:'#ff8844',KE:'#66ffbb'};
+
+// ═══════════════════════════════════════════════════════════════════
+//  COMPUTE ROWS
+// ═══════════════════════════════════════════════════════════════════
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmtLabel(y,mo,d,h,m){return`${String(d).padStart(2,'0')}-${MON[mo-1]} ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`}
+
+function istToUtc(y,mo,d,h,m){
+  let uh=h-5,um=m-30,ud=d,umo=mo,uy=y;
+  if(um<0){um+=60;uh--}if(uh<0){uh+=24;ud--}
+  if(ud<1){umo--;if(umo<1){umo=12;uy--}ud=new Date(Date.UTC(uy,umo-1,0)).getUTCDate()}
+  return new Date(Date.UTC(uy,umo-1,ud,uh,um,0));
+}
+
+function buildDates(ds,mode){
+  const[y,mo,d]=ds.split('-').map(Number),out=[];
+  if(mode==='day') out.push({y,mo,d});
+  else if(mode==='week'){for(let i=0;i<7;i++){const dt=new Date(Date.UTC(y,mo-1,d+i));out.push({y:dt.getUTCFullYear(),mo:dt.getUTCMonth()+1,d:dt.getUTCDate()})}}
+  else if(mode==='month'){const dim=new Date(Date.UTC(y,mo,0)).getUTCDate();for(let i=1;i<=dim;i++)out.push({y,mo,d:i})}
+  else{for(let mm=1;mm<=12;mm++){const dim=new Date(Date.UTC(y,mm,0)).getUTCDate();for(let dd=1;dd<=dim;dd++)out.push({y,mo:mm,d:dd})}}
+  return out;
+}
+
+function buildSlots(dates){
+  const s=[];
+  for(const dt of dates)
+    for(let h=9;h<=23;h++)
+      for(let m=0;m<60&&!(h===23&&m>45);m+=5)
+        s.push({...dt,h,m});
+  return s;
+}
+
+async function computeRows(ds,mode,onProg){
+  const slots=buildSlots(buildDates(ds,mode));
+  const rows=[];let firstAyan=null;
+  for(let i=0;i<slots.length;i++){
+    if(i%100===0){onProg(i,slots.length);await new Promise(r=>setTimeout(r,0))}
+    const s=slots[i];
+    const pos=getPositions(istToUtc(s.y,s.mo,s.d,s.h,s.m));
+    if(firstAyan===null)firstAyan=pos.ayan;
+    const kp=kpNadi(pos.MO);
+    const str=moonKPStrength(pos,kp);
+    // 66 pairs
+    const aspData=PAIRS.map(([p1,p2])=>{
+      const angle=angDiff(pos[p1],pos[p2]);
+      const aspType=classAspect(angle);
+      const css=aspType?aspCSSClass(aspType,PNORM[p1],PNORM[p2]):'';
+      return{angle,aspType,css};
+    });
+    rows.push({label:fmtLabel(s.y,s.mo,s.d,s.h,s.m),str,kp,aspData});
+  }
+  onProg(slots.length,slots.length);
+  return{rows,ayan:firstAyan};
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  TABLE
+// ═══════════════════════════════════════════════════════════════════
+function buildTable(){
+  const tbl=document.createElement('table');
+  const thead=document.createElement('thead');
+
+  function mkTH(txt,cs,rs,cls,sty){
+    const th=document.createElement('th');
+    if(cs>1)th.colSpan=cs;if(rs>1)th.rowSpan=rs;
+    if(cls)th.className=cls;if(sty)th.style.cssText=sty;
+    th.textContent=txt;return th;
+  }
+
+  // Row 0
+  const tr0=document.createElement('tr');
+  tr0.appendChild(mkTH('DATE (IST)',1,2,'th0-date'));
+  tr0.appendChild(mkTH('MOON KP STRENGTH + NAKSHATRA NADI',6,1,'th0-kp'));
+  for(const g of PAIR_GROUPS){
+    const c=PCOL[g.key];
+    tr0.appendChild(mkTH(g.key,g.pairs.length,1,'th0-planet',
+      `background:#030710;color:${c};border-bottom:2px solid ${c}`));
+  }
+  thead.appendChild(tr0);
+
+  // Row 1
+  const tr1=document.createElement('tr');
+  [
+    {t:'MOON STR%',  h:'Weighted KP Moon Strength: 40% Position + 15% Paksha + 45% Moon Aspects'},
+    {t:'PKS',        h:'Paksha: S=Shukla/waxing(bullish), K=Krishna/waning(bearish)'},
+    {t:'POS',        h:'KP Positional Score: Nak lord×50%+Sub lord×35%+Nadi lord×15%'},
+    {t:'ASP',        h:'Moon Aspect Score: weighted by planet nature'},
+    {t:'NAK–SUB–NADI',h:'Moon Nakshatra-Sub-Nadi (KP 3-layer)'},
+    {t:'NAT',        h:'Nature of Nadi lord: B=Benefic, M=Malefic, X=Mixed'}
+  ].forEach(({t,h})=>{const th=mkTH(t,1,1,'th1-kp');th.title=h;tr1.appendChild(th)});
+
+  for(const[p1,p2] of PAIRS){
+    const th=mkTH(p2,1,1,'th1-asp');
+    th.style.color=PCOL[p2];th.title=`${p1}–${p2}`;tr1.appendChild(th);
+  }
+  thead.appendChild(tr1);
+  tbl.appendChild(thead);
+  const tbody=document.createElement('tbody');
+  tbl.appendChild(tbody);
+  return{tbl,tbody};
+}
+
+function renderRows(tbody,rows){
+  const frag=document.createDocumentFragment();
+  for(const row of rows){
+    const tr=document.createElement('tr');
+    const{label,str,kp,aspData}=row;
+
+    // Date
+    const td0=document.createElement('td');td0.textContent=label;tr.appendChild(td0);
+
+    // Moon Strength %
+    const tdS=document.createElement('td');
+    tdS.className=strCls(str.pct);
+    tdS.textContent=str.pct+'%';
+    tdS.title=`Pos:${str.posScore}% Paksha:${str.pakshaScore}% MoonAsp:${str.moonAspScore}%`;
+    tr.appendChild(tdS);
+
+    // Paksha
+    const tdPk=document.createElement('td');
+    tdPk.className=str.paksha==='S'?'pk-s':'pk-k';
+    tdPk.textContent=(str.paksha==='S'?'◑':'◐')+str.paksha;
+    tdPk.title=`Moon-Sun: ${str.pakshaAngle}° ${str.paksha==='S'?'Shukla(waxing)':'Krishna(waning)'}`;
+    tr.appendChild(tdPk);
+
+    // Pos score
+    const tdPos=document.createElement('td');
+    tdPos.style.cssText=`background:#06080e;color:${str.posScore>=55?'#44ffaa':str.posScore>=40?'#cccc44':'#ff8844'}`;
+    tdPos.textContent=str.posScore;
+    tdPos.title=`Nak:${kp.nakLord}(${PNAT[kp.nakLord]}) Sub:${kp.subLord}(${PNAT[kp.subLord]}) Nadi:${kp.nadiLord}(${PNAT[kp.nadiLord]})`;
+    tr.appendChild(tdPos);
+
+    // Asp score
+    const tdAs=document.createElement('td');
+    tdAs.style.cssText=`background:#06080e;color:${str.moonAspScore>=55?'#44ffaa':str.moonAspScore>=40?'#cccc44':'#ff8844'}`;
+    tdAs.textContent=str.moonAspScore;
+    tr.appendChild(tdAs);
+
+    // Nadi text
+    const tdN=document.createElement('td');
+    tdN.className='tdNad';
+    tdN.title=kp.nakName;
+    tdN.textContent=`${kp.nakLord}-${kp.ni} | ${kp.subLord}-${kp.subNum} | ${kp.nadiLord}-${kp.nadiNum}`;
+    tr.appendChild(tdN);
+
+    // Nature indicator
+    const tdNat=document.createElement('td');
+    const nat=PNAT[kp.nadiLord];
+    tdNat.className=nat>0?'tdP nd-bene':nat<0?'tdS nd-male':'tdN nd-neut';
+    tdNat.textContent=nat>1?'B+':nat===1?'B ':nat===-1?'M ':nat<-1?'M-':'X';
+    tdNat.title=`${kp.nadiLord} nature: ${nat}`;
+    tr.appendChild(tdNat);
+
+    // 66 aspect cells
+    for(const{angle,aspType,css} of aspData){
+      const td=document.createElement('td');
+      td.className='tdA'+(css?' '+css:'');
+      td.textContent=angle.toFixed(2);
+      if(aspType)td.title=`${aspType} ${angle.toFixed(1)}°`;
+      tr.appendChild(td);
+    }
+    frag.appendChild(tr);
+  }
+  tbody.appendChild(frag);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  PAGINATION
+// ═══════════════════════════════════════════════════════════════════
+const PAGE=300;
+let _rows=[],_pg=0,_tbody=null;
+const totPg=()=>Math.max(1,Math.ceil(_rows.length/PAGE));
+function goPage(p){
+  _pg=Math.max(0,Math.min(p,totPg()-1));
+  const s=_pg*PAGE,e=Math.min(s+PAGE,_rows.length);
+  _tbody.innerHTML='';renderRows(_tbody,_rows.slice(s,e));
+  document.getElementById('pgLbl').textContent=`Page ${_pg+1} of ${totPg()}`;
+  document.getElementById('pgRange').textContent=`${s+1}–${e}`;
+  document.getElementById('pgTotal').textContent=_rows.length.toLocaleString();
+  document.getElementById('ibPage').textContent=`${_pg+1}/${totPg()}`;
+  document.getElementById('wrap').scrollTop=0;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  CSV
+// ═══════════════════════════════════════════════════════════════════
+function exportCSV(){
+  if(!_rows.length){alert('Generate first');return}
+  const hdr=['Date(IST)','MoonStr%','Paksha','PosScore','AspScore','NakSubNadi','NadiNat',
+    ...PAIRS.map(([a,b])=>`${a}-${b}`)].join(',');
+  const body=_rows.map(r=>{
+    const nd=`${r.kp.nakLord}-${r.kp.ni}|${r.kp.subLord}-${r.kp.subNum}|${r.kp.nadiLord}-${r.kp.nadiNum}`;
+    return[r.label,r.str.pct+'%',r.str.paksha,r.str.posScore,r.str.moonAspScore,nd,PNAT[r.kp.nadiLord],
+      ...r.aspData.map(a=>a.angle.toFixed(2))].join(',');
+  }).join('\n');
+  const blob=new Blob([hdr+'\n'+body],{type:'text/csv'});
+  const a=Object.assign(document.createElement('a'),{href:URL.createObjectURL(blob),download:`kp_${dPick.value}_${selMode.value}.csv`});
+  a.click();URL.revokeObjectURL(a.href);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  GENERATE
+// ═══════════════════════════════════════════════════════════════════
+const wrap=document.getElementById('wrap');
+const pgw=document.getElementById('pgwrap'),pgb=document.getElementById('pgbar');
+const pgNav=document.getElementById('pgNav'),ibar=document.getElementById('ibar');
+const dPick=document.getElementById('dPick'),selMode=document.getElementById('selMode');
+const sts=document.getElementById('status');
+
+function setStatus(t,live=false){sts.textContent=t;sts.className=live?'live':''}
+function setProg(done,tot){pgb.style.width=Math.round(done/tot*100)+'%';setStatus(`Computing ${done}/${tot}…`,true)}
+
+async function generate(){
+  const ds=dPick.value,mode=selMode.value;if(!ds)return;
+  pgw.style.display='block';pgb.style.width='0%';
+  pgNav.style.display='none';ibar.style.display='none';
+  wrap.innerHTML=`<div id="ldg"><div class="spin"></div>
+    <div style="font-family:var(--disp);font-size:11px;letter-spacing:2px;color:var(--amber)">COMPUTING…</div>
+    <div style="font-size:9px;color:var(--text2);margin-top:8px">
+      KP weighted strength · benefic/malefic planet nature · paksha factor · 66 pairs
+    </div></div>`;
+  try{
+    const{rows,ayan}=await computeRows(ds,mode,setProg);
+    _rows=rows;_pg=0;
+    setStatus('Rendering…',true);await new Promise(r=>setTimeout(r,0));
+    const{tbl,tbody}=buildTable();_tbody=tbody;
+    wrap.innerHTML='';wrap.appendChild(tbl);
+    goPage(0);
+    document.getElementById('ibAyan').textContent=ayan.toFixed(5)+'°';
+    document.getElementById('ibRows').textContent=rows.length.toLocaleString();
+    ibar.style.display='flex';
+    if(totPg()>1)pgNav.style.display='flex';
+    setStatus(`✓ ${rows.length.toLocaleString()} rows · ayan=${ayan.toFixed(3)}°`);
+  }catch(err){
+    wrap.innerHTML=`<div style="padding:40px;color:#ff4455;font-family:var(--mono)">ERROR: ${err.message}<br><pre style="font-size:8px;color:#665544">${err.stack}</pre></div>`;
+    setStatus('Error');console.error(err);
+  }
+  pgw.style.display='none';
+}
+
+document.getElementById('btnGo').onclick=generate;
+document.getElementById('btnCSV').onclick=exportCSV;
+document.getElementById('btnPrev').onclick=()=>{const d=new Date(dPick.value+'T12:00:00Z');d.setUTCDate(d.getUTCDate()-1);dPick.value=d.toISOString().split('T')[0];generate()};
+document.getElementById('btnNext').onclick=()=>{const d=new Date(dPick.value+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+1);dPick.value=d.toISOString().split('T')[0];generate()};
+
+// Ayanamsha & topocentric switches — update state, refresh info bar,
+// auto-regenerate if data is already loaded.
+const selAyan=document.getElementById('selAyan');
+const selTopo=document.getElementById('selTopo');
+selAyan.onchange=()=>{
+  AYAN_SYS=selAyan.value;
+  document.getElementById('ibSys').textContent=selAyan.options[selAyan.selectedIndex].text.toUpperCase();
+  if(_rows.length)generate();
+};
+selTopo.onchange=()=>{
+  TOPO=(selTopo.value==='topo');
+  document.getElementById('ibFrame').textContent=TOPO?'TOPO MUMBAI':'GEOCENTRIC';
+  if(_rows.length)generate();
+};
+
+document.getElementById('pgFirst').onclick=()=>goPage(0);
+document.getElementById('pgPrev').onclick=()=>goPage(_pg-1);
+document.getElementById('pgNext').onclick=()=>goPage(_pg+1);
+document.getElementById('pgLast').onclick=()=>goPage(totPg()-1);
+document.addEventListener('keydown',e=>{
+  if(e.altKey&&e.key==='ArrowLeft')document.getElementById('btnPrev').click();
+  if(e.altKey&&e.key==='ArrowRight')document.getElementById('btnNext').click();
+  if(e.altKey&&e.key==='PageUp')goPage(_pg-1);
+  if(e.altKey&&e.key==='PageDown')goPage(_pg+1);
+});
+(()=>{const ist=new Date(Date.now()+19800000);dPick.value=ist.toISOString().split('T')[0]})();
+</script>
+</body>
+</html>
