@@ -155,6 +155,17 @@ res_label = st.sidebar.select_slider(
 )
 resolution = RESOLUTIONS[res_label]
 
+forecast_days = st.sidebar.slider(
+    "Forecast planet positions (days ahead)",
+    min_value=0,
+    max_value=365,
+    value=90,
+    step=5,
+    help="Extend planet latitude curves this many days beyond today. "
+         "No candlestick data will appear in the future region.",
+)
+planet_end_date = end_date + timedelta(days=forecast_days)
+
 chart_type = st.sidebar.radio("Price chart", ["Candlestick", "Close line"], horizontal=True)
 
 with st.sidebar.expander("Advanced", expanded=False):
@@ -180,7 +191,7 @@ with st.spinner(f"Fetching {instrument_name} from Yahoo…"):
 
 with st.spinner("Computing planetary positions…"):
     planet_df = compute_planet_latitudes(
-        start_date, end_date, resolution, use_topo, use_true_node,
+        start_date, planet_end_date, resolution, use_topo, use_true_node,
     )
 
 # If the user opted to collapse weekends on the price axis, drop weekend
@@ -205,7 +216,7 @@ h1, h2, h3, h4 = st.columns(4)
 h1.metric(instrument_name, f"{last_close:,.2f}", f"{change_pct:+.2f}% in range")
 h2.metric("Bars", f"{len(price_df):,}")
 h3.metric("Planet samples", f"{len(planet_df):,}")
-h4.metric("Location", "Mumbai (IST)")
+h4.metric("Forecast to", planet_end_date.strftime("%d %b %Y") if forecast_days > 0 else "Today")
 
 # ------------------------------------------------------------------
 # Figure
@@ -269,6 +280,34 @@ if show_zero:
         row=2, col=1,
     )
 
+# --- Future forecast shading -----------------------------------------
+if forecast_days > 0:
+    today_str = today.isoformat()
+    future_end_str = planet_end_date.isoformat()
+
+    for row_num in (1, 2):
+        # Shaded band for the future region
+        fig.add_vrect(
+            x0=today_str, x1=future_end_str,
+            fillcolor="rgba(255,255,100,0.06)",
+            line_width=0,
+            row=row_num, col=1,
+        )
+    # Dashed vertical "today" line on both panels
+    fig.add_vline(
+        x=today_str,
+        line=dict(color="rgba(255,255,0,0.55)", dash="dash", width=1.2),
+    )
+    # Annotation label
+    fig.add_annotation(
+        x=today_str, y=1.01,
+        xref="x2", yref="y2 domain",
+        text="◀ Today",
+        showarrow=False,
+        font=dict(size=11, color="rgba(255,255,0,0.7)"),
+        xanchor="right",
+    )
+
 # --- Layout ----------------------------------------------------------
 fig.update_layout(
     height=780,
@@ -305,5 +344,6 @@ with st.expander("Raw data"):
 
 st.caption(
     "Prices: Yahoo Finance · Planets: Swiss Ephemeris (geocentric by default) · "
-    "Rahu/Ketu are lunar nodes — latitude is 0 by definition."
+    "Rahu/Ketu are lunar nodes — latitude is 0 by definition. · "
+    "Yellow shaded region = future forecast (no price data available)."
 )
