@@ -419,20 +419,27 @@ if forecast_days > 0:
         )
 
 # "Today" vertical dashed line on both panels
+# NOTE: Plotly 6.7.0 has a bug where annotation= on add_vline crashes with
+# date-string x-axes. We split into add_vline + add_annotation separately.
 for row_idx in (1, 2):
     fig.add_vline(
         x=today_str,
         line=dict(color="rgba(255,200,40,0.75)", dash="dash", width=1.6),
         row=row_idx, col=1,
-        annotation=dict(
-            text="◀ Today",
-            font=dict(size=10, color="rgba(230,180,30,1.0)"),
-            xanchor="right",
-            yref="paper",
-            y=0.98 if row_idx == 1 else 0.98,
-            showarrow=False,
-        ) if row_idx == 1 else None,
     )
+
+# "◀ Today" label — anchored to the price panel top (paper y ≈ 0.99)
+fig.add_annotation(
+    x=today_str,
+    xref="x",          # shared x-axis ref
+    yref="paper",
+    y=0.99,
+    text="◀ Today",
+    font=dict(size=10, color="rgba(230,180,30,1.0)"),
+    xanchor="right",
+    yanchor="top",
+    showarrow=False,
+)
 
 # ── Conjunction vertical lines (both panels) ─────────────────────────
 CONJ_LINE_COLOR  = "rgba(160,120,220,0.55)"   # soft purple
@@ -442,20 +449,27 @@ for ev in conjunction_events:
     dt_str = str(ev["datetime"])
     label  = f"{ev['p1']}∥{ev['p2']} ({ev['sep']:.1f}°)"
 
+    # Draw line on both panels — no annotation= to avoid Plotly 6.7 date-string crash
     for row_idx in (1, 2):
         fig.add_vline(
             x=dt_str,
             line=dict(color=CONJ_LINE_COLOR, dash="dot", width=1.4),
             row=row_idx, col=1,
-            annotation=dict(
-                text=label,
-                font=dict(size=9, color=CONJ_LABEL_COLOR),
-                textangle=-90,
-                yref="paper",
-                yanchor="top",
-                showarrow=False,
-            ) if row_idx == 2 else None,
         )
+
+    # Label in the planet panel only (paper y ≈ 0–0.42 for row 2)
+    fig.add_annotation(
+        x=dt_str,
+        xref="x",
+        yref="paper",
+        y=0.38,
+        text=label,
+        font=dict(size=9, color=CONJ_LABEL_COLOR),
+        textangle=-90,
+        xanchor="center",
+        yanchor="top",
+        showarrow=False,
+    )
 
 # ── Planet longitude panel ───────────────────────────────────────────
 PLOT_ORDER = ["Sun", "Moon", "Mercury", "Venus", "Mars",
@@ -600,7 +614,7 @@ if hide_weekends:
     fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])], row=1, col=1)
     fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])], row=2, col=1)
 
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 # ------------------------------------------------------------------
 # Conjunction table
@@ -616,15 +630,15 @@ if show_conjunctions and conjunction_events:
             }
             for ev in sorted(conjunction_events, key=lambda e: e["datetime"])
         ]
-        st.dataframe(pd.DataFrame(conj_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(conj_rows), width="stretch", hide_index=True)
 
 # ------------------------------------------------------------------
 # Raw data tables
 # ------------------------------------------------------------------
 with st.expander("Raw data"):
     t1, t2 = st.tabs(["Prices", "Planet longitudes + speed"])
-    t1.dataframe(price_df, use_container_width=True)
-    t2.dataframe(planet_df, use_container_width=True)
+    t1.dataframe(price_df, width="stretch")
+    t2.dataframe(planet_df, width="stretch")
 
 # ------------------------------------------------------------------
 # Legend key
