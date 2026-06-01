@@ -91,7 +91,8 @@ html,body{width:100%;min-height:100vh;background:var(--bg0);color:var(--tx0);fon
 </div>
 <script>
 // ═══════════════════════════════════════════════════════════════════
-// KP FINANCIAL ASTROLOGY TERMINAL// ───────────────────────────────────────────────────────────────────
+// KP FINANCIAL ASTROLOGY TERMINAL
+// ───────────────────────────────────────────────────────────────────
 // COMPLETE IMPLEMENTATION of Pt. Hardev Sharma Trivedi & Pt. Gopesh
 // Kumar Ojha, "Vyapaar Ratna" (व्यापार-रत्न), 9 modules:
 //
@@ -2564,6 +2565,37 @@ const BHADRA_LOKA_POL = {Swarga:+1, Patala:+1, Prithvi:-1};
 const KARANA_MOV = ['Bava','Balava','Kaulava','Taitila','Gara','Vanija','Vishti'];
 const DEBIL_SIGN = {Sun:6, Moon:7, Mars:3, Mercury:11, Jupiter:9, Venus:5, Saturn:0, Rahu:1, Ketu:7};
 const EXALT_SIGN = {Sun:0, Moon:1, Mars:9, Mercury:5, Jupiter:3, Venus:11, Saturn:6};
+const NAT_FRIEND={Sun:['Moon','Mars','Jupiter'],Moon:['Sun','Mercury'],Mars:['Sun','Moon','Jupiter'],Mercury:['Sun','Venus'],Jupiter:['Sun','Moon','Mars'],Venus:['Mercury','Saturn'],Saturn:['Mercury','Venus'],Rahu:['Venus','Saturn','Mercury'],Ketu:['Mars','Venus','Saturn']};
+const NAT_ENEMY={Sun:['Venus','Saturn'],Moon:[],Mars:['Mercury'],Mercury:['Moon'],Jupiter:['Mercury','Venus'],Venus:['Sun','Moon'],Saturn:['Sun','Moon','Mars'],Rahu:['Sun','Moon','Mars'],Ketu:['Sun','Moon']};
+const ELEMENTS=['Fire','Earth','Air','Water'];
+const ELEM_COL={Fire:'#ff7043',Earth:'#a1887f',Air:'#80deea',Water:'#64b5f6'};
+const MODALITY=['Movable','Fixed','Common'];
+function natRel(a,b){ if(a===b) return 'Own'; if((NAT_FRIEND[a]||[]).includes(b)) return 'Friend'; if((NAT_ENEMY[a]||[]).includes(b)) return 'Enemy'; return 'Neutral'; }
+function signStatus(planet, signIdx){
+  if(EXALT_SIGN[planet]===signIdx) return {dig:'Exalted', cls:'up'};
+  if(DEBIL_SIGN[planet]===signIdx) return {dig:'Debilitated', cls:'dn'};
+  const lord=SLRD[signIdx];
+  if(lord===planet) return {dig:'Own sign', cls:'up'};
+  const r=natRel(planet, lord);
+  return {dig:r+' sign', cls:r==='Friend'?'up':r==='Enemy'?'dn':'nu'};
+}
+function planetAttributes(D){
+  const {planets, J, aspects}=D;
+  const cmb=new Map(combustList(planets).map(c=>[c.name,c]));
+  return planets.map(p=>{
+    const spd=planetSpeed(p.name, J);
+    const ss=signStatus(p.name, p.s);
+    const asp=aspects.filter(a=>a.p1===p.name||a.p2===p.name)
+                     .filter(a=>[0,180,120,90,60].includes(a.deg))
+                     .slice(0,5)
+                     .map(a=>({sym:a.sym,name:a.aspect,other:(a.p1===p.name?a.abb2:a.abb1),deg:a.deg,nature:a.nature}));
+    return { name:p.name, abbr:p.abbr, speed:spd, retro:p.retro,
+      stationary:(Math.abs(spd)<0.02 && !['Rahu','Ketu'].includes(p.name)),
+      combust: cmb.has(p.name), combustSep: cmb.has(p.name)?cmb.get(p.name).sep:null,
+      dignity: ss.dig, digCls: ss.cls, vargottama: p.s===p.d9Sign,
+      element: ELEMENTS[p.s%4], modality: MODALITY[p.s%3], aspects: asp };
+  });
+}
 const INDEX_RULER = {NIFTY:'Sun', BANKNIFTY:'Moon'};
 const BULL_HOUSES = new Set([1,2,5,9,11]);
 const BEAR_HOUSES = new Set([6,8,12]);
@@ -3415,6 +3447,7 @@ function tOverview(){
 // ═══════════════════════════════════════════════════════════════════
 function tKP(){
   const D=DATA;
+  const attrs=planetAttributes(D);
   const houseCusps=Array.from({length:12},(_,i)=>n360(D.ascSid+i*30));
   const ayLabel = D.ayMode==='kp' ? 'KP NEW (KSK)' : 'LAHIRI';
   return`
@@ -3455,6 +3488,28 @@ function tKP(){
         </tbody>
       </table>
     </div>
+  </div>
+  <div class="pnl">
+    <div class="ph"><span class="dot"></span>PLANETARY STATE \u00b7 DIGNITY \u00b7 FRIEND/ENEMY \u00b7 ELEMENT \u00b7 MODALITY</div>
+    <div class="ts">
+      <table class="tbl">
+        <thead><tr><th>Planet</th><th>Speed \u00b0/day</th><th>Motion</th><th>Combust</th><th>Dignity / Sign-relation</th><th>Vargottama</th><th>Element</th><th>Modality</th><th>Aspects</th></tr></thead>
+        <tbody>
+          ${attrs.map(a=>`<tr>
+            <td><strong style="color:${pc(a.name)}">${a.abbr} ${a.name}</strong></td>
+            <td style="font-family:monospace;color:var(--tx1)">${a.speed>=0?'+':''}${a.speed.toFixed(3)}</td>
+            <td style="font-weight:700;color:${a.retro?'var(--bear)':a.stationary?'var(--neut)':'var(--bull)'}">${a.retro?'Retro \u211e':a.stationary?'Stationary':'Direct \u2192'}</td>
+            <td style="color:${a.combust?'var(--bear)':'var(--tx3)'};font-weight:${a.combust?700:400}">${a.combust?'Combust '+a.combustSep.toFixed(1)+'\u00b0':'\u2014'}</td>
+            <td style="font-weight:700;color:${a.digCls==='up'?'var(--bull)':a.digCls==='dn'?'var(--bear)':'var(--tx1)'}">${a.dignity}</td>
+            <td style="text-align:center">${a.vargottama?'<span style="color:var(--bull);font-weight:700">\u2605</span>':'\u2014'}</td>
+            <td style="font-weight:700;color:${ELEM_COL[a.element]}">${a.element}</td>
+            <td style="color:var(--tx1)">${a.modality}</td>
+            <td style="font-size:12px">${a.aspects.length?a.aspects.map(x=>`<span title="${x.name} ${x.deg}\u00b0" style="color:${x.nature==='easy'?'var(--bull)':x.nature==='tense'?'var(--bear)':'var(--tx2)'}">${x.sym}${x.other}</span>`).join(' '):'<span style="color:var(--tx3)">\u2014</span>'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="padding:5px 12px;font-size:9px;color:var(--tx3)">Modality \u2014 Movable/Char (1\u00b74\u00b77\u00b710): enterprise, quick action, loves change \u00b7 Fixed/Sthira (2\u00b75\u00b78\u00b711): persistence, stamina, determined \u00b7 Common/Dwiswabhava (3\u00b76\u00b79\u00b712): flexible, versatile, vacillating. Friend/Enemy/Neutral = planet vs its sign-lord (dispositor); Exalted/Debilitated/Own override. Aspects: \u2606 \u25b3 trine(120) \u25a1 square(90) \u260d opp(180) \u260c conj(0) \u26b9 sextile(60) \u2014 green=easy, red=tense.</div>
   </div>
   <div class="pnl">
     <div class="ph"><span class="dot"></span>KP BHAV CUSPS — EQUAL HOUSE FROM LAGNA</div>
