@@ -91,8 +91,7 @@ html,body{width:100%;min-height:100vh;background:var(--bg0);color:var(--tx0);fon
 </div>
 <script>
 // ═══════════════════════════════════════════════════════════════════
-// KP FINANCIAL ASTROLOGY TERMINAL — v4.2 (Vyapaar Ratna pp.257-337)
-// ───────────────────────────────────────────────────────────────────
+// KP FINANCIAL ASTROLOGY TERMINAL// ───────────────────────────────────────────────────────────────────
 // COMPLETE IMPLEMENTATION of Pt. Hardev Sharma Trivedi & Pt. Gopesh
 // Kumar Ojha, "Vyapaar Ratna" (व्यापार-रत्न), 9 modules:
 //
@@ -2570,6 +2569,8 @@ const BULL_HOUSES = new Set([1,2,5,9,11]);
 const BEAR_HOUSES = new Set([6,8,12]);
 const PAPA_SET  = new Set(['Sun','Mars','Saturn','Rahu','Ketu']);
 const SHUBH_SET = new Set(['Moon','Mercury','Jupiter','Venus']);
+const RASHI_NUM = ['1','2','3','4','5','6','7','8','9','10','11','12'];
+function wsHouse(signIdx, ascSignIdx){ return ((signIdx - ascSignIdx + 12) % 12) + 1; }
 
 function karanaOf(sunLon, moonLon){
   const elong = n360(moonLon - sunLon);
@@ -2635,7 +2636,7 @@ function computeNatal(ayMode){
   const planets=Object.entries(trop).map(([name,tl])=>{
     const sl=n360(tl-ay); const sg=getSign(sl); const nk=getNak(sl);
     return {name,lon:sl,s:sg.s,sign:sg.sign,abb:sg.abb,lord:sg.lord,deg:sg.deg,
-      h:houseOf(sl,ascSid), d9Sign:getD9(sl), nak:nk.n,
+      h:wsHouse(sg.s, ascSignIdx), d9Sign:getD9(sl), nak:nk.n,
       retro:(name==='Rahu'||name==='Ketu')?true:isRetrograde(name,J),
       abbr:PA[name]||name.slice(0,2)};
   });
@@ -2651,7 +2652,7 @@ function transitOverNatal(transitPlanets, natal){
   const moonN=natal.planets.find(p=>p.name==='Moon');
   for(const tp of transitPlanets){
     if(['Uranus','Neptune'].includes(tp.name)) continue;
-    const hN=houseOf(tp.lon, natal.ascSid);
+    const hN=wsHouse(Math.floor(n360(tp.lon)/30), natal.ascSignIdx);
     const malefic=PAPA_SET.has(tp.name);
     let s=0;
     if(BULL_HOUSES.has(hN)){ s = malefic? -0.6 : +1.0; }
@@ -2669,6 +2670,7 @@ function transitOverNatal(transitPlanets, natal){
 function computeBhavphal(planets, ascSid){
   const ascSignIdx=Math.floor(n360(ascSid)/30);
   const combustNames=new Set(combustList(planets).map(c=>c.name));
+  const hOf=p=>wsHouse(p.s, ascSignIdx);
   const rahu=planets.find(p=>p.name==='Rahu'), ketu=planets.find(p=>p.name==='Ketu');
   const byName=n=>planets.find(p=>p.name===n);
   const KENDRA=new Set([1,4,7,10]), TRIKONA=new Set([1,5,9]), DUSTHANA=new Set([6,8,12]), UPACHAYA=new Set([3,6,10,11]);
@@ -2677,11 +2679,11 @@ function computeBhavphal(planets, ascSid){
     const cuspSign=(ascSignIdx+h-1)%12;
     const lordName=SLRD[cuspSign];
     const lord=byName(lordName);
-    const occupants=planets.filter(p=>p.h===h);
+    const occupants=planets.filter(p=>hOf(p)===h);
     let score=0; const factors=[];
     const add=(d,t)=>{score+=d; factors.push((d>0?'+':'')+d.toFixed(1)+' '+t);};
     if(lord){
-      const lh=lord.h;
+      const lh=hOf(lord);
       if(DUSTHANA.has(lh)) add(-2.0, `lord ${lordName} in dusthana H${lh}`);
       if(TRIKONA.has(lh)) add(+2.0, `lord in trikona H${lh}`);
       else if(KENDRA.has(lh)) add(+1.5, `lord in kendra H${lh}`);
@@ -2699,7 +2701,7 @@ function computeBhavphal(planets, ascSid){
       else if(PAPA_SET.has(o.name)){ add(UPACHAYA.has(h)?+0.4:-0.7, `${o.abbr} (malefic) in H${h}`); }
     }
     let verdict = score>=2 ? 'STRONG ✓' : score>=0.5 ? 'Shubh +' : score<=-2 ? 'STRONG ✗' : score<=-0.5 ? 'Ashubh −' : 'Mixed ~';
-    houses.push({h, cuspSign, cuspSignName:SIGNS[cuspSign], lord:lordName, lordHouse:lord?lord.h:null,
+    houses.push({h, cuspSign, cuspSignName:SIGNS[cuspSign], lord:lordName, lordHouse:lord?hOf(lord):null,
                  occupants:occupants.map(o=>o.abbr), score:Math.round(score*10)/10, verdict, factors});
   }
   let mkt=0; for(const hh of houses){ if(BULL_HOUSES.has(hh.h)) mkt+=hh.score; else if(BEAR_HOUSES.has(hh.h)) mkt-=hh.score; }
@@ -2829,12 +2831,38 @@ function computeMomentChart(dateStr, timeIST, ayMode){
   const planets=Object.entries(trop).map(([name,tl])=>{
     const sl=n360(tl-ay); const sg=getSign(sl); const nk=getNak(sl);
     return {name,lon:sl,s:sg.s,sign:sg.sign,abbr:PA[name]||name.slice(0,2),lord:sg.lord,deg:sg.deg,
-      h:houseOf(sl,ascSid), d9Sign:getD9(sl), nak:nk.n,
+      h:wsHouse(sg.s, lagS), d9Sign:getD9(sl), nak:nk.n,
       retro:(name==='Rahu'||name==='Ketu')?true:isRetrograde(name,J)};
   });
   return {J,ay,ascSid,lagS,ascSign:getSign(ascSid),planets};
 }
 
+function northChart(planets, ascSignIdx, title, sub){
+  const W=460, M=W/2, Q=W/4, T=3*W/4;
+  const POLY={
+    1:[[M,0],[T,Q],[M,M],[Q,Q]], 2:[[0,0],[M,0],[Q,Q]], 3:[[0,0],[Q,Q],[0,M]],
+    4:[[0,M],[Q,Q],[M,M],[Q,T]], 5:[[0,M],[Q,T],[0,W]], 6:[[0,W],[Q,T],[M,W]],
+    7:[[M,W],[T,T],[M,M],[Q,T]], 8:[[M,W],[T,T],[W,W]], 9:[[W,W],[T,T],[W,M]],
+    10:[[W,M],[T,T],[M,M],[T,Q]], 11:[[W,M],[T,Q],[W,0]], 12:[[W,0],[T,Q],[M,0]]
+  };
+  const cen=pts=>{let x=0,y=0;pts.forEach(p=>{x+=p[0];y+=p[1];});return [x/pts.length,y/pts.length];};
+  let s=`<svg width="${W}" height="${W}" viewBox="0 0 ${W} ${W}" xmlns="http://www.w3.org/2000/svg">`;
+  s+=`<rect x="0" y="0" width="${W}" height="${W}" fill="#010c12" stroke="#1c6080" stroke-width="2"/>`;
+  s+=`<path d="M0 0 L${W} ${W} M${W} 0 L0 ${W} M${M} 0 L${W} ${M} L${M} ${W} L0 ${M} Z" fill="none" stroke="#1c5070" stroke-width="1.2"/>`;
+  for(let h=1;h<=12;h++){
+    const signIdx=(ascSignIdx+h-1)%12;
+    const [cx,cy]=cen(POLY[h]);
+    const ph=planets.filter(p=>wsHouse(p.s, ascSignIdx)===h);
+    const kendra=[1,4,7,10].includes(h);
+    s+=`<text x="${cx}" y="${cy-(ph.length?12:0)+(h>=5&&h<=9?-2:4)}" text-anchor="middle" fill="${kendra?'#ffc107':'#5ad0e8'}" font-size="12" font-weight="bold" font-family="Courier New">${RASHI_NUM[signIdx]}</text>`;
+    if(h===1) s+=`<text x="${cx}" y="${cy-22}" text-anchor="middle" fill="#00e8ff" font-size="9" font-family="Courier New">La</text>`;
+    ph.forEach((p,i)=>{
+      s+=`<text x="${cx}" y="${cy+8+i*15}" text-anchor="middle" fill="${PC[p.name]||'#7ecad8'}" font-size="13" font-weight="bold" font-family="Courier New">${p.abbr}${Number.isFinite(p.deg)?' '+Math.floor(p.deg):''}${p.retro?'<tspan fill="#ff5566" font-size="10">\u211e</tspan>':''}</text>`;
+    });
+  }
+  if(title) s+=`<text x="6" y="${W-6}" fill="#2a6878" font-size="11" font-family="Courier New">${title}${sub?' \u00b7 '+sub:''}</text>`;
+  return s+'</svg>';
+}
 function astroMakeChart(pArr, lagS, title, sub){
   const HM={1:[1,0],2:[2,0],3:[3,0],4:[3,1],5:[3,2],6:[3,3],7:[2,3],8:[1,3],9:[0,3],10:[0,2],11:[0,1],12:[0,0]};
   const CS=108, sz=CS*4;
@@ -3195,7 +3223,7 @@ function rHdr(){
 <header class="hdr">
   <div class="hdr-r1">
     <div>
-      <div class="brand">⬡ KP FINANCIAL ASTROLOGY TERMINAL · v4.2 · VYAPAAR RATNA</div>
+      <div class="brand">⬡ KP FINANCIAL ASTROLOGY TERMINAL</div>
       <div class="brand-sub">MUMBAI ${LAT.toFixed(4)}°N ${LON.toFixed(4)}°E · NSE/BSE · ${ayLabel.toUpperCase()} ${dms(D.ay,2)} · ${days[dateObj.getDay()]} ${mons[dateObj.getMonth()]} ${dateObj.getDate()} ${dateObj.getFullYear()} · IST ${mtt(parseFloat(S.time)*60)} → UTC ${mtt((parseFloat(S.time)-5.5)*60)} · EPH ${D.ephSrc}</div>
     </div>
     <div class="ctrl-row">
@@ -3498,13 +3526,13 @@ function tCharts(){
     return s+'</svg>';
   }
 
-  const d9Planets=D.planets.map(p=>({...p,h:houseOf(p.d9Sign*30+15,d9LagnaS*30+15),house:houseOf(p.d9Sign*30+15,d9LagnaS*30+15),deg:p.d9Sign%1===0?15:p.d9Sign*30%30}));
+  const d9Planets=D.planets.map(p=>({name:p.name,abbr:p.abbr,retro:p.retro,s:p.d9Sign,deg:undefined}));
 
   // Compact 4-col house-occupancy grid (was 12-row vertical list)
   const houseOcc = `
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px 8px">
       ${Array.from({length:12},(_,i)=>{
-        const h=i+1,ps=D.planets.filter(p=>p.h===h);
+        const h=i+1,ps=D.planets.filter(p=>wsHouse(p.s,lagnaS)===h);
         return`<div style="display:flex;gap:4px;align-items:baseline">
           <span style="color:#5ad0e8;font-size:11px;font-weight:700;min-width:22px">H${h}</span>
           <span style="font-size:12px">${ps.length?ps.map(p=>`<span style="color:${PC[p.name]};font-weight:700">${p.abbr}</span>`).join(' '):'<span style="color:var(--tx3)">—</span>'}</span>
@@ -3532,7 +3560,7 @@ function tCharts(){
     <div class="pnl">
       <div class="ph"><span class="dot"></span>D1 — LAGNA CHART · IST ${mtt(parseFloat(S.time)*60)}</div>
       <div class="pb">
-        <div style="overflow:auto;display:flex;justify-content:center">${makeChart(D.planets,lagnaS,'D1')}</div>
+        <div style="overflow:auto;display:flex;justify-content:center">${northChart(D.planets,lagnaS,'D1','Lagna · '+S.date)}</div>
         <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--bd)">
           <div style="color:var(--acc);font-size:11px;letter-spacing:.07em;margin-bottom:8px;font-weight:700">HOUSE OCCUPANCY</div>
           ${houseOcc}
@@ -3542,7 +3570,7 @@ function tCharts(){
     <div class="pnl">
       <div class="ph"><span class="dot"></span>D9 — NAVAMSA CHART</div>
       <div class="pb">
-        <div style="overflow:auto;display:flex;justify-content:center">${makeChart(d9Planets,d9LagnaS,'D9')}</div>
+        <div style="overflow:auto;display:flex;justify-content:center">${northChart(d9Planets,d9LagnaS,'D9','Navamsa')}</div>
         <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--bd)">
           <div style="color:var(--acc);font-size:11px;letter-spacing:.07em;margin-bottom:8px;font-weight:700">NAVAMSA STRENGTH</div>
           ${navStr}
@@ -4628,7 +4656,7 @@ function tKundali(){
   <div class="g2">
     <div class="pnl"><div class="ph"><span class="dot"></span>☉ NIFTY NATAL — ${nat.label}</div>
       <div class="pb">
-        <div style="display:flex;justify-content:center">${astroMakeChart(nat.planets, nat.ascSignIdx, 'D1', '27-Nov-1992 11:43')}</div>
+        <div style="display:flex;justify-content:center">${northChart(nat.planets, nat.ascSignIdx, 'NIFTY NATAL D1', '27-Nov-1992 11:43 North-Indian whole-sign')}</div>
         <div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0;font-size:11px">
           <span><span class="ml">LAGNA</span> <b class="ca">${nat.ascSign.sign} ${dmsC(nat.ascSign.deg)}</b></span>
           <span><span class="ml">DAY LORD</span> <b style="color:${PC[nat.dayLord]}">${nat.dayLord}</b></span>
@@ -4639,7 +4667,7 @@ function tKundali(){
     <div class="pnl"><div class="ph" style="justify-content:space-between"><span><span class="dot"></span>◇ INTRADAY KUNDALI · 5-MIN</span>
         <select class="ci" style="font-size:10px;padding:2px 4px" onchange="gs({time5:this.value})">${opts.join('')}</select></div>
       <div class="pb">
-        <div style="display:flex;justify-content:center">${astroMakeChart(mom.planets, mom.lagS, 'ID', S.date+' '+mtt(parseFloat(t5)*60))}</div>
+        <div style="display:flex;justify-content:center">${northChart(mom.planets, mom.lagS, 'INTRADAY 5-MIN', S.date+' '+mtt(parseFloat(t5)*60)+' North-Indian')}</div>
         <div style="font-size:11px;margin:8px 0"><span class="ml">LAGNA</span> <b class="ca">${mom.ascSign.sign} ${dmsC(mom.ascSign.deg)}</b> · <span class="ml">MOON</span> <b style="color:${PC.Moon}">${mom.planets.find(p=>p.name==='Moon').sign}</b></div>
         <div style="color:var(--acc);font-size:10px;font-weight:700;margin-bottom:4px">TRANSIT OVER NATAL (today's push on Nifty · score ${D.natalTransit?D.natalTransit.score:0})</div>
         <div class="ts"><table class="tbl"><thead><tr><th>Planet</th><th>Natal house</th><th>Push</th><th>Note</th></tr></thead><tbody>${tr||'<tr><td colspan=4 style="color:var(--tx3)">no strong transit hits</td></tr>'}</tbody></table></div>
