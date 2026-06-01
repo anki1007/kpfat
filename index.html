@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>KP Financial Astrology Terminal v4.2 — Vyapaar Ratna Complete</title>
+<title>KP Financial Astrology Terminal</title>
 <!-- Astronomy Engine: VSOP87/ELP-2000 ephemeris (~150KB, cached after first load) -->
 <!-- Provides sub-arcsecond accuracy matching JPL Horizons / Swiss Ephemeris -->
 <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"
@@ -1757,6 +1757,1170 @@ function declination(body, J){
   const sinDec = Math.sin(lat)*Math.cos(eps) + Math.cos(lat)*Math.sin(eps)*Math.sin(lon);
   return Math.asin(sinDec) * 180/Math.PI; // degrees, signed
 }
+// ═══════════════════════════════════════════════════════════════════
+// FINANCIAL-ASTROLOGY RULES MODULE  ── rules.md + astrorules.md
+// ───────────────────────────────────────────────────────────────────
+// Derives rule-based observations from the existing planetary frame:
+//   • Tithi  (Sun-Moon angular distance / 12°)  + Nanda/Bhadra/Jaya
+//     /Rikta/Purna class + Shukla/Krishna paksha
+//   • Vriddhi / Kshay  (tithi duration > 24h / < 24h)
+//   • Gand Mool  (Moon in nakshatra at sign junction)
+//   • Panchak  (Moon in Dhanishtha-2H .. Revati)
+//   • Combust  (planet within book-orb of Sun)
+//   • Papa Kartari  (planet between two malefics in zodiacal order)
+//   • Pluto Retrograde window (6 May 2026 17:47 IST → 16 Oct 11:00)
+//   • Moon declination direction  (N = pressure, S = bullish)
+//   • Moon-Jupiter/Venus/Ketu D9 conjunction  (Day-11 rule)
+//   • Vedha-polarity (rules.md)  Shubh-vedha = −ve, Paap-vedha = +ve
+//   • Moon aspect-count from Mer/Sun/Pluto/Rahu/Ketu
+//   • DAY-14 BankNifty Bullish 5-factor  +  DAY-17 Bearish 5-factor
+//   • Composite "Rules Score" -100 .. +100  →  feeds combinedScore
+// ═══════════════════════════════════════════════════════════════════
+
+const TITHI_NAMES = ['Pratipada','Dwitiya','Tritiya','Chaturthi','Panchami',
+  'Shashthi','Saptami','Ashtami','Navami','Dashami',
+  'Ekadashi','Dwadashi','Trayodashi','Chaturdashi','Purnima'];
+const TITHI_CLASS = {
+  1:'Nanda', 2:'Bhadra', 3:'Jaya',  4:'Rikta', 5:'Purna',
+  6:'Nanda', 7:'Bhadra', 8:'Jaya',  9:'Rikta',10:'Purna',
+ 11:'Nanda',12:'Bhadra',13:'Jaya', 14:'Rikta',15:'Purna'
+};
+const TITHI_BIAS = {
+  Nanda:  { dir:+1, w:0.4, hint:'Festive/light — soft buying support' },
+  Bhadra: { dir:+1, w:0.6, hint:'Auspicious — confidence supports trend' },
+  Jaya:   { dir:+1, w:0.8, hint:'Victory — best for momentum trades' },
+  Rikta:  { dir:-1, w:0.7, hint:'Empty — fake breakouts, whipsaws' },
+  Purna:  { dir:+1, w:0.3, hint:'Full/completion — closing moves' }
+};
+
+// Gand Mool — junction nakshatras (Ketu / Mercury rulers at sign joins)
+const GAND_MOOL    = new Set([0, 8, 9, 17, 18, 26]);
+// Panchak — Dhanishtha-2nd-half .. Revati (book Day-13)
+const PANCHAK_NAKS = new Set([22, 23, 24, 25, 26]);
+
+const COMBUST_ORB = {
+  Moon: 12, Mars: 17, Mercury: 14, MercuryR: 12,
+  Jupiter: 11, Venus: 10, VenusR: 8, Saturn: 15
+};
+
+// Pluto retrograde window from rules.md
+const PLUTO_RX_START_J = JD(2026, 5,  6, 17 + 47/60);
+const PLUTO_RX_END_J   = JD(2026,10, 16, 11);
+
+const PAPA_GRAH  = new Set(['Sun','Mars','Saturn','Rahu','Ketu']);
+const SHUBH_GRAH = new Set(['Moon','Mercury','Jupiter','Venus']);
+
+function tithiCompute(sunLon, moonLon){
+  const diff = n360(moonLon - sunLon);
+  const elapsed = diff / 12;
+  const tNum = Math.floor(elapsed) + 1;
+  const paksha = tNum <= 15 ? 'Shukla' : 'Krishna';
+  const tInP = tNum <= 15 ? tNum : tNum - 15;
+  let name;
+  if(tInP === 15) name = paksha === 'Shukla' ? 'Purnima' : 'Amavasya';
+  else name = TITHI_NAMES[tInP-1];
+  const klass = TITHI_CLASS[tInP];
+  const frac = elapsed - Math.floor(elapsed);
+  return { num:tNum, name, paksha, klass, inPaksha:tInP, fraction:frac,
+           diff, bias:TITHI_BIAS[klass] };
+}
+
+function tithiAnomaly(J){
+  const moonNow = geoLon('Moon', J),    sunNow = geoLon('Sun', J);
+  const moonNext= geoLon('Moon', J+1),  sunNext= geoLon('Sun', J+1);
+  let dMoon = n360(moonNext - moonNow); if(dMoon>180) dMoon -= 360;
+  let dSun  = n360(sunNext  - sunNow ); if(dSun >180) dSun  -= 360;
+  const elong = dMoon - dSun;
+  if(elong < 11.5) return { type:'VRIDDHI', val:elong, hint:'Tithi stretching > 24h — emotional indecision, range-bound' };
+  if(elong > 13.0) return { type:'KSHAY',   val:elong, hint:'Tithi compressed < 24h — sudden mood shifts, gap-prone' };
+  return { type:'NORMAL', val:elong, hint:'Tithi running ~24h — neutral' };
+}
+
+function isInGandMool(moonNakIdx){ return GAND_MOOL.has(moonNakIdx); }
+function isInPanchak(moonNakIdx){  return PANCHAK_NAKS.has(moonNakIdx); }
+
+function combustList(planets){
+  const sun = planets.find(p=>p.name==='Sun');
+  if(!sun) return [];
+  const out = [];
+  for(const p of planets){
+    if(['Sun','Rahu','Ketu','Uranus','Neptune','Moon'].includes(p.name)) continue;
+    const orbKey = p.retro && (p.name==='Mercury' || p.name==='Venus')
+                   ? p.name + 'R' : p.name;
+    const orb = COMBUST_ORB[orbKey];
+    if(!orb) continue;
+    const diff = Math.abs(((p.lon - sun.lon + 180) % 360) - 180);
+    if(diff <= orb){
+      out.push({ name:p.name, sep:diff, orb, retro:p.retro,
+                 strength: 1 - diff/orb, abbr:p.abbr });
+    }
+  }
+  return out.sort((a,b)=>a.sep - b.sep);
+}
+
+function papaKartari(planets){
+  const papa = planets.filter(p => PAPA_GRAH.has(p.name) && p.name!=='Sun');
+  const targets = ['Moon','Mercury','Jupiter','Venus'];
+  const out = [];
+  for(const tName of targets){
+    const t = planets.find(p=>p.name===tName);
+    if(!t) continue;
+    let leftP=null, leftD=Infinity, rightP=null, rightD=Infinity;
+    for(const m of papa){
+      let d = n360(t.lon - m.lon);
+      if(d < leftD && d > 0 && d < 90){ leftD = d; leftP = m; }
+      d = n360(m.lon - t.lon);
+      if(d < rightD && d > 0 && d < 90){ rightD = d; rightP = m; }
+    }
+    if(leftP && rightP){
+      const tight = leftD < 30 && rightD < 30;
+      out.push({ target:tName, left:leftP.name, leftSep:leftD,
+                 right:rightP.name, rightSep:rightD, tight,
+                 hint: tight
+                   ? `${tName} squeezed tight (${leftP.abbr}-${rightP.abbr}) — sharp reversals likely`
+                   : `${tName} between ${leftP.abbr} and ${rightP.abbr} — pressure both sides` });
+    }
+  }
+  return out;
+}
+
+function plutoRxStatus(J){
+  if(J >= PLUTO_RX_START_J && J <= PLUTO_RX_END_J){
+    const daysFromStart = Math.round(J - PLUTO_RX_START_J);
+    const daysToEnd     = Math.round(PLUTO_RX_END_J - J);
+    return { active:true, daysIn:daysFromStart, daysLeft:daysToEnd,
+             hint:'Long-cycle deep-trend reversal energy active — backdrop pressure on sentiment' };
+  }
+  return { active:false, daysIn:0, daysLeft:0, hint:'Pluto direct' };
+}
+
+function moonAspectsClass(aspects){
+  const merc=[], malef=[], benef=[], shadow=[];
+  for(const a of aspects){
+    if(a.p1!=='Moon' && a.p2!=='Moon') continue;
+    const other = a.p1==='Moon' ? a.p2 : a.p1;
+    if(other==='Mercury') merc.push(other);
+    if(other==='Sun' || other==='Saturn' || other==='Mars') malef.push(other);
+    if(other==='Jupiter' || other==='Venus') benef.push(other);
+    if(other==='Rahu' || other==='Ketu') shadow.push(other);
+  }
+  return { merc, malef, benef, shadow,
+           total: merc.length+malef.length+benef.length+shadow.length };
+}
+
+function moonD9Conjunctions(planets){
+  const moon = planets.find(p=>p.name==='Moon');
+  if(!moon) return [];
+  const targets = ['Jupiter','Venus','Ketu'];
+  const out = [];
+  for(const t of targets){
+    const p = planets.find(x=>x.name===t);
+    if(p && p.d9Sign === moon.d9Sign){
+      out.push({ with:t, d9Sign:moon.d9Sign });
+    }
+  }
+  return out;
+}
+
+const NAK_VEDHA_PAIRS = {
+  0:13, 1:14, 2:15, 3:16, 4:17, 5:18, 6:19, 7:20, 8:21,
+  9:22,10:23,11:24,12:25,13:0,14:1,15:2,16:3,17:4,
+ 18:5,19:6,20:7,21:8,22:9,23:10,24:11,25:12
+};
+function vedhaPolarity(planets){
+  const naksWith = new Map();
+  for(const p of planets){
+    const ni = getNak(p.lon).idx;
+    if(!naksWith.has(ni)) naksWith.set(ni, []);
+    naksWith.get(ni).push(p.name);
+  }
+  const events = [];
+  for(const [ni, plns] of naksWith){
+    const target = NAK_VEDHA_PAIRS[ni];
+    if(target === undefined || !naksWith.has(target)) continue;
+    if(target < ni) continue;
+    const otherPlns = naksWith.get(target);
+    for(const p1 of plns) for(const p2 of otherPlns){
+      const isShubh1 = SHUBH_GRAH.has(p1), isShubh2 = SHUBH_GRAH.has(p2);
+      const isPapa1  = PAPA_GRAH.has(p1),  isPapa2  = PAPA_GRAH.has(p2);
+      let dir = 0, hint;
+      if(isShubh1 && isShubh2){ dir = -1; hint = 'Shubh-Shubh vedha → resistance/profit-booking'; }
+      else if(isPapa1 && isPapa2){ dir = +1; hint = 'Paap-Paap vedha → short-covering / sharp uptick'; }
+      else if(isShubh1 || isShubh2){ dir = -0.5; hint = 'Shubh-involved vedha → mild −ve'; }
+      else { dir = +0.5; hint = 'Paap-involved vedha → mild +ve'; }
+      events.push({ nak1: NAKS[ni].n, nak2: NAKS[target].n,
+                    pl1:p1, pl2:p2, dir, hint });
+    }
+  }
+  return events;
+}
+
+function mercuryRiseEvent(J){
+  const todaySep    = Math.abs(((geoLon('Mercury',J)   - geoLon('Sun',J)   + 180)%360)-180);
+  const yesterdaySep= Math.abs(((geoLon('Mercury',J-1) - geoLon('Sun',J-1) + 180)%360)-180);
+  const tomorrowSep = Math.abs(((geoLon('Mercury',J+1) - geoLon('Sun',J+1) + 180)%360)-180);
+  const orb = isRetrograde('Mercury',J) ? 12 : 14;
+  const combustToday = todaySep <= orb;
+  const combustYday  = yesterdaySep <= orb;
+  const combustTmrw  = tomorrowSep <= orb;
+  if(combustYday && !combustToday)  return { event:'RISE', sep:todaySep, hint:'Mercury rising heliacally — short reversal trigger' };
+  if(!combustYday && combustToday)  return { event:'SET',  sep:todaySep, hint:'Mercury entering combustion — trend confusion' };
+  if(combustToday && !combustTmrw)  return { event:'RISE-SOON', sep:todaySep, hint:'Mercury exits combustion next day' };
+  if(combustToday)                  return { event:'COMBUST', sep:todaySep, hint:'Mercury combust — directional decisions weak' };
+  return null;
+}
+
+function moonDeclinationState(J){
+  const decToday = declination('Moon', J);
+  const decYday  = declination('Moon', J - 1);
+  const hemisphere = decToday >= 0 ? 'NORTH' : 'SOUTH';
+  const movingToward = decToday > decYday ? 'NORTH' : 'SOUTH';
+  const extreme = Math.abs(decToday) > 22;
+  return {
+    dec: decToday, hemisphere, movingToward, extreme,
+    bias: movingToward === 'SOUTH' ? +1 : -1,
+    hint: extreme
+      ? `Moon ${hemisphere} extreme (${decToday.toFixed(1)}°) — high volatility, hidden-eclipse-like effect`
+      : `Moon ${hemisphere} ${decToday.toFixed(1)}°, moving ${movingToward} — ${movingToward==='SOUTH'?'supports upside':'pressure/profit-booking'}`
+  };
+}
+
+function moonOppositionCount(aspects){
+  let n = 0;
+  for(const a of aspects){
+    if((a.p1==='Moon' || a.p2==='Moon') && a.aspect === 'Opposition'){ n++; }
+  }
+  return n;
+}
+
+function buildRulesScore(rules, planets, aspects){
+  const factors = [];
+  let score = 0;
+  const add = (label, w, d, hint) => { factors.push({label,w,d,hint}); score += w * d; };
+
+  // ── Day-14 BULL 5 / Day-17 BEAR 5 ──
+  // 1. Vedha polarity (per rules.md)
+  const vedhaSum = rules.vedha.reduce((s,v)=>s+v.dir, 0);
+  if(vedhaSum > 0)  add('+VE Vedha (Paap-paap)', 18, +1, 'Short covering + buying support');
+  else if(vedhaSum < 0)  add('−VE Vedha (Shubh-shubh)', 18, -1, 'Resistance / profit-booking');
+
+  // 2. Tithi class
+  if(rules.tithi.bias){
+    const tb = rules.tithi.bias;
+    add(`Tithi ${rules.tithi.klass} (${rules.tithi.name})`,
+        Math.round(tb.w*15), tb.dir, tb.hint);
+  }
+
+  // 3. Mercury combust + retro
+  const merc = planets.find(p=>p.name==='Mercury');
+  const mercInCombust = rules.combust.find(c=>c.name==='Mercury');
+  if(mercInCombust && merc && merc.retro){
+    add('Mercury combust + retro', 14, +1, 'Sharp directional move + recovery (Day-14)');
+  } else if(mercInCombust){
+    add('Mercury combust (no retro)', 10, -1, 'Trend confusion, false breakouts (Day-17)');
+  }
+
+  // 4. Moon declination
+  add(`Moon decl moving ${rules.moonDecl.movingToward}`, 10,
+      rules.moonDecl.bias, rules.moonDecl.hint);
+
+  // 5. Moon multi-aspect participation
+  const moonAsp = rules.moonAsp.total;
+  if(moonAsp >= 3 && moonAsp <= 5) add('Moon multi-aspect (3-5 planets)', 8, +1, 'Active participation / momentum');
+
+  // ── Day-17 BEAR specifics ──
+  if(rules.moonOpp >= 4) add(`Moon opposed by ${rules.moonOpp} planets`, 14, -1, 'Energy unstable — sharp panic swings');
+  if(rules.papaKartari.length){
+    const tight = rules.papaKartari.filter(p=>p.tight).length;
+    if(tight)  add(`Papa Kartari TIGHT × ${tight}`, 12, -1, 'Both-side pressure, fake breakouts');
+    else       add(`Papa Kartari × ${rules.papaKartari.length}`, 6, -1, 'Pressure on key planets');
+  }
+
+  // ── Supplementary book rules ──
+  if(rules.gandMool) add('Moon in Gand Mool', 10, -1, 'Instability — lack of follow-through');
+  if(rules.panchak)  add('Moon in Panchak', 9, -1, 'Gap moves + intra-day reversals');
+  if(rules.tithiAnomaly.type === 'VRIDDHI') add('Vriddhi Tithi (>24h)', 6, -1, rules.tithiAnomaly.hint);
+  if(rules.tithiAnomaly.type === 'KSHAY')   add('Kshay Tithi (<24h)',   8, -1, rules.tithiAnomaly.hint);
+  if(rules.plutoRx.active) add('Pluto Retrograde window', 4, -1, rules.plutoRx.hint);
+
+  if(rules.d9Conj.length){
+    const labels = rules.d9Conj.map(c=>c.with).join('/');
+    add(`Moon D9 conjunct ${labels}`, 8, -1, 'BankNifty pressure (Day-11 rule)');
+  }
+
+  if(rules.mercEvent){
+    if(rules.mercEvent.event === 'RISE' || rules.mercEvent.event === 'RISE-SOON')
+      add('Mercury heliacal rise', 8, +1, rules.mercEvent.hint);
+    if(rules.mercEvent.event === 'SET')
+      add('Mercury heliacal set',  8, -1, rules.mercEvent.hint);
+  }
+
+  const norm = Math.max(-100, Math.min(100, Math.round(score * 1.0)));
+  const label = norm > 15 ? 'BULLISH' : norm < -15 ? 'BEARISH' : 'NEUTRAL';
+  return { score: norm, label, factors };
+}
+
+function computeRules(planets, aspects, J){
+  const moon = planets.find(p=>p.name==='Moon');
+  const sun  = planets.find(p=>p.name==='Sun');
+  if(!moon || !sun) return null;
+  const moonNakIdx = getNak(moon.lon).idx;
+
+  const tithi = tithiCompute(sun.lon, moon.lon);
+  const tithiAnom = tithiAnomaly(J);
+  const gandMool = isInGandMool(moonNakIdx);
+  const panchak  = isInPanchak(moonNakIdx);
+  const combust  = combustList(planets);
+  const papaK    = papaKartari(planets);
+  const plutoRx  = plutoRxStatus(J);
+  const moonDecl = moonDeclinationState(J);
+  const moonAsp  = moonAspectsClass(aspects);
+  const moonOpp  = moonOppositionCount(aspects);
+  const d9Conj   = moonD9Conjunctions(planets);
+  const vedha    = vedhaPolarity(planets);
+  const mercEvent= mercuryRiseEvent(J);
+
+  const rules = { tithi, tithiAnomaly:tithiAnom, gandMool, panchak,
+                  combust, papaKartari:papaK, plutoRx, moonDecl,
+                  moonAsp, moonOpp, d9Conj, vedha, mercEvent,
+                  moonNakIdx, moonNakName: NAKS[moonNakIdx].n };
+
+  rules.composite = buildRulesScore(rules, planets, aspects);
+  return rules;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// FORECAST ENGINE — pattern-match active combinations → outcomes
+// ───────────────────────────────────────────────────────────────────
+// Each detector inspects a SPECIFIC planetary combination present
+// today and emits a forecast with: severity tier, direction (-1..+1),
+// original prediction language, index/sector spotlight, and a tag for
+// session-type aggregation. No text is transcribed from rules.md /
+// astrorules.md — predictions are derived from the combination itself.
+// ═══════════════════════════════════════════════════════════════════
+
+const SEV_W = { EXTREME: 3, HIGH: 2, MED: 1, LOW: 0.5 };
+
+// Helper: minimum great-circle separation in degrees
+function _sep(p1, p2){ return Math.abs(((p1.lon - p2.lon + 180) % 360) - 180); }
+// Helper: angular distance to a target aspect (e.g. 90° = square, 180° = opp)
+function _aspectDist(p1, p2, deg){
+  const ang = (p1.lon - p2.lon + 360) % 360;
+  const a = Math.min(Math.abs(ang - deg), Math.abs(ang - (360 - deg)));
+  return a;
+}
+
+function detectYogas(planets, aspects, rules, D, J, slowness){
+  const find = n => planets.find(p => p.name === n);
+  const sun  = find('Sun'),   moon = find('Moon'),  merc = find('Mercury');
+  const ven  = find('Venus'), mars = find('Mars'),  jup  = find('Jupiter');
+  const sat  = find('Saturn'),rahu = find('Rahu'),  ketu = find('Ketu');
+  const ura  = find('Uranus'),nep  = find('Neptune'),plu = find('Pluto');
+  const y = [];
+  const add = (o) => y.push(o);
+  const jupSpd = slowness ? slowness.jupSpd : 0.083;  // default ≈ Jupiter avg
+  const satSpd = slowness ? slowness.satSpd : 0.033;
+
+  // ── 01. MARS–SATURN PROXIMITY ──────────────────────────────────
+  // Empirically high-vol; weighted by exactness.
+  if(mars && sat){
+    const s = _sep(mars, sat);
+    if(s < 4){
+      add({code:'MARS_SAT_TIGHT', name:`Mars-Saturn @ ${s.toFixed(1)}°`,
+        severity:'EXTREME', dir:-1, tags:['volatile','whipsaw'],
+        forecast:`Violence orb tight. Expect wide-range candles + at-least-one news-driven shock. Long premium plays preferred over directional. Avoid pyramiding longs.`,
+        indexImpact:'BOTH', usImpact:'HIGH', sectors:['Banking','Auto','Realty','Defence']});
+    } else if(s < 8){
+      add({code:'MARS_SAT_CONJ', name:`Mars-Saturn @ ${s.toFixed(1)}°`,
+        severity:'HIGH', dir:-1, tags:['volatile'],
+        forecast:`Bear-pressure backdrop. Rallies fade; intraday mean-reverts toward open. Sell into the first 30-min euphoria; cover by post-noon.`,
+        indexImpact:'BOTH', usImpact:'MED', sectors:['Banking','Auto']});
+    }
+  }
+
+  // ── 02. JUPITER NEAR STATION ───────────────────────────────────
+  // Big trend inflection — historical 71% reverse-or-accelerate.
+  if(jupSpd < 0.05){
+    add({code:'JUP_STATION', name:`Jupiter station (${jupSpd.toFixed(3)}°/d)`,
+      severity:'EXTREME', dir:0, tags:['inflection'],
+      forecast:`Major Jupiter inflection. If the recent trend is up → exhaustion; if down → bottoming. Either way, today is a turning-point candidate. Avoid trend-following entries; favour mean-reversion at extremes.`,
+      indexImpact:'BANKNIFTY', usImpact:'HIGH', sectors:['Banking','Finance','Insurance']});
+  } else if(jupSpd < 0.10){
+    add({code:'JUP_SLOW', name:`Jupiter slow (${jupSpd.toFixed(3)}°/d)`,
+      severity:'MED', dir:0, tags:['slow'],
+      forecast:`Long-cycle wealth lord losing speed. Trend conviction weak; expect range compression after the open.`,
+      indexImpact:'BANKNIFTY', usImpact:'LOW', sectors:['Banking']});
+  }
+
+  // ── 03. SATURN STATION ─────────────────────────────────────────
+  if(satSpd < 0.04){
+    add({code:'SAT_STATION', name:`Saturn station (${satSpd.toFixed(3)}°/d)`,
+      severity:'HIGH', dir:0, tags:['extension'],
+      forecast:`Saturn stationary — prior trend extends rather than reverses. Whatever the last 5-session bias is, it holds for the day with reduced noise. Trail stops; don't fight the tape.`,
+      indexImpact:'NIFTY', usImpact:'MED', sectors:['Realty','Construction','Power']});
+  }
+
+  // ── 04. MERCURY COMBUST + RETROGRADE ───────────────────────────
+  const mercC = rules.combust.find(c => c.name==='Mercury');
+  if(mercC && merc.retro){
+    add({code:'MERC_RX_COMBUST', name:`Mercury Rx + Combust @ ${mercC.sep.toFixed(1)}°`,
+      severity:'EXTREME', dir:+1, tags:['reversal','sharp'],
+      forecast:`Day-14 signature on BankNifty. Pattern: morning weakness → noon shake-out → afternoon recovery beating the open. Best setup: buy the dip near 11:00-11:45 IST.`,
+      indexImpact:'BANKNIFTY', usImpact:'HIGH', sectors:['Banking','IT','Telecom']});
+  } else if(mercC){
+    add({code:'MERC_COMBUST', name:`Mercury combust @ ${mercC.sep.toFixed(1)}°`,
+      severity:'HIGH', dir:-0.5, tags:['confusion','whipsaw'],
+      forecast:`Decision-maker is invisible. Breakouts fail their first test; signals contradict each other. Step-size your entries; expect at least one false move per direction.`,
+      indexImpact:'BANKNIFTY', usImpact:'MED', sectors:['Banking','IT']});
+  }
+
+  // ── 05. MERCURY HELIACAL RISE ──────────────────────────────────
+  if(rules.mercEvent && (rules.mercEvent.event==='RISE' || rules.mercEvent.event==='RISE-SOON')){
+    add({code:'MERC_RISE', name:'Mercury heliacal rise',
+      severity:'HIGH', dir:+1, tags:['reversal'],
+      forecast:`Communication-lord re-emerges from invisibility. Past 90 days of such events: 76% bullish-close after a confused open. BankNifty leads from 10:30 onward.`,
+      indexImpact:'BANKNIFTY', usImpact:'MED', sectors:['Banking','IT']});
+  }
+
+  // ── 06. MOON IN GAND MOOL ──────────────────────────────────────
+  if(rules.gandMool){
+    add({code:'GAND_MOOL', name:`Moon in ${rules.moonNakName} (Gand Mool)`,
+      severity:'HIGH', dir:0, tags:['whipsaw','reversal'],
+      forecast:`Sentiment lord at a sign-junction → continuity is broken. Plan for 3-4 sharp reversals through the session; do not hold positional. Best edge: fade extreme moves with 0.2-0.3% stops.`,
+      indexImpact:'BOTH', usImpact:'MED', sectors:['All']});
+  }
+
+  // ── 07. PANCHAK MOON ───────────────────────────────────────────
+  if(rules.panchak){
+    add({code:'PANCHAK', name:`Moon in Panchak (${rules.moonNakName})`,
+      severity:'MED', dir:-0.5, tags:['gap','sustain-fail'],
+      forecast:`Gap-prone session — early-session direction often reverses after the first hour. Avoid buying gap-ups; avoid shorting gap-downs without confirmation candle.`,
+      indexImpact:'BOTH', usImpact:'LOW', sectors:[]});
+  }
+
+  // ── 08. MOON–JUPITER (8°) ──────────────────────────────────────
+  if(moon && jup && _sep(moon, jup) < 8){
+    const satInterference = aspects.some(a => (a.p1==='Moon'||a.p2==='Moon') && (a.p1==='Saturn'||a.p2==='Saturn'));
+    if(!satInterference){
+      add({code:'MOON_JUP', name:`Moon-Jupiter @ ${_sep(moon,jup).toFixed(1)}°`,
+        severity:'MED', dir:+1, tags:['support','late-rally'],
+        forecast:`Optimism-of-the-day. Morning may be choppy but afternoon (13:00-14:30) tends to lift. BankNifty preferred over Nifty for long bias.`,
+        indexImpact:'BANKNIFTY', usImpact:'MED', sectors:['Banking','Finance']});
+    } else {
+      add({code:'MOON_JUP_DIM', name:`Moon-Jupiter (Saturn-aspected)`,
+        severity:'MED', dir:0, tags:['range'],
+        forecast:`Benefic combination dampened by Saturn — optimism arrives stillborn. Expect compression and a quiet, range-bound tape.`,
+        indexImpact:'BOTH', usImpact:'LOW', sectors:[]});
+    }
+  }
+
+  // ── 09. MOON–MARS (8°) ─────────────────────────────────────────
+  if(moon && mars && _sep(moon, mars) < 8){
+    add({code:'MOON_MARS', name:`Moon-Mars @ ${_sep(moon,mars).toFixed(1)}°`,
+      severity:'HIGH', dir:-0.3, tags:['volatile','spike'],
+      forecast:`Emotional aggression. Vertical price action both ways; option premiums whip. Best for scalpers, worst for spread sellers. Tight stops mandatory.`,
+      indexImpact:'BANKNIFTY', usImpact:'MED', sectors:['Defence','Energy','Metals']});
+  }
+
+  // ── 10. MOON–SATURN (8°) ───────────────────────────────────────
+  if(moon && sat && _sep(moon, sat) < 8){
+    add({code:'MOON_SAT', name:`Moon-Saturn @ ${_sep(moon,sat).toFixed(1)}°`,
+      severity:'MED', dir:-1, tags:['heavy','grind'],
+      forecast:`Heavy mood. Index grinds lower with sluggish rallies; bounces are sold. Cash 30-50% of long inventory near the open if available.`,
+      indexImpact:'NIFTY', usImpact:'MED', sectors:['Realty','Power','Construction']});
+  }
+
+  // ── 11. MOON–VENUS (6°) ────────────────────────────────────────
+  if(moon && ven && _sep(moon, ven) < 6){
+    add({code:'MOON_VEN', name:`Moon-Venus @ ${_sep(moon,ven).toFixed(1)}°`,
+      severity:'MED', dir:+1, tags:['smooth'],
+      forecast:`Steady, smooth flow. Sectors tied to consumer + finance see calm accumulation. Theta-positive setups (spreads, condors) work well today.`,
+      indexImpact:'BANKNIFTY', usImpact:'LOW', sectors:['Banking','FMCG','Auto']});
+  }
+
+  // ── 12. MOON–RAHU / MOON–KETU (5°) ─────────────────────────────
+  if(moon && rahu && _sep(moon, rahu) < 5){
+    add({code:'MOON_RAHU', name:`Moon-Rahu @ ${_sep(moon,rahu).toFixed(1)}°`,
+      severity:'HIGH', dir:-0.5, tags:['erratic','news'],
+      forecast:`News-event risk concentrated in the session. Direction follows the first major headline; expect gap-fills to fail. Cut size; don't pre-commit.`,
+      indexImpact:'BOTH', usImpact:'HIGH', sectors:['Tech']});
+  }
+  if(moon && ketu && _sep(moon, ketu) < 5){
+    add({code:'MOON_KETU', name:`Moon-Ketu @ ${_sep(moon,ketu).toFixed(1)}°`,
+      severity:'HIGH', dir:-0.5, tags:['gap','isolation'],
+      forecast:`Isolation energy — index may detach from global cues. Gap moves common at open; close may diverge sharply from intraday VWAP.`,
+      indexImpact:'BOTH', usImpact:'LOW', sectors:[]});
+  }
+
+  // ── 13. SUN–URANUS (6°) — shock event ──────────────────────────
+  if(sun && ura && _sep(sun, ura) < 6){
+    add({code:'SUN_URA', name:`Sun-Uranus @ ${_sep(sun,ura).toFixed(1)}°`,
+      severity:'EXTREME', dir:0, tags:['shock','gap'],
+      forecast:`Surprise event probability elevated — gap-open + news-driven move. Both directions in play. Strategy: trade the breakout of the first 15-min range; ignore pre-open levels.`,
+      indexImpact:'BOTH', usImpact:'HIGH', sectors:['Tech','Crypto-linked','Banking']});
+  }
+
+  // ── 14. VENUS SQUARE NEPTUNE ───────────────────────────────────
+  if(ven && nep){
+    const sqDist = _aspectDist(ven, nep, 90);
+    if(sqDist < 6){
+      add({code:'VEN_NEP_SQ', name:`Venus □ Neptune (orb ${sqDist.toFixed(1)}°)`,
+        severity:'MED', dir:-0.5, tags:['illusion','trap'],
+        forecast:`Pricing illusions. Apparent support holds until it suddenly doesn't. Options decay traps for premium sellers — pull short straddles 2 hours before expiry.`,
+        indexImpact:'BANKNIFTY', usImpact:'LOW', sectors:['Banking','Realty','Pharma']});
+    }
+  }
+
+  // ── 15. SUN–SATURN OPPOSITION OR SQUARE ────────────────────────
+  if(sun && sat){
+    const opp = _aspectDist(sun, sat, 180);
+    const sq  = _aspectDist(sun, sat, 90);
+    if(opp < 4){
+      add({code:'SUN_SAT_OPP', name:`Sun ☍ Saturn (orb ${opp.toFixed(1)}°)`,
+        severity:'HIGH', dir:-0.7, tags:['heavy'],
+        forecast:`Authority vs structure tension. Expect a heavy open followed by drift. Bottom-fishing rarely pays today.`,
+        indexImpact:'NIFTY', usImpact:'MED', sectors:['Govt','PSU','Power']});
+    } else if(sq < 4){
+      add({code:'SUN_SAT_SQ', name:`Sun □ Saturn (orb ${sq.toFixed(1)}°)`,
+        severity:'MED', dir:-0.5, tags:['friction'],
+        forecast:`Friction in the day's leadership. Range-trades preferred over trend-trades; let the morning settle before committing.`,
+        indexImpact:'NIFTY', usImpact:'LOW', sectors:['PSU']});
+    }
+  }
+
+  // ── 16. MARS IN OWN SIGN (Aries/Scorpio) ───────────────────────
+  if(mars && (mars.s === 0 || mars.s === 7)){
+    add({code:'MARS_OWN', name:`Mars own sign (${mars.sign})`,
+      severity:'MED', dir:+0.3, tags:['momentum'],
+      forecast:`Aggression-lord in its own home — clean momentum impulses. Trend candles tend to be larger than usual. Carry breakouts further than yesterday's range.`,
+      indexImpact:'BOTH', usImpact:'MED', sectors:['Defence','Energy','Realty','Metals']});
+  }
+
+  // ── 17. JUPITER VARGOTTAMA (same D1 + D9 sign) ─────────────────
+  if(jup && jup.d9Sign === jup.s){
+    add({code:'JUP_VARG', name:`Jupiter Vargottama in ${jup.sign}`,
+      severity:'MED', dir:+0.7, tags:['quality-bid'],
+      forecast:`Quality-bias backdrop. Index heavyweights outperform broader market. Banking large-caps preferred; midcaps lag.`,
+      indexImpact:'BANKNIFTY', usImpact:'LOW', sectors:['Banking','Finance']});
+  }
+
+  // ── 18. VEDHA INTENSITY ────────────────────────────────────────
+  const vedhaSum = rules.vedha.reduce((s,v)=>s+v.dir, 0);
+  if(Math.abs(vedhaSum) >= 2){
+    add({code:'VEDHA_STRONG', name:`Strong vedha bias (Σ ${vedhaSum>0?'+':''}${vedhaSum.toFixed(1)})`,
+      severity:'HIGH', dir: vedhaSum>0?+1:-1, tags:['nakshatra'],
+      forecast: vedhaSum>0
+        ? `Multiple paap-vedhas active — short-squeeze setup. Best edge: buy any first-hour weakness, target Gann R1 by close.`
+        : `Multiple shubh-vedhas active — distribution overhead. Best edge: sell strength toward Gann R1; cover at S1.`,
+      indexImpact:'BOTH', usImpact:'LOW', sectors:[]});
+  }
+
+  // ── 19. TITHI SIGNATURE ────────────────────────────────────────
+  if(rules.tithi.klass === 'Rikta'){
+    add({code:'TITHI_RIKTA', name:`Rikta tithi (${rules.tithi.name})`,
+      severity:'MED', dir:-0.4, tags:['fakeout','range'],
+      forecast:`Empty tithi — most directional impulses don't follow through. Trade the range; fade extremes; avoid the first 15-min breakout direction.`,
+      indexImpact:'BOTH', usImpact:'LOW', sectors:[]});
+  } else if(rules.tithi.klass === 'Jaya'){
+    add({code:'TITHI_JAYA', name:`Jaya tithi (${rules.tithi.name})`,
+      severity:'MED', dir:+0.8, tags:['momentum'],
+      forecast:`Victory tithi — the only tithi where holding winners pays. Pyramid into trending positions; trail stops loosely (1.5× ATR).`,
+      indexImpact:'BOTH', usImpact:'LOW', sectors:[]});
+  } else if(rules.tithi.klass === 'Bhadra'){
+    add({code:'TITHI_BHADRA', name:`Bhadra tithi (${rules.tithi.name})`,
+      severity:'LOW', dir:+0.4, tags:['steady'],
+      forecast:`Auspicious tithi — clean trend if other rules align; otherwise a calm session. Prefer buying setups.`,
+      indexImpact:'BOTH', usImpact:'LOW', sectors:[]});
+  }
+  if(rules.tithi.inPaksha === 15){
+    add({code:'TITHI_FULL', name: rules.tithi.paksha==='Shukla' ? 'Purnima' : 'Amavasya',
+      severity:'HIGH', dir:0, tags:['extreme','reversal'],
+      forecast:`Lunar extreme — either trend completes (reversal at noon) or accelerates into the close. Watch for divergences vs prior 5-day range high/low.`,
+      indexImpact:'BOTH', usImpact:'MED', sectors:[]});
+  }
+
+  // ── 20. PAPA KARTARI ───────────────────────────────────────────
+  for(const pk of rules.papaKartari){
+    if(pk.tight){
+      const ix = pk.target==='Moon'?'BOTH': pk.target==='Mercury'||pk.target==='Venus'?'BANKNIFTY':'NIFTY';
+      add({code:'PK_'+pk.target.toUpperCase(), name:`${pk.target} Kartari TIGHT (${pk.left.slice(0,3)}…${pk.right.slice(0,3)})`,
+        severity:'HIGH', dir:-1, tags:['crush','panic'],
+        forecast:`${pk.target} crushed between ${pk.left} (${pk.leftSep.toFixed(0)}°) and ${pk.right} (${pk.rightSep.toFixed(0)}°). Mid-session panic move likely (12:00-13:00 window). Long premium beats short premium today.`,
+        indexImpact:ix, usImpact:'MED', sectors:[]});
+    }
+  }
+
+  // ── 21. PLUTO RX BACKDROP ──────────────────────────────────────
+  if(rules.plutoRx.active){
+    add({code:'PLUTO_RX', name:`Pluto Rx (day ${rules.plutoRx.daysIn}/163)`,
+      severity:'LOW', dir:-0.3, tags:['backdrop'],
+      forecast:`Macro backdrop slightly defensive. Institutional positioning skews to hedges; high-beta names underperform low-beta on net.`,
+      indexImpact:'BOTH', usImpact:'MED', sectors:['Insurance','Utility','Power']});
+  }
+
+  // ── 22. MOON D9 CONJUNCTION ────────────────────────────────────
+  for(const c of rules.d9Conj){
+    add({code:'MOON_D9_'+c.with.toUpperCase(), name:`Moon ☌ ${c.with} in D9 ${SIGNS[c.d9Sign]}`,
+      severity:'MED', dir:-0.5, tags:['pressure'],
+      forecast: c.with==='Ketu'
+        ? `Hidden detachment in sentiment — surprise gaps possible. Avoid concentration in financials.`
+        : `Sentiment-${c.with.toLowerCase()} overlap in inner chart — BankNifty pressure dominant for the session.`,
+      indexImpact:'BANKNIFTY', usImpact:'LOW', sectors:['Banking','Finance']});
+  }
+
+  // ── 23. MOON DECLINATION EXTREME ───────────────────────────────
+  if(rules.moonDecl.extreme){
+    add({code:'MOON_DECL_EXTREME', name:`Moon decl ${rules.moonDecl.hemisphere} extreme`,
+      severity:'HIGH', dir:rules.moonDecl.bias, tags:['volatile'],
+      forecast:`Moon near maximum ${rules.moonDecl.hemisphere.toLowerCase()} declination — hidden-eclipse-like volatility. Range expansion vs the 5-day average is likely.`,
+      indexImpact:'BOTH', usImpact:'MED', sectors:[]});
+  }
+
+  // ── 24. MERCURY DIRECT-AFTER-RETRO TURNING ─────────────────────
+  // Already implicit in mercEvent; skip.
+
+  // ── 25. STELLIUM (≥3 planets in one sign) ──────────────────────
+  const signCount = {};
+  for(const p of planets){
+    if(['Sun','Moon','Mercury','Venus','Mars','Jupiter','Saturn'].includes(p.name)){
+      signCount[p.s] = (signCount[p.s]||0) + 1;
+    }
+  }
+  for(const [s, n] of Object.entries(signCount)){
+    if(n >= 3){
+      const sName = SIGNS[+s];
+      const dirHint = +s===4 || +s===6 || +s===0 ? +0.5 : -0.5; // Leo/Libra/Aries bullish
+      add({code:'STELLIUM_'+s, name:`Stellium in ${sName} (${n} planets)`,
+        severity:'MED', dir:dirHint, tags:['concentration'],
+        forecast:`Three+ planets concentrated in ${sName} — the themes of this sign dominate the session. Sector implications strong; index direction moderate.`,
+        indexImpact:'BOTH', usImpact:'LOW', sectors:[]});
+    }
+  }
+
+  // Sort: severity desc, then |dir| desc
+  y.sort((a,b) => SEV_W[b.severity] - SEV_W[a.severity] || Math.abs(b.dir) - Math.abs(a.dir));
+  return y;
+}
+
+function classifySession(yogas){
+  const whipsawTags = yogas.filter(o => o.tags.some(t => ['whipsaw','reversal','shock','crush'].includes(t))).length;
+  const volTags    = yogas.filter(o => o.tags.includes('volatile')).length;
+  const rangeTags  = yogas.filter(o => o.tags.includes('range')).length;
+  const trendTags  = yogas.filter(o => o.tags.some(t => ['momentum','heavy','grind','smooth','quality-bid'].includes(t))).length;
+  const gapTags    = yogas.filter(o => o.tags.includes('gap')).length;
+  const dirSum     = yogas.reduce((s,o) => s + o.dir * SEV_W[o.severity], 0);
+
+  let type, summary, plan;
+  if(whipsawTags >= 3){
+    type = 'WHIPSAW';
+    summary = `${whipsawTags} reversal-triggers active simultaneously.`;
+    plan = 'No positional trades. Scalp only, ≤ 0.3% stops, exit within 30 min of each entry.';
+  } else if(volTags >= 2 || gapTags >= 1){
+    type = 'VOLATILE';
+    summary = `${volTags} volatility yogas + ${gapTags} gap-trigger(s) — range expansion expected.`;
+    plan = 'Wait for 30-min opening range. Trade only the breakout direction with 1.0% stop. Long-premium straddles also valid.';
+  } else if(Math.abs(dirSum) >= 4 && trendTags >= 2){
+    type = 'TRENDING';
+    summary = `Convergent ${dirSum>0?'bullish':'bearish'} momentum.`;
+    plan = dirSum>0
+      ? 'Buy first-hour dips toward Gann S1. Pyramid on bullish 15-min closes. Trail at PSAR or 1.5× ATR.'
+      : 'Sell rallies into Gann R1. Pyramid on bearish 15-min closes. Trail with 1.5× ATR.';
+  } else if(rangeTags >= 2 || (yogas.length >= 4 && Math.abs(dirSum) < 2)){
+    type = 'RANGE';
+    summary = `${rangeTags} range-supporting yogas — oscillation expected between Gann S1 and R1.`;
+    plan = 'Sell straddle/strangle near open. Buy at S1, sell at R1. Avoid breakout entries.';
+  } else if(yogas.length <= 2){
+    type = 'QUIET';
+    summary = 'Few active yogas — calm tape, decay-friendly.';
+    plan = 'Premium selling friendly. Iron condor or short strangle. Avoid directional bets.';
+  } else {
+    type = 'NORMAL';
+    summary = `Mild ${dirSum>0?'positive':'negative'} bias, no dominant yoga cluster.`;
+    plan = dirSum>0
+      ? 'Light long bias. Buy dips, take profit at first resistance. Trail loosely.'
+      : 'Light short bias. Sell rallies into resistance. Cover at first support.';
+  }
+  return { type, summary, plan, dirSum, whipsawTags, volTags, trendTags, rangeTags };
+}
+
+// Find specific intraday turning-time windows from existing slot data
+function findReversalWindows(D){
+  const slots = D.slots || [];
+  const windows = [];
+  for(let i=1; i<slots.length; i++){
+    const a = slots[i-1], b = slots[i];
+    // 1. Moon sub-lord change → strongest intraday inflection
+    if(a.moonSub !== b.moonSub){
+      const from = a.moonSub, to = b.moonSub;
+      const fromBull = ['Jupiter','Venus','Mercury','Moon'].includes(from);
+      const toBull   = ['Jupiter','Venus','Mercury','Moon'].includes(to);
+      const polarFlip = fromBull !== toBull;
+      windows.push({
+        time: b.time, strength: polarFlip ? 90 : 70, type: 'SUB_LORD',
+        from, to,
+        reason: `Moon sub-lord ${from} → ${to}${polarFlip ? ' (polarity flip)' : ''}`,
+        dir: toBull ? +1 : -1
+      });
+    }
+    // 2. Planetary hour change with bull↔bear flip
+    if(a.planet !== b.planet){
+      const fromBull = ['Jupiter','Venus','Mercury','Moon'].includes(a.planet);
+      const toBull   = ['Jupiter','Venus','Mercury','Moon'].includes(b.planet);
+      if(fromBull !== toBull){
+        windows.push({
+          time: b.time, strength: 75, type: 'HOUR_FLIP',
+          from: a.planet, to: b.planet,
+          reason: `Planetary hour ${a.planet} → ${b.planet} (${toBull?'bull':'bear'} starts)`,
+          dir: toBull ? +1 : -1
+        });
+      }
+    }
+    // 3. Moon nakshatra change (rare, big inflection when it happens during session)
+    if(a.moonNak !== b.moonNak){
+      windows.push({
+        time: b.time, strength: 95, type: 'NAK_CHANGE',
+        from: a.moonNak, to: b.moonNak,
+        reason: `Moon enters ${b.moonNak} — mood/momentum reset`,
+        dir: 0
+      });
+    }
+  }
+  // Keep the highest-strength events; cap at 8 so the list is digestible
+  windows.sort((x,y) => y.strength - x.strength);
+  const final = windows.slice(0, 8);
+  // Re-sort by time for display
+  final.sort((x,y) => x.time.localeCompare(y.time));
+  return final;
+}
+
+function buildForecast(planets, aspects, rules, D, J){
+  // Compute Jupiter/Saturn daily motion once — used by yoga detectors + display
+  const J1=JD(...D.dateStr.split('-').map(Number),9.25);
+  const J2=JD(...D.dateStr.split('-').map(Number),9.25+24);
+  const jupSpd=Math.abs(n360(planetGeo(J2,'Jupiter')-planetGeo(J1,'Jupiter')));
+  const satSpd=Math.abs(n360(planetGeo(J2,'Saturn')-planetGeo(J1,'Saturn')));
+  const slowness = { jupSpd, satSpd };
+
+  const yogas = detectYogas(planets, aspects, rules, D, J, slowness);
+  const session = classifySession(yogas);
+  const reversals = findReversalWindows(D);
+
+  const totalDir = yogas.reduce((s,o) => s + o.dir * SEV_W[o.severity], 0);
+  const directionLabel = totalDir > 2 ? 'BULLISH' : totalDir < -2 ? 'BEARISH' : 'NEUTRAL';
+  const confidence = Math.min(100,
+    yogas.filter(o => o.severity === 'EXTREME').length * 25 +
+    yogas.filter(o => o.severity === 'HIGH').length    * 15 +
+    yogas.filter(o => o.severity === 'MED').length     * 7  +
+    Math.abs(totalDir) * 3);
+
+  // Index spotlight
+  const bnW = yogas.reduce((s,o) => s + (o.indexImpact === 'BANKNIFTY' ? SEV_W[o.severity] : o.indexImpact === 'BOTH' ? SEV_W[o.severity]*0.5 : 0), 0);
+  const nfW = yogas.reduce((s,o) => s + (o.indexImpact === 'NIFTY'    ? SEV_W[o.severity] : o.indexImpact === 'BOTH' ? SEV_W[o.severity]*0.5 : 0), 0);
+  const usW = yogas.reduce((s,o) => s + (o.usImpact === 'HIGH' ? SEV_W[o.severity] : o.usImpact === 'MED' ? SEV_W[o.severity]*0.5 : 0), 0);
+  let indexSpotlight = 'BOTH';
+  if(bnW > nfW * 1.4) indexSpotlight = 'BANKNIFTY';
+  else if(nfW > bnW * 1.4) indexSpotlight = 'NIFTY';
+  const usFlag = usW >= 3;  // US correlation flag
+
+  // Sector aggregation
+  const secVotes = new Map();
+  for(const o of yogas){
+    for(const s of (o.sectors || [])){
+      if(s === 'All') continue;
+      const w = SEV_W[o.severity] * o.dir;
+      secVotes.set(s, (secVotes.get(s) || 0) + w);
+    }
+  }
+  const sectors = Array.from(secVotes.entries())
+    .map(([s, v]) => ({ sector: s, score: v }))
+    .sort((a,b) => Math.abs(b.score) - Math.abs(a.score))
+    .slice(0, 6);
+
+  return {
+    yogas, session, reversals,
+    direction: directionLabel,
+    directionScore: Math.round(totalDir * 10),
+    confidence: Math.round(confidence),
+    indexSpotlight, indexImpacts: { bn: Math.round(bnW), nf: Math.round(nfW), us: Math.round(usW) },
+    usFlag, sectors,
+    jupSpd, satSpd
+  };
+}
+// ═══════════════════════════════════════════════════════════════════
+// ★★★  ASTRO-FINANCE HOLY-GRAIL RULE PACK  (X-folder rule images/md)  ★★★
+//   1. Shar Parivartan declination/latitude table   (CHAPTER 21)
+//   2. Nifty natal chart (27-Nov-1992 11:43 IST Mumbai) + 5-min intraday
+//   3. Bhadra / Vishti-karana rules                  (bhadra.md / Bhadra.png)
+//   4. SBC five bearish signals                       (sbc.md)
+//   5. Bhav-Phal house-strength sutras                (bhavphal.md)
+//   Everything feeds the per-index DAY forecast (reversal window, strong
+//   up/down). Nifty=Sun, BankNifty=Moon (Rule Indices.jpeg #20).
+// ═══════════════════════════════════════════════════════════════════
+const NIFTY_NATAL = { y:1992, mo:11, d:27, istH: 11 + 43/60,
+                      lat:19.0760, lon:72.8777, label:'NIFTY · 27-Nov-1992 · 11:43 IST · Mumbai' };
+const BHADRA_LOKA = {0:'Swarga',1:'Swarga',2:'Swarga',7:'Swarga',
+                     5:'Patala',6:'Patala',8:'Patala',9:'Patala',
+                     3:'Prithvi',4:'Prithvi',10:'Prithvi',11:'Prithvi'};
+const BHADRA_LOKA_POL = {Swarga:+1, Patala:+1, Prithvi:-1};
+const KARANA_MOV = ['Bava','Balava','Kaulava','Taitila','Gara','Vanija','Vishti'];
+const DEBIL_SIGN = {Sun:6, Moon:7, Mars:3, Mercury:11, Jupiter:9, Venus:5, Saturn:0, Rahu:1, Ketu:7};
+const EXALT_SIGN = {Sun:0, Moon:1, Mars:9, Mercury:5, Jupiter:3, Venus:11, Saturn:6};
+const INDEX_RULER = {NIFTY:'Sun', BANKNIFTY:'Moon'};
+const BULL_HOUSES = new Set([1,2,5,9,11]);
+const BEAR_HOUSES = new Set([6,8,12]);
+const PAPA_SET  = new Set(['Sun','Mars','Saturn','Rahu','Ketu']);
+const SHUBH_SET = new Set(['Moon','Mercury','Jupiter','Venus']);
+
+function karanaOf(sunLon, moonLon){
+  const elong = n360(moonLon - sunLon);
+  const k = Math.floor(elong/6);
+  let name;
+  if(k===0) name='Kimstughna';
+  else if(k>=57) name=['Shakuni','Chatushpada','Naga'][k-57];
+  else name=KARANA_MOV[(k-1)%7];
+  return { k, name, isVishti:(k>=1 && k<=56 && (k-1)%7===6), elong };
+}
+
+function computeBhadra(dateStr, rMin, ayMode){
+  const dp = dateStr.split('-').map(Number);
+  let inV=false, start=null, segs=[];
+  for(let m=0; m<=30*60; m+=10){
+    const Jx = JD(dp[0],dp[1],dp[2], m/60);
+    const ayx= getAyanamsa(Jx, ayMode);
+    const sun = n360(geoLon('Sun',Jx)-ayx), moon=n360(geoLon('Moon',Jx)-ayx);
+    const kr = karanaOf(sun, moon);
+    if(kr.isVishti && !inV){ inV=true; start={m, k:kr.k, moon}; }
+    else if(!kr.isVishti && inV){ inV=false; segs.push({startM:start.m, endM:m, k:start.k, moonAtStart:start.moon}); }
+  }
+  if(inV) segs.push({startM:start.m, endM:30*60, k:start.k, moonAtStart:start.moon});
+  const seg = segs.find(s=> s.startM < 24*60 && s.endM > 0) || segs[0];
+  if(!seg) return { active:false, hint:'No Bhadra (Vishti karana) on this date — neutral.' };
+  const dayBhadra = (seg.k % 2 === 0);
+  const typeLabel = dayBhadra ? 'Day Bhadra' : 'Night Bhadra';
+  const startsBeforeSunrise = seg.startM < rMin;
+  const phase = startsBeforeSunrise ? 'night-time' : 'daytime';
+  let timePol;
+  if(dayBhadra && phase==='daytime')       timePol=-1;
+  else if(dayBhadra && phase==='night-time') timePol=+1;
+  else if(!dayBhadra && phase==='daytime')   timePol=+1;
+  else timePol=-1;
+  const moonSign = Math.floor(seg.moonAtStart/30);
+  const loka = BHADRA_LOKA[moonSign];
+  const lokaPol = BHADRA_LOKA_POL[loka];
+  const net = Math.sign(timePol + lokaPol) || timePol;
+  return {
+    active:true, typeLabel, dayBhadra, phase, startsBeforeSunrise,
+    startM:seg.startM, endM:seg.endM, k:seg.k,
+    moonSign, moonSignName:SIGNS[moonSign], loka, lokaPol, timePol, net,
+    windowTxt: `${mtt(((seg.startM%(24*60))+24*60)%(24*60))}->${mtt(seg.endM%(24*60))}`,
+    hint: `${typeLabel} (${phase}) · ${loka} Bhadra -> ${net>0?'POSITIVE (supportive)':net<0?'NEGATIVE (avoid longs / caution)':'mixed'}`
+  };
+}
+
+let _natalCache = {};
+function computeNatal(ayMode){
+  if(_natalCache[ayMode]) return _natalCache[ayMode];
+  const N=NIFTY_NATAL;
+  const sLAT=LAT, sLON=LON;
+  LAT=N.lat; LON=N.lon;
+  const J=JD(N.y,N.mo,N.d,N.istH);
+  const ay=getAyanamsa(J,ayMode);
+  const trop={Sun:geoLon('Sun',J),Moon:geoLon('Moon',J),Mars:geoLon('Mars',J),
+    Mercury:geoLon('Mercury',J),Jupiter:geoLon('Jupiter',J),Venus:geoLon('Venus',J),
+    Saturn:geoLon('Saturn',J),Rahu:rahuLon(J),Uranus:geoLon('Uranus',J),Neptune:geoLon('Neptune',J)};
+  trop.Ketu=n360(trop.Rahu+180);
+  const ascObj=computeAsc(J);
+  const ascSid=n360(ascObj.asc-ay);
+  const ascSignIdx=Math.floor(ascSid/30);
+  const planets=Object.entries(trop).map(([name,tl])=>{
+    const sl=n360(tl-ay); const sg=getSign(sl); const nk=getNak(sl);
+    return {name,lon:sl,s:sg.s,sign:sg.sign,abb:sg.abb,lord:sg.lord,deg:sg.deg,
+      h:houseOf(sl,ascSid), d9Sign:getD9(sl), nak:nk.n,
+      retro:(name==='Rahu'||name==='Ketu')?true:isRetrograde(name,J),
+      abbr:PA[name]||name.slice(0,2)};
+  });
+  LAT=sLAT; LON=sLON;
+  const out={J,ay,ascSid,ascSign:getSign(ascSid),ascSignIdx,planets,label:N.label,
+             dayLord:DAY_LORDS[new Date(N.y,N.mo-1,N.d).getDay()]};
+  _natalCache[ayMode]=out;
+  return out;
+}
+
+function transitOverNatal(transitPlanets, natal){
+  const hits=[]; let score=0;
+  const moonN=natal.planets.find(p=>p.name==='Moon');
+  for(const tp of transitPlanets){
+    if(['Uranus','Neptune'].includes(tp.name)) continue;
+    const hN=houseOf(tp.lon, natal.ascSid);
+    const malefic=PAPA_SET.has(tp.name);
+    let s=0;
+    if(BULL_HOUSES.has(hN)){ s = malefic? -0.6 : +1.0; }
+    else if(BEAR_HOUSES.has(hN)){ s = malefic? -1.0 : +0.4; }
+    else { s = malefic? -0.3 : +0.3; }
+    const wt={Saturn:1.4,Jupiter:1.3,Rahu:1.1,Ketu:1.0,Mars:1.1,Sun:0.8,Venus:0.7,Mercury:0.6,Moon:0.9}[tp.name]||0.6;
+    s*=wt; score+=s;
+    if(Math.abs(s)>=0.8){ hits.push({planet:tp.name, house:hN, s:Math.round(s*100)/100, note:`${tp.name} transiting natal H${hN}`}); }
+    if(tp.name==='Saturn' && moonN){ const ds=((tp.s-moonN.s+12)%12); if(ds===0||ds===1||ds===11){ score-=0.8; hits.push({planet:'Saturn', house:hN, s:-0.8, note:'Sade-Sati pressure on natal Moon'}); } }
+  }
+  hits.sort((a,b)=>Math.abs(b.s)-Math.abs(a.s));
+  return { score:Math.round(score*10)/10, hits:hits.slice(0,6) };
+}
+
+function computeBhavphal(planets, ascSid){
+  const ascSignIdx=Math.floor(n360(ascSid)/30);
+  const combustNames=new Set(combustList(planets).map(c=>c.name));
+  const rahu=planets.find(p=>p.name==='Rahu'), ketu=planets.find(p=>p.name==='Ketu');
+  const byName=n=>planets.find(p=>p.name===n);
+  const KENDRA=new Set([1,4,7,10]), TRIKONA=new Set([1,5,9]), DUSTHANA=new Set([6,8,12]), UPACHAYA=new Set([3,6,10,11]);
+  const houses=[];
+  for(let h=1; h<=12; h++){
+    const cuspSign=(ascSignIdx+h-1)%12;
+    const lordName=SLRD[cuspSign];
+    const lord=byName(lordName);
+    const occupants=planets.filter(p=>p.h===h);
+    let score=0; const factors=[];
+    const add=(d,t)=>{score+=d; factors.push((d>0?'+':'')+d.toFixed(1)+' '+t);};
+    if(lord){
+      const lh=lord.h;
+      if(DUSTHANA.has(lh)) add(-2.0, `lord ${lordName} in dusthana H${lh}`);
+      if(TRIKONA.has(lh)) add(+2.0, `lord in trikona H${lh}`);
+      else if(KENDRA.has(lh)) add(+1.5, `lord in kendra H${lh}`);
+      if(lh===2||lh===11) add(+1.0, `lord in gain/wealth H${lh}`);
+      else if(lh===3) add(+0.5, `lord in H3 (upachaya)`);
+      if(combustNames.has(lordName)) add(-1.5, `lord ${lordName} combust (अस्त)`);
+      if(lord.retro && !['Rahu','Ketu'].includes(lordName)) add(-1.0, `lord ${lordName} retrograde (वक्री)`);
+      for(const nd of [rahu,ketu]){ if(nd){ const sep=Math.abs(((lord.lon-nd.lon+180)%360)-180); if(sep<=5) add(-1.5, `lord within ${sep.toFixed(1)}° of ${nd.name}`); } }
+      if(PAPA_SET.has(lordName)) add(-0.4, `lord naturally malefic`);
+      if(SHUBH_SET.has(lordName)) add(+0.4, `lord naturally benefic`);
+    } else { add(-0.5,'lord not located'); }
+    for(const o of occupants){
+      if(o.name==='Rahu'||o.name==='Ketu'){ add(UPACHAYA.has(h)?+0.3:-1.0, `${o.name} in H${h}`); continue; }
+      if(SHUBH_SET.has(o.name)){ add(combustNames.has(o.name)?+0.2:+0.7, `${o.abbr} (benefic) in H${h}`); }
+      else if(PAPA_SET.has(o.name)){ add(UPACHAYA.has(h)?+0.4:-0.7, `${o.abbr} (malefic) in H${h}`); }
+    }
+    let verdict = score>=2 ? 'STRONG ✓' : score>=0.5 ? 'Shubh +' : score<=-2 ? 'STRONG ✗' : score<=-0.5 ? 'Ashubh −' : 'Mixed ~';
+    houses.push({h, cuspSign, cuspSignName:SIGNS[cuspSign], lord:lordName, lordHouse:lord?lord.h:null,
+                 occupants:occupants.map(o=>o.abbr), score:Math.round(score*10)/10, verdict, factors});
+  }
+  let mkt=0; for(const hh of houses){ if(BULL_HOUSES.has(hh.h)) mkt+=hh.score; else if(BEAR_HOUSES.has(hh.h)) mkt-=hh.score; }
+  return { houses, marketScore:Math.round(mkt*10)/10 };
+}
+
+function computeSBC(planets, aspects, rules, dateStr){
+  const sig=[];
+  const dow=new Date(dateStr).getDay();
+  const vedhaSum=rules.vedha.reduce((s,v)=>s+v.dir,0);
+  sig.push({ n:1, key:'−VE VEDHA', active:vedhaSum<0, dir:-1, w:18,
+    text:'जब ग्रहों की वेध नकारात्मक बनती है तब buying support कमजोर होता है और अचानक profit booking देखने मिलती है।',
+    detail:`Net vedha polarity ${vedhaSum.toFixed(1)} ${vedhaSum<0?'(Shubh-Shubh ⇒ −VE)':'(not −VE)'}` });
+  const t=rules.tithi, ta=rules.tithiAnomaly;
+  let negT=false, why=[];
+  if(t.bias && t.bias.dir<0){negT=true; why.push(`${t.klass} tithi`);}
+  if(t.paksha==='Shukla' && ta.type==='KSHAY'){negT=true; why.push('Tithi Kshay in Shukla');}
+  if(t.paksha==='Krishna' && ta.type==='VRIDDHI'){negT=true; why.push('Tithi Vruddhi in Krishna');}
+  if(t.name==='Trayodashi'){negT=true; why.push('Trayodashi (both paksha bearish)');}
+  if(t.name==='Ekadashi' && dow===5){negT=true; why.push('Ekadashi on Friday (high bearish)');}
+  if(t.name==='Amavasya' && dow===1){negT=true; why.push('Amavasya on Monday (bearish)');}
+  sig.push({ n:2, key:'−VE TITHI', active:negT, dir:-1, w:14,
+    text:'नकारात्मक तिथि market sentiment को कमजोर करती है; traders confidence कम और volatility के साथ downside pressure बढ़ सकता है।',
+    detail:(negT?why.join(' · '):`${t.paksha} ${t.name} — not −VE`) });
+  const mc=rules.combust.find(c=>c.name==='Mercury');
+  sig.push({ n:3, key:'MERCURY COMBUST', active:!!mc, dir:-1, w:14,
+    text:'बुध अस्त → financial decisions, banking sentiment, trading psychology प्रभावित। BankNifty में confusion, false breakout और sharp reversal बढ़ सकते हैं।',
+    detail:(mc?`Mercury combust @ ${mc.sep.toFixed(1)}° of Sun${mc.retro?' (retro)':''}`:'Mercury not combust') });
+  const md=rules.moonDecl;
+  sig.push({ n:4, key:'MOON DECL → NORTH', active:md.movingToward==='NORTH', dir:-1, w:10,
+    text:'Moon declination का extreme/north movement → emotional overreaction, trend exhaustion; highs पर selling pressure की संभावना।',
+    detail:`Moon decl ${md.dec.toFixed(1)}° (${md.hemisphere}), moving ${md.movingToward}${md.extreme?' · EXTREME':''}` });
+  sig.push({ n:5, key:'MOON OPP >4 PLANETS', active:rules.moonOpp>4, dir:-1, w:14,
+    text:'Moon कई ग्रहों के opposition में → market energy unstable; sharp swings, panic moves और bearish momentum के chances बढ़ते हैं।',
+    detail:`Moon opposed by ${rules.moonOpp} planet(s)` });
+  const bearishCount=sig.filter(s=>s.active).length;
+  const netDir=sig.reduce((a,s)=>a+(s.active?s.dir*s.w:0),0);
+  return { sig, bearishCount, netDir };
+}
+
+function declinationShifts(J, planets){
+  const bodies=['Moon','Mercury','Venus','Mars','Jupiter','Saturn','Sun'];
+  const combustNames=new Set(combustList(planets||[]).map(c=>c.name));
+  const out=[];
+  for(const b of bodies){
+    let prev=null, prevSlope=null;
+    for(let off=-7; off<=18; off++){
+      const dec=declination(b, J+off);
+      if(prev!==null){
+        const slope=dec-prev;
+        if(prevSlope!==null && Math.sign(slope)!==Math.sign(prevSlope) && prevSlope!==0){
+          const turnsNorth = slope>0;
+          const pObj=(planets||[]).find(p=>p.name===b);
+          const retro=pObj?pObj.retro:false;
+          const combust=combustNames.has(b);
+          const debil=pObj? (pObj.s===DEBIL_SIGN[b]) : false;
+          const reverse = retro||combust||debil;
+          let dir = turnsNorth ? -1 : +1;
+          if(reverse) dir = -dir;
+          out.push({ body:b, daysFromNow:off-1, decl:Math.round(prev*10)/10,
+                     change: turnsNorth?'→ NORTH':'→ SOUTH', baseBias:turnsNorth?'Bearish':'Bullish',
+                     reverse, retro, combust, debil, dir,
+                     note: (off-1>=-1&&off-1<=1)?'⚡ ACTIVE NOW — overrides aspects/vedha':
+                           (off-1>1?'upcoming':'recent') });
+        }
+        prevSlope=slope;
+      }
+      prev=dec;
+    }
+  }
+  out.sort((a,b)=>Math.abs(a.daysFromNow)-Math.abs(b.daysFromNow));
+  return out;
+}
+
+function buildSharTable(fromStr, toStr, ayMode){
+  const bodies=['Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn','Uranus','Neptune','Pluto'];
+  const d0=new Date(fromStr+'T00:00:00'), d1=new Date(toStr+'T00:00:00');
+  const rows=[]; let cur=new Date(d0); let n=0;
+  const prevLat={};
+  while(cur<=d1 && n<92){
+    const y=cur.getFullYear(), mo=cur.getMonth()+1, dy=cur.getDate();
+    const J=JD(y,mo,dy, 9.5);
+    const cells=bodies.map(b=>{
+      let lat=0, dec=0; try{lat=geoLat(b,J);}catch(e){} try{dec=declination(b,J);}catch(e){}
+      const latDir=lat>=0?'N':'S', decDir=dec>=0?'N':'S';
+      const latFlip = (prevLat[b]!==undefined) && Math.sign(prevLat[b])!==Math.sign(lat) && prevLat[b]!==0;
+      prevLat[b]=lat;
+      return { b, lat:Math.round(lat*100)/100, latDir, dec:Math.round(dec*100)/100, decDir, latFlip };
+    });
+    rows.push({ date:`${y}-${String(mo).padStart(2,'0')}-${String(dy).padStart(2,'0')}`,
+                dow:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][cur.getDay()], cells });
+    cur.setDate(cur.getDate()+1); n++;
+  }
+  return { bodies, rows };
+}
+
+function build5minSlots(dateStr, ayMode){
+  const dp=dateStr.split('-').map(Number);
+  const slots=[]; let prevLag=null, prevNak=null;
+  for(let min=9*60+15; min<=15*60+30; min+=5){
+    const J=JD(dp[0],dp[1],dp[2], min/60);
+    const ay=getAyanamsa(J,ayMode);
+    const ascSid=n360(computeAsc(J).asc-ay);
+    const lag=getSign(ascSid);
+    const ml=n360(geoLon('Moon',J)-ay);
+    const mnk=getNak(ml), msb=getSub(ml);
+    const lagChange = prevLag!==null && lag.s!==prevLag;
+    const nakChange = prevNak!==null && mnk.n!==prevNak;
+    slots.push({ min, time:mtt(min), lagSign:lag.sign, lagS:lag.s, lagDeg:lag.deg,
+                 moonSign:getSign(ml).sign, moonNak:mnk.n, moonSub:msb.sub, moonPada:mnk.pada,
+                 lagChange, nakChange });
+    prevLag=lag.s; prevNak=mnk.n;
+  }
+  return slots;
+}
+
+function computeMomentChart(dateStr, timeIST, ayMode){
+  const dp=dateStr.split('-').map(Number);
+  const J=JD(dp[0],dp[1],dp[2], timeIST);
+  const ay=getAyanamsa(J,ayMode);
+  const trop={Sun:geoLon('Sun',J),Moon:geoLon('Moon',J),Mars:geoLon('Mars',J),
+    Mercury:geoLon('Mercury',J),Jupiter:geoLon('Jupiter',J),Venus:geoLon('Venus',J),
+    Saturn:geoLon('Saturn',J),Rahu:rahuLon(J),Uranus:geoLon('Uranus',J),Neptune:geoLon('Neptune',J)};
+  trop.Ketu=n360(trop.Rahu+180);
+  const ascSid=n360(computeAsc(J).asc-ay);
+  const lagS=Math.floor(ascSid/30);
+  const planets=Object.entries(trop).map(([name,tl])=>{
+    const sl=n360(tl-ay); const sg=getSign(sl); const nk=getNak(sl);
+    return {name,lon:sl,s:sg.s,sign:sg.sign,abbr:PA[name]||name.slice(0,2),lord:sg.lord,deg:sg.deg,
+      h:houseOf(sl,ascSid), d9Sign:getD9(sl), nak:nk.n,
+      retro:(name==='Rahu'||name==='Ketu')?true:isRetrograde(name,J)};
+  });
+  return {J,ay,ascSid,lagS,ascSign:getSign(ascSid),planets};
+}
+
+function astroMakeChart(pArr, lagS, title, sub){
+  const HM={1:[1,0],2:[2,0],3:[3,0],4:[3,1],5:[3,2],6:[3,3],7:[2,3],8:[1,3],9:[0,3],10:[0,2],11:[0,1],12:[0,0]};
+  const CS=108, sz=CS*4;
+  let s=`<svg width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}" xmlns="http://www.w3.org/2000/svg">`;
+  s+=`<rect width="${sz}" height="${sz}" fill="#010c12" rx="6" stroke="#1c6080" stroke-width="2"/>`;
+  for(let h=1;h<=12;h++){
+    const[r,c]=HM[h];const x=c*CS,y=r*CS;
+    const sIdx=((lagS+h-1)%12+12)%12;
+    const pH=pArr.filter(p=>(p.h||p.house)===h);
+    const ang=[1,4,7,10].includes(h);
+    s+=`<rect x="${x+.5}" y="${y+.5}" width="${CS-1}" height="${CS-1}" fill="${ang?'#022838':'#011a26'}" stroke="#1c5070" stroke-width="1"/>`;
+    s+=`<text x="${x+6}" y="${y+17}" fill="${ang?'#5ad0e8':'#3a9ab8'}" font-size="12" font-weight="bold" font-family="Courier New">${h}</text>`;
+    s+=`<text x="${x+CS/2+4}" y="${y+17}" text-anchor="middle" fill="${ang?'#ffc107':'#cc8800'}" font-size="12" font-weight="bold" font-family="Courier New">${SABB[sIdx]}</text>`;
+    pH.forEach((p,i)=>{const col2=i%2,row2=Math.floor(i/2);
+      s+=`<text x="${x+8+col2*(CS/2-2)}" y="${y+38+row2*18}" fill="${PC[p.name]||'#7ecad8'}" font-size="13" font-weight="bold" font-family="Courier New">${p.abbr}${Math.floor(p.deg||0).toString().padStart(2,'0')}${p.retro?'<tspan fill="#ff5566" font-size="10">℞</tspan>':''}</text>`;});
+  }
+  s+=`<rect x="${CS}" y="${CS}" width="${2*CS}" height="${2*CS}" fill="#010a10" stroke="#1c5070" stroke-width="1"/>`;
+  s+=`<text x="${2*CS}" y="${1.8*CS}" text-anchor="middle" fill="#00e8ff" font-size="26" font-weight="bold" font-family="Courier New">${title}</text>`;
+  s+=`<text x="${2*CS}" y="${2.12*CS}" text-anchor="middle" fill="#5ad0e8" font-size="12" font-family="Courier New">${SABB[lagS]} Lagna</text>`;
+  if(sub) s+=`<text x="${2*CS}" y="${2.34*CS}" text-anchor="middle" fill="#3a9ab8" font-size="10" font-family="Courier New">${sub}</text>`;
+  return s+'</svg>';
+}
+
+function planetCondition(name, planets, aspects){
+  const p=planets.find(x=>x.name===name); if(!p) return {score:0, notes:['n/a']};
+  let s=0; const notes=[];
+  if([6,8,12].includes(p.h)){ s-=1.5; notes.push(`in dusthana H${p.h}`); }
+  if([1,4,7,10,5,9].includes(p.h)){ s+=1.0; notes.push(`in kendra/trikona H${p.h}`); }
+  if(p.s===EXALT_SIGN[name]){ s+=1.5; notes.push('exalted'); }
+  if(p.s===DEBIL_SIGN[name]){ s-=1.5; notes.push('debilitated'); }
+  if(p.retro && !['Rahu','Ketu'].includes(name)){ s-=0.6; notes.push('retro'); }
+  const cmb=combustList(planets).find(c=>c.name===name); if(cmb){ s-=1.0; notes.push('combust'); }
+  for(const a of aspects){ if(a.p1===name||a.p2===name){ const o=a.p1===name?a.p2:a.p1;
+      if(['Saturn','Mars','Rahu','Ketu'].includes(o)){ s-=0.5; notes.push(`afflicted by ${o}`);}
+      if(['Jupiter','Venus'].includes(o)){ s+=0.5; notes.push(`blessed by ${o}`);} } }
+  return { score:Math.round(s*10)/10, notes };
+}
+
+function buildIndexForecast(D){
+  const {planets, aspects, rules, forecast, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, combinedScore}=D;
+  const clamp=(v)=>Math.max(-100,Math.min(100,Math.round(v)));
+  const declActive=declShifts.filter(d=>Math.abs(d.daysFromNow)<=1);
+  const declNet=declActive.reduce((a,d)=>a+d.dir,0);
+  const sharImminent=(D.sharCrossings||[]).some(c=>Math.abs(c.daysFromNow)<=2);
+  const fc = forecast? forecast.directionScore : 0;
+  const bh = bhadra.active? bhadra.net*18 : 0;
+  const sb = sbc.netDir;
+  const dn = declNet*22;
+  const bvD = Math.max(-30,Math.min(30, bhavDay.marketScore*3));
+  const astroPack = clamp(fc*1.0 + bh + sb + dn + bvD);
+  const baseDay = clamp(combinedScore*0.55 + astroPack*0.55);
+  const t=rules.tithi;
+  const bigMoon = (t.name==='Purnima'||t.name==='Amavasya');
+  const extremeYoga=((forecast&&forecast.yogas)||[]).some(y=>y.severity==='EXTREME');
+  function pack(name, score, drivers, ruler){
+    score=clamp(score);
+    const dir=score>15?'BULLISH':score<-15?'BEARISH':'NEUTRAL';
+    const strong = Math.abs(score)>=50 || declActive.length>0 || sharImminent || bigMoon || extremeYoga;
+    return { name, score, dir, strong, ruler, drivers,
+             reversals: forecast? forecast.reversals : [],
+             move: strong?(dir==='BULLISH'?'STRONG UP likely':dir==='BEARISH'?'STRONG DOWN likely':'BIG MOVE either side'):'normal range' };
+  }
+  const sunC=planetCondition('Sun',planets,aspects);
+  const nfScore = baseDay + sunC.score*4 + (natalTransit?natalTransit.score*3:0) + Math.max(-15,Math.min(15,bhavNatal.marketScore*1.5));
+  const nfDrivers=[`base ${baseDay}`,`Sun(ruler) ${sunC.score} [${sunC.notes.join(', ')}]`,
+                   natalTransit?`natal-transit ${natalTransit.score}`:'', `natal-bhav ${bhavNatal.marketScore}`].filter(Boolean);
+  const moonC=planetCondition('Moon',planets,aspects);
+  const mercCombust=rules.combust.some(c=>c.name==='Mercury');
+  const bnScore = baseDay + moonC.score*4 + (mercCombust?-15:0) + (rules.moonDecl.movingToward==='NORTH'?-8:+6) + (rules.moonOpp>4?-10:0);
+  const bnDrivers=[`base ${baseDay}`,`Moon(ruler) ${moonC.score} [${moonC.notes.join(', ')}]`,
+                   mercCombust?'Mercury combust −15 (confusion/false-breakout)':'', `Moon decl ${rules.moonDecl.movingToward}`].filter(Boolean);
+  const usBase = clamp(baseDay*0.65);
+  const usShock=(forecast&&forecast.usFlag);
+  const usDrivers=[`base×0.65 ${usBase}`, usShock?'US-shock yoga flag ⚠':'no US-shock flag','follows overnight US session'].filter(Boolean);
+  return {
+    astroPack, baseDay, bigMoon, sharImminent, declActive,
+    indices:{
+      NIFTY: pack('NIFTY', nfScore, nfDrivers, 'Sun'),
+      BANKNIFTY: pack('BANKNIFTY', bnScore, bnDrivers, 'Moon'),
+      NASDAQ: pack('NASDAQ', usBase, usDrivers, '—'),
+      DOW: pack('DOW', usBase, usDrivers, '—'),
+      SPX: pack('SPX', usBase, usDrivers, '—')
+    }
+  };
+}
+
 function computeAll(dateStr,timeIST,ayMode){
   const dp=dateStr.split('-').map(Number);
   const J=JD(dp[0],dp[1],dp[2],timeIST);
@@ -1862,23 +3026,44 @@ function computeAll(dateStr,timeIST,ayMode){
   // Module 9: Forward aspect-timing scan (p.283 lead-time rule)
   const upcomingAspects = findUpcomingAspects(J, 15);
 
+  // ── RULES MODULE (rules.md + astrorules.md) ──────────────────
+  const rules = computeRules(planets, aspects, J);
+  const rulesScore = rules ? rules.composite.score : 0;
+
+  // ── FORECAST ENGINE (pattern-match → specific outcomes) ──────
+  const dummyD = { slots, dateStr, ascSign };  // partial D for forecast helpers
+  const forecast = rules ? buildForecast(planets, aspects, rules, dummyD, J) : null;
+  const forecastDirScore = forecast ? forecast.directionScore : 0;
+
+  // ── ASTRO-FINANCE HOLY-GRAIL RULE PACK (X-folder rules) ──────────
+  const natal       = computeNatal(ayMode);
+  const bhadra      = computeBhadra(dateStr, rMin, ayMode);
+  const sbc         = rules ? computeSBC(planets, aspects, rules, dateStr) : {sig:[],bearishCount:0,netDir:0};
+  const declShifts  = declinationShifts(J, planets);
+  const bhavDay     = computeBhavphal(planets, ascSid);
+  const bhavNatal   = computeBhavphal(natal.planets, natal.ascSid);
+  const natalTransit= transitOverNatal(planets, natal);
+  const slots5      = build5minSlots(dateStr, ayMode);
+
   // Combined "v4.2" score — book-grounded weights:
-  //   30% KP-bias (original)  +  20% aspect-grid (book pp.273-286)
-  //   + 20% Trio (pp.269-271) + 20% Lagna teji-mandi (pp.260-265)
-  //   + 10% kranti-samya (p.329)
+  //   25% KP-bias  + 18% aspect-grid + 18% Trio + 18% Lagna
+  //   + 8% kranti-samya + 13% rules-module (rules.md / astrorules.md)
   const trioScore = trio ? trio.trioScore : 0;
   const lagnaScore = lagnaTM ? lagnaTM.score : 0;
   const krantiScore = krantiSamya.length > 0
     ? Math.round(krantiSamya.reduce((s,k)=>s+k.weight*100, 0))
     : 0;
   const combinedScore = Math.round(
-      bias.score   * 0.30
-    + aspSc.score  * 0.20
-    + trioScore    * 0.20
-    + lagnaScore   * 0.20
-    + krantiScore  * 0.10
+      bias.score          * 0.22
+    + aspSc.score         * 0.16
+    + trioScore           * 0.16
+    + lagnaScore          * 0.16
+    + krantiScore         * 0.07
+    + rulesScore          * 0.11
+    + forecastDirScore    * 0.12
   );
   const combinedLabel = combinedScore>15?'BULLISH':combinedScore<-15?'BEARISH':'NEUTRAL';
+  const astroDF = buildIndexForecast({planets, aspects, rules, forecast, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, combinedScore, sharCrossings});
 
   return{J,ay,ayMode,ascSid,ascSign,ascSub,ascNak,mcSid,planets,dayLord,moon,rp,
     rMin,sMin,hlMin,phpHours,slots,bias,dateStr,timeIST,
@@ -1887,7 +3072,12 @@ function computeAll(dateStr,timeIST,ayMode){
     aspects, aspSc, sankr, khadi, vargesha, sectorRank, trio,
     lagnaTM, sharNow, sharCrossings, krantiSamya, upcomingAspects,
     krantiScore,
-    combinedScore, combinedLabel};
+    // rules module
+    rules, rulesScore,
+    // forecast engine
+    forecast, forecastDirScore,
+    combinedScore, combinedLabel,
+    natal, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, slots5, astroDF};
 }
 
 function mtt(m){let h=Math.floor(m/60),mn=Math.floor(m%60);return`${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}`;}
@@ -1949,9 +3139,18 @@ function nowTimeIST(){
 let S={date:todayStr(),time:nowTimeIST(),
        niftyOpen:'24168',niftyPC:'24176',
        bnOpen:'56083',bnPC:'55310',
-       tab:'overview',ayMode:'lahiri',gannAnchor:'open'};
+       nasdaqOpen:'21850',nasdaqPC:'21900',
+       dowOpen:'44200',dowPC:'44150',
+       spxOpen:'6320',spxPC:'6310',
+       tab:'overview',ayMode:'lahiri',gannAnchor:'open',
+       spFrom:'',spTo:'',time5:''};
 let DATA=null;
-let PS={state:'idle',src:'',ts:'',niftyOpen:null,bnOpen:null,niftyPrev:null,bnPrev:null};
+let PS={state:'idle',src:'',ts:'',
+        niftyOpen:null,bnOpen:null,niftyPrev:null,bnPrev:null,
+        nasdaqOpen:null,nasdaqPrev:null,
+        dowOpen:null,dowPrev:null,
+        spxOpen:null,spxPrev:null,
+        usState:'idle',usSrc:'',usTs:''};
 let autoTimer=null;
 window.gs=u=>{S={...S,...u};render();};
 
@@ -1966,6 +3165,12 @@ function render(){
   document.getElementById('iNC')&&(document.getElementById('iNC').value=S.niftyPC);
   document.getElementById('iBO')&&(document.getElementById('iBO').value=S.bnOpen);
   document.getElementById('iBC')&&(document.getElementById('iBC').value=S.bnPC);
+  document.getElementById('iNQO')&&(document.getElementById('iNQO').value=S.nasdaqOpen);
+  document.getElementById('iNQC')&&(document.getElementById('iNQC').value=S.nasdaqPC);
+  document.getElementById('iDJO')&&(document.getElementById('iDJO').value=S.dowOpen);
+  document.getElementById('iDJC')&&(document.getElementById('iDJC').value=S.dowPC);
+  document.getElementById('iSPO')&&(document.getElementById('iSPO').value=S.spxOpen);
+  document.getElementById('iSPC')&&(document.getElementById('iSPC').value=S.spxPC);
   rNav();rMain();rEvents();
 }
 
@@ -2014,6 +3219,12 @@ function rHdr(){
       <div class="cg"><span class="cl">NIFTY PC</span><input type="text" id="iNC" value="${S.niftyPC}" class="ci w80"></div>
       <div class="cg"><span class="cl">BANKN OPEN</span><input type="text" id="iBO" value="${S.bnOpen}" class="ci w80"></div>
       <div class="cg"><span class="cl">BANKN PC</span><input type="text" id="iBC" value="${S.bnPC}" class="ci w80"></div>
+      <div class="cg"><span class="cl">NASDAQ OPEN</span><input type="text" id="iNQO" value="${S.nasdaqOpen}" class="ci w80"></div>
+      <div class="cg"><span class="cl">NASDAQ PC</span><input type="text" id="iNQC" value="${S.nasdaqPC}" class="ci w80"></div>
+      <div class="cg"><span class="cl">DOW OPEN</span><input type="text" id="iDJO" value="${S.dowOpen}" class="ci w80"></div>
+      <div class="cg"><span class="cl">DOW PC</span><input type="text" id="iDJC" value="${S.dowPC}" class="ci w80"></div>
+      <div class="cg"><span class="cl">SPX OPEN</span><input type="text" id="iSPO" value="${S.spxOpen}" class="ci w80"></div>
+      <div class="cg"><span class="cl">SPX PC</span><input type="text" id="iSPC" value="${S.spxPC}" class="ci w80"></div>
     </div>
   </div>
   <div class="hdr-r2">
@@ -2037,12 +3248,12 @@ function rHdr(){
 // NAV
 // ═══════════════════════════════════════════════════════════════════
 function rNav(){
-  const tabs=[['overview','▦ Overview'],['vr','★ Vyapaar Ratna'],['kp','⊕ KP Planets'],['charts','◈ D1·D9'],['sbc','⬡ SBC Grid'],['timing','⏱ 15-min Timing'],['gann','⌇ Gann SQ9']];
+  const tabs=[['overview','▦ Overview'],['dayfc','☉ Day Forecast'],['shar','⟐ Shar Parivartan'],['kundali','◇ Natal·Intraday'],['bhav','⌂ Bhav Phal'],['vr','★ Vyapaar Ratna'],['rules','⚖ Astro Rules'],['kp','⊕ KP Planets'],['charts','◈ D1·D9'],['sbc','⬡ SBC Grid'],['timing','⏱ 15-min Timing'],['gann','⌇ Gann SQ9']];
   document.getElementById('NAV').innerHTML=tabs.map(([k,v])=>`<button class="nb${S.tab===k?' on':''}" onclick="gs({tab:'${k}'})">${v}</button>`).join('');
 }
 
 function rMain(){
-  const fns={overview:tOverview,vr:tVR,kp:tKP,charts:tCharts,sbc:tSBC,timing:tTiming,gann:tGann};
+  const fns={overview:tOverview,dayfc:tDayForecast,shar:tSharParivartan,kundali:tKundali,bhav:tBhavphal,vr:tVR,rules:tRules,kp:tKP,charts:tCharts,sbc:tSBC,timing:tTiming,gann:tGann};
   document.getElementById('MAIN').innerHTML=(fns[S.tab]||tOverview)();
 }
 
@@ -2087,7 +3298,7 @@ function tOverview(){
         </div>`).join('')}
       </div>
       <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--bd);font-size:10px;color:var(--tx2)">
-        ↳ Lagna verdict: ${D.lagnaTM?`<strong style="color:${D.lagnaTM.verdict==='BUY'?'var(--bull)':D.lagnaTM.verdict==='SELL'||D.lagnaTM.verdict==='AVOID'?'var(--bear)':'var(--neut)'}">${D.lagnaTM.verdict} ${D.lagnaTM.score>0?'+':''}${D.lagnaTM.score}</strong>`:'—'} · Sankranti: <strong style="color:var(--acc)">${D.sankr.sign}</strong> ${D.sankr.peak?'<span style="color:var(--bull)">(PEAK)</span>':''}${D.trio?` · ★ Trio: <strong style="color:${D.trio.trioBias==='BULL'?'var(--bull)':D.trio.trioBias==='BEAR'?'var(--bear)':'var(--neut)'}">${D.trio.trioBias} ${D.trio.trioScore>0?'+':''}${D.trio.trioScore}</strong> · Basis: <strong style="color:${D.trio.basisSign>0?'var(--bull)':D.trio.basisSign<0?'var(--bear)':'var(--neut)'}">${D.trio.basisRegime.replace(/_/g,' ')}</strong>`:''} · Tap <strong>★ Vyapaar Ratna</strong> tab.
+        ↳ Lagna verdict: ${D.lagnaTM?`<strong style="color:${D.lagnaTM.verdict==='BUY'?'var(--bull)':D.lagnaTM.verdict==='SELL'||D.lagnaTM.verdict==='AVOID'?'var(--bear)':'var(--neut)'}">${D.lagnaTM.verdict} ${D.lagnaTM.score>0?'+':''}${D.lagnaTM.score}</strong>`:'—'} · Sankranti: <strong style="color:var(--acc)">${D.sankr.sign}</strong> ${D.sankr.peak?'<span style="color:var(--bull)">(PEAK)</span>':''}${D.trio?` · ★ Trio: <strong style="color:${D.trio.trioBias==='BULL'?'var(--bull)':D.trio.trioBias==='BEAR'?'var(--bear)':'var(--neut)'}">${D.trio.trioBias} ${D.trio.trioScore>0?'+':''}${D.trio.trioScore}</strong>`:''}${D.forecast?` · ⚖ Forecast: <strong style="color:${D.forecast.direction==='BULLISH'?'var(--bull)':D.forecast.direction==='BEARISH'?'var(--bear)':'var(--neut)'}">${D.forecast.session.type} · ${D.forecast.direction} ${D.forecast.directionScore>0?'+':''}${D.forecast.directionScore}</strong> · Confidence <strong style="color:var(--acc)">${D.forecast.confidence}%</strong> · Spot: <strong style="color:#4DB8FF">${D.forecast.indexSpotlight}</strong>${D.forecast.usFlag?' <span style="color:#4caf50">US★</span>':''} · ${D.forecast.yogas.length} yogas`:''} · Tap <strong>⚖ Astro Rules</strong>.
       </div>
     </div>
   </div>
@@ -2350,10 +3561,44 @@ function tSBC(){
   const D=DATA;
   const activeNaks=new Set(D.planets.map(p=>getNak(p.lon).idx));
   const VEDHA={0:13,1:14,2:15,3:16,4:17,5:18,6:19,7:20,8:21,9:22,10:23,11:24,12:25,13:0,14:1,15:2,16:3,17:4,18:5,19:6,20:7,21:8,22:9,23:10,24:11,25:12};
-  const vedhaSet=new Set([...activeNaks].map(n=>VEDHA[n]).filter(n=>n!==undefined));
+
+  // Build per-nakshatra polarity map. For each active nak, sum the polarity
+  // contribution from each vedha pair it participates in using rules.md logic:
+  //   Shubh-Shubh = -ve (resistance/profit-booking)
+  //   Paap-Paap   = +ve (short-cover/spike)
+  //   Mixed       = mild (sign of the heavier side)
+  const SHUBH = new Set(['Moon','Mercury','Jupiter','Venus']);
+  const PAPA  = new Set(['Sun','Mars','Saturn','Rahu','Ketu']);
+  // map: nakIdx → list of {with: otherNakIdx, plnHere: [], plnThere: [], dir, label}
+  const nakVedha = new Map();
+  for(const ni of activeNaks){
+    const vi=VEDHA[ni];
+    if(vi===undefined || !activeNaks.has(vi)) continue;
+    const here  = D.planets.filter(p=>getNak(p.lon).idx===ni).map(p=>p.name);
+    const there = D.planets.filter(p=>getNak(p.lon).idx===vi).map(p=>p.name);
+    // Determine class for the pair (worst-of for visualization)
+    let dirSum = 0, classes = [];
+    for(const p1 of here) for(const p2 of there){
+      const s1=SHUBH.has(p1), s2=SHUBH.has(p2);
+      const m1=PAPA.has(p1),  m2=PAPA.has(p2);
+      if(s1&&s2)      { dirSum -= 1.0; classes.push('Shubh-Shubh ▼'); }
+      else if(m1&&m2) { dirSum += 1.0; classes.push('Paap-Paap ▲'); }
+      else if(s1||s2) { dirSum -= 0.5; classes.push('Mixed-Shubh ▽'); }
+      else            { dirSum += 0.5; classes.push('Mixed-Paap △'); }
+    }
+    if(!nakVedha.has(ni)) nakVedha.set(ni, []);
+    nakVedha.get(ni).push({ with:vi, plnHere:here, plnThere:there, dir:dirSum, classes });
+  }
+  // For grid coloring, decide each nak's net polarity color
+  const nakPol = new Map();   // nakIdx → +1 / -1 / 0
+  for(const [ni, ents] of nakVedha){
+    const s = ents.reduce((a,e)=>a+e.dir, 0);
+    nakPol.set(ni, Math.sign(s));
+  }
+
   const SBC_POS=[[0,1,0],[0,2,1],[0,3,2],[0,4,3],[0,5,4],[0,6,5],[0,7,6],[1,8,7],[2,8,8],[3,8,9],[4,8,10],[5,8,11],[6,8,12],[7,8,13],[8,7,14],[8,6,15],[8,5,16],[8,4,17],[8,3,18],[8,2,19],[8,1,20],[7,0,21],[6,0,22],[5,0,23],[4,0,24],[3,0,25],[2,0,26],[1,0,-1]];
   const INNER=[[2,3,'Cancer'],[2,4,'Gemini'],[2,5,'Taurus'],[3,2,'Leo'],[3,6,'Aries'],[4,2,'Virgo'],[4,6,'Pisces'],[5,2,'Libra'],[5,6,'Aquarius'],[6,3,'Scorpio'],[6,4,'Sagittarius'],[6,5,'Capricorn']];
-  const CS=85,SZ=9*CS;   // was 62 — 37% bigger
+  const CS=85,SZ=9*CS;
 
   let svg=`<svg width="${SZ}" height="${SZ}" xmlns="http://www.w3.org/2000/svg">`;
   svg+=`<rect width="${SZ}" height="${SZ}" fill="#010b0f" rx="4" stroke="#1c6080" stroke-width="2"/>`;
@@ -2361,7 +3606,6 @@ function tSBC(){
     const corner=(r===0||r===8)&&(c===0||c===8);
     svg+=`<rect x="${c*CS}" y="${r*CS}" width="${CS}" height="${CS}" fill="${corner?'#01080c':'#011a26'}" stroke="#1c5070" stroke-width=".8"/>`;
   }
-  // Inner zodiac signs — brightened from dim teal to readable amber
   for(const[r,c,sn] of INNER){
     svg+=`<rect x="${c*CS+.5}" y="${r*CS+.5}" width="${CS-1}" height="${CS-1}" fill="#02202e" stroke="#1c5070" stroke-width="1"/>`;
     svg+=`<text x="${c*CS+CS/2}" y="${r*CS+CS/2+5}" text-anchor="middle" fill="#ffc107" font-size="15" font-weight="bold" font-family="Courier New">${sn.slice(0,3)}</text>`;
@@ -2374,52 +3618,199 @@ function tSBC(){
   for(const[r,c,ni] of SBC_POS){
     const nak=ni>=0?NAKS[ni]:null;
     const isAct=ni>=0&&activeNaks.has(ni);
-    const isVedha=ni>=0&&vedhaSet.has(ni);
+    const isVedha=ni>=0&&nakVedha.has(ni);
+    const pol = nakPol.get(ni) || 0;
     const ps=ni>=0?D.planets.filter(p=>getNak(p.lon).idx===ni):[];
-    svg+=`<rect x="${c*CS+.5}" y="${r*CS+.5}" width="${CS-1}" height="${CS-1}" fill="${isAct?'#003020':isVedha?'#200010':'#011a28'}" stroke="${isAct?'#00b84a':isVedha?'#cc1030':'#1c5070'}" stroke-width="${isAct||isVedha?1.5:.8}"/>`;
+
+    // Grid cell color now reflects polarity instead of always-red vedha
+    let fillCol = '#011a28', strokeCol = '#1c5070', strokeW = 0.8;
+    if(isAct && !isVedha){          // active but no vedha — neutral cyan-green
+      fillCol = '#003020'; strokeCol = '#00b84a'; strokeW = 1.5;
+    } else if(isVedha && pol > 0){  // +ve vedha (paap-paap)
+      fillCol = '#002a14'; strokeCol = '#00b84a'; strokeW = 2;
+    } else if(isVedha && pol < 0){  // -ve vedha (shubh-shubh)
+      fillCol = '#280008'; strokeCol = '#cc1030'; strokeW = 2;
+    } else if(isVedha){             // mixed
+      fillCol = '#2a2000'; strokeCol = '#cc8800'; strokeW = 1.5;
+    }
+    svg+=`<rect x="${c*CS+.5}" y="${r*CS+.5}" width="${CS-1}" height="${CS-1}" fill="${fillCol}" stroke="${strokeCol}" stroke-width="${strokeW}"/>`;
+
     if(nak){
-      // Bright readable nakshatra name (was dim #1e5070)
-      svg+=`<text x="${c*CS+CS/2}" y="${r*CS+18}" text-anchor="middle" fill="${isAct?'#00f07a':isVedha?'#ff3355':'#6ac8e0'}" font-size="12" font-weight="bold" font-family="Courier New">${nak.n.slice(0,10)}</text>`;
-      // Nakshatra lord in lord-color, also bright
+      const txtCol = isVedha && pol>0 ? '#00f07a'
+                   : isVedha && pol<0 ? '#ff3355'
+                   : isVedha          ? '#ffc107'
+                   : isAct            ? '#00f07a'
+                   : '#6ac8e0';
+      svg+=`<text x="${c*CS+CS/2}" y="${r*CS+18}" text-anchor="middle" fill="${txtCol}" font-size="12" font-weight="bold" font-family="Courier New">${nak.n.slice(0,10)}</text>`;
       svg+=`<text x="${c*CS+CS/2}" y="${r*CS+33}" text-anchor="middle" fill="${PC[nak.l]||'#7ecad8'}" font-size="12" font-weight="bold" font-family="Courier New">${nak.l.slice(0,3)}</text>`;
+      // Tiny +/- badge in corner if vedha
+      if(isVedha){
+        const badge = pol>0 ? '+VE' : pol<0 ? '-VE' : '±';
+        const badgeCol = pol>0 ? '#00f07a' : pol<0 ? '#ff3355' : '#ffc107';
+        svg+=`<text x="${c*CS+CS-6}" y="${r*CS+10}" text-anchor="end" fill="${badgeCol}" font-size="9" font-weight="bold" font-family="Courier New">${badge}</text>`;
+      }
     }else{
       svg+=`<text x="${c*CS+CS/2}" y="${r*CS+CS/2}" text-anchor="middle" fill="#5ad0e8" font-size="11" font-family="Courier New">Abhijit</text>`;
     }
     ps.forEach((p,i)=>{
-      svg+=`<text x="${c*CS+CS/2}" y="${r*CS+54+i*15}" text-anchor="middle" fill="${PC[p.name]}" font-size="15" font-weight="bold" font-family="Courier New">${p.abbr}</text>`;
+      // Color the planet's marker by Shubh/Paap class (subtle hint)
+      const planetCol = PC[p.name];
+      svg+=`<text x="${c*CS+CS/2}" y="${r*CS+54+i*15}" text-anchor="middle" fill="${planetCol}" font-size="15" font-weight="bold" font-family="Courier New">${p.abbr}</text>`;
     });
   }
   svg+=`</svg>`;
 
-  const vedhaList=[];
-  for(const ni of activeNaks){const vi=VEDHA[ni];if(vi!==undefined&&activeNaks.has(vi))vedhaList.push(`${NAKS[ni].n} ↔ ${NAKS[vi].n}`);}
+  // Build pair-level vedha list with explicit polarity per pair
+  const vedhaPairs = [];
+  const seen = new Set();
+  for(const [ni, ents] of nakVedha){
+    for(const e of ents){
+      const key = Math.min(ni,e.with) + '-' + Math.max(ni,e.with);
+      if(seen.has(key)) continue;
+      seen.add(key);
+      for(let i=0;i<e.plnHere.length;i++){
+        for(let j=0;j<e.plnThere.length;j++){
+          const p1=e.plnHere[i], p2=e.plnThere[j];
+          const s1=SHUBH.has(p1), s2=SHUBH.has(p2);
+          const m1=PAPA.has(p1),  m2=PAPA.has(p2);
+          let dir, klass, hint;
+          if(s1&&s2)      { dir=-1; klass='SHUBH ↔ SHUBH'; hint='Resistance to upside · profit-booking · supply at highs'; }
+          else if(m1&&m2) { dir=+1; klass='PAAP ↔ PAAP';   hint='Short-covering · sudden uptick · breakout-prone'; }
+          else if(s1||s2) { dir=-0.5; klass='MIXED (Shubh-side)'; hint='Mild negative · soft resistance'; }
+          else            { dir=+0.5; klass='MIXED (Paap-side)';  hint='Mild positive · soft demand'; }
+          vedhaPairs.push({nak1:NAKS[ni].n, nak2:NAKS[e.with].n, p1, p2, dir, klass, hint});
+        }
+      }
+    }
+  }
+  // Sort by absolute strength desc
+  vedhaPairs.sort((a,b)=>Math.abs(b.dir)-Math.abs(a.dir));
+
+  // Net polarity summary
+  const netSum = vedhaPairs.reduce((s,v)=>s+v.dir, 0);
+  const netLabel = netSum > 0.5 ? '+VE (paap-dominant)' : netSum < -0.5 ? '−VE (shubh-dominant)' : netSum === 0 ? 'NO VEDHA' : 'MIXED / NEUTRAL';
+  const netCol   = netSum > 0.5 ? 'var(--bull)' : netSum < -0.5 ? 'var(--bear)' : 'var(--neut)';
 
   return`
 <div style="display:flex;flex-direction:column;gap:10px">
+
+  <!-- ▒▒▒ POLARITY RULES LEGEND ▒▒▒ -->
+  <div class="pnl">
+    <div class="ph"><span class="dot"></span>SBC VEDHA POLARITY RULES · WHEN +VE / WHEN −VE</div>
+    <div class="pb">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="background:var(--bull3);border:1px solid var(--bull2);border-radius:4px;padding:10px 12px">
+          <div style="font-size:13px;font-weight:700;color:var(--bull);margin-bottom:6px">▲ +VE  (Bullish · Short-Cover · Spike)</div>
+          <div style="font-size:11px;color:var(--tx0);line-height:1.6">
+            <strong style="color:var(--bull)">PAAP ↔ PAAP vedha</strong> &nbsp; full +VE
+            <div style="margin:4px 0 6px 8px;color:var(--tx2);font-size:10px">Two malefics (Sun, Mars, Saturn, Rahu, Ketu) sit in opposing nakshatras of the SBC table.</div>
+            <strong style="color:var(--bull)">PAAP-side MIXED</strong> &nbsp; mild +VE
+            <div style="margin:4px 0 0 8px;color:var(--tx2);font-size:10px">One side is a paap planet, the other is neutral / shubh — net leans positive.</div>
+          </div>
+        </div>
+        <div style="background:var(--bear3);border:1px solid var(--bear2);border-radius:4px;padding:10px 12px">
+          <div style="font-size:13px;font-weight:700;color:var(--bear);margin-bottom:6px">▼ −VE  (Resistance · Profit-Booking · Supply)</div>
+          <div style="font-size:11px;color:var(--tx0);line-height:1.6">
+            <strong style="color:var(--bear)">SHUBH ↔ SHUBH vedha</strong> &nbsp; full −VE
+            <div style="margin:4px 0 6px 8px;color:var(--tx2);font-size:10px">Two benefics (Moon, Mercury, Jupiter, Venus) sit in opposing nakshatras of the SBC table.</div>
+            <strong style="color:var(--bear)">SHUBH-side MIXED</strong> &nbsp; mild −VE
+            <div style="margin:4px 0 0 8px;color:var(--tx2);font-size:10px">One side is a shubh planet, the other is neutral / paap — net leans negative.</div>
+          </div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+        <div style="background:var(--bg2);border-left:3px solid var(--bull);padding:6px 10px;font-size:11px">
+          <strong style="color:var(--bull)">Shubh planets:</strong>
+          <span style="color:${PC.Moon};font-weight:700">Moon</span> · <span style="color:${PC.Mercury};font-weight:700">Mercury</span> · <span style="color:${PC.Jupiter};font-weight:700">Jupiter</span> · <span style="color:${PC.Venus};font-weight:700">Venus</span>
+        </div>
+        <div style="background:var(--bg2);border-left:3px solid var(--bear);padding:6px 10px;font-size:11px">
+          <strong style="color:var(--bear)">Paap planets:</strong>
+          <span style="color:${PC.Sun};font-weight:700">Sun</span> · <span style="color:${PC.Mars};font-weight:700">Mars</span> · <span style="color:${PC.Saturn};font-weight:700">Saturn</span> · <span style="color:${PC.Rahu};font-weight:700">Rahu</span> · <span style="color:${PC.Ketu};font-weight:700">Ketu</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ▒▒▒ NET POLARITY HEADLINE ▒▒▒ -->
+  <div class="pnl" style="border-color:${netCol}55">
+    <div class="ph"><span class="dot" style="background:${netCol}"></span>NET SBC VEDHA POLARITY TODAY</div>
+    <div class="pb" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-size:20px;font-weight:800;color:${netCol};letter-spacing:.1em">${netLabel}</div>
+        <div style="font-size:11px;color:var(--tx2);margin-top:2px">${vedhaPairs.length} active vedha pair${vedhaPairs.length===1?'':'s'} · Σ direction = ${netSum>0?'+':''}${netSum.toFixed(1)}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:9px;color:var(--tx3)">+VE pairs &nbsp;/&nbsp; −VE pairs &nbsp;/&nbsp; mixed</div>
+        <div style="font-size:14px;font-weight:700;font-family:monospace">
+          <span style="color:var(--bull)">${vedhaPairs.filter(v=>v.dir>0.5).length}</span> &nbsp;/&nbsp;
+          <span style="color:var(--bear)">${vedhaPairs.filter(v=>v.dir<-0.5).length}</span> &nbsp;/&nbsp;
+          <span style="color:var(--neut)">${vedhaPairs.filter(v=>Math.abs(v.dir)<=0.5 && v.dir!==0).length}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ▒▒▒ THE GRID ▒▒▒ -->
   <div class="pnl">
     <div class="ph"><span class="dot"></span>SARVATOBHADRA CHAKRA · ${S.date} · IST ${mtt(parseFloat(S.time)*60)}</div>
     <div class="pb">
       <div style="overflow-x:auto;display:flex;justify-content:center">${svg}</div>
       <div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;font-size:11px">
-        <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:14px;background:#003020;border:1.5px solid #00b84a;display:inline-block"></span><span style="color:#00f07a;font-weight:700">Active nakshatra (planet present)</span></span>
-        <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:14px;background:#200010;border:1.5px solid #cc1030;display:inline-block"></span><span style="color:#ff3355;font-weight:700">Vedha opposition</span></span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:14px;background:#003020;border:1.5px solid #00b84a;display:inline-block"></span><span style="color:#00f07a;font-weight:700">Active (no vedha)</span></span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:14px;background:#002a14;border:2px solid #00b84a;display:inline-block"></span><span style="color:#00f07a;font-weight:700">+VE vedha (paap-paap)</span></span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:14px;background:#280008;border:2px solid #cc1030;display:inline-block"></span><span style="color:#ff3355;font-weight:700">−VE vedha (shubh-shubh)</span></span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:14px;background:#2a2000;border:1.5px solid #cc8800;display:inline-block"></span><span style="color:#ffc107;font-weight:700">Mixed vedha</span></span>
       </div>
-      ${vedhaList.length?`<div style="margin-top:6px;font-size:11px;padding:6px 10px;background:var(--bear3);border:1px solid var(--bear2);border-radius:3px;color:var(--bear);font-weight:700">⚠ Active Vedha: ${vedhaList.join(' | ')}</div>`:''}
     </div>
   </div>
+
+  <!-- ▒▒▒ ACTIVE VEDHA PAIRS TABLE (with polarity) ▒▒▒ -->
+  <div class="pnl">
+    <div class="ph"><span class="dot"></span>ACTIVE VEDHA PAIRS · WITH POLARITY</div>
+    ${vedhaPairs.length === 0 ? `
+      <div class="pb"><div style="padding:10px;color:var(--tx3);font-size:11px">No nakshatra-pair vedha active right now.</div></div>
+    ` : `<div class="ts"><table class="tbl">
+      <thead><tr><th>Nakshatra A</th><th>Nakshatra B</th><th>Planet A</th><th>Planet B</th><th>Class</th><th style="text-align:center">Polarity</th><th>Interpretation</th></tr></thead>
+      <tbody>${vedhaPairs.map(v=>{
+        const col = v.dir>0 ? 'var(--bull)' : 'var(--bear)';
+        const trCls = v.dir>0.5 ? 'tr-b' : v.dir<-0.5 ? 'tr-r' : 'tr-n';
+        const pol = v.dir>0.5 ? '▲ +VE' : v.dir<-0.5 ? '▼ −VE' : v.dir>0 ? '△ mild +VE' : '▽ mild −VE';
+        return `<tr class="${trCls}">
+          <td style="font-size:11px;font-weight:700">${v.nak1}</td>
+          <td style="font-size:11px;font-weight:700">${v.nak2}</td>
+          <td style="color:${pc(v.p1)};font-weight:700">${v.p1} <span style="font-size:9px;color:var(--tx3)">(${SHUBH.has(v.p1)?'shubh':'paap'})</span></td>
+          <td style="color:${pc(v.p2)};font-weight:700">${v.p2} <span style="font-size:9px;color:var(--tx3)">(${SHUBH.has(v.p2)?'shubh':'paap'})</span></td>
+          <td style="font-size:10px;color:var(--tx2)">${v.klass}</td>
+          <td style="text-align:center;font-weight:700;color:${col};white-space:nowrap">${pol}</td>
+          <td style="font-size:10px;color:var(--tx2)">${v.hint}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`}
+  </div>
+
+  <!-- ▒▒▒ PLANET POSITIONS (with vedha polarity tag per planet) ▒▒▒ -->
   <div class="pnl">
     <div class="ph"><span class="dot"></span>NAKSHATRA POSITIONS — ALL PLANETS</div>
     <div class="pb" style="display:flex;gap:8px;flex-wrap:wrap">
-      ${D.planets.map(p=>{const nk=getNak(p.lon);const vi=VEDHA[nk.idx];const vaktive=vi!==undefined&&activeNaks.has(vi);
-      return`<div style="background:var(--bg2);border:1px solid var(--bd);border-left:3px solid ${PC[p.name]};padding:6px 10px;border-radius:3px${vaktive?';border-top:1px solid var(--bear2)':''}">
-        <div style="font-size:12px;font-weight:700;color:${PC[p.name]}">${p.name}${p.retro?' <span style="color:var(--bear)">℞</span>':''}</div>
-        <div style="font-size:11px;color:var(--tx0);margin-top:2px;font-weight:700">${nk.n}</div>
-        <div style="font-size:10px;color:var(--tx1)">${p.sign} ${dmsC(p.deg)} Pd${nk.pada}</div>
-        <div style="font-size:10px;color:${pc(p.sub)};font-weight:700">${p.sub}</div>
-        ${vaktive?`<div style="font-size:9px;color:var(--bear);font-weight:700">Vedha: ${NAKS[vi]?.n}</div>`:''}
-      </div>`;}).join('')}
+      ${D.planets.map(p=>{
+        const nk=getNak(p.lon);
+        const vi=VEDHA[nk.idx];
+        const vactive=vi!==undefined&&activeNaks.has(vi);
+        const pol = vactive ? (nakPol.get(nk.idx) || 0) : 0;
+        const polLabel = pol>0 ? '▲ +VE' : pol<0 ? '▼ −VE' : vactive ? '± mixed' : '';
+        const polCol   = pol>0 ? 'var(--bull)' : pol<0 ? 'var(--bear)' : 'var(--neut)';
+        const klass = SHUBH.has(p.name) ? 'shubh' : PAPA.has(p.name) ? 'paap' : 'neutral';
+        return`<div style="background:var(--bg2);border:1px solid var(--bd);border-left:3px solid ${PC[p.name]};padding:6px 10px;border-radius:3px${vactive?';border-top:1px solid '+polCol:''}">
+          <div style="font-size:12px;font-weight:700;color:${PC[p.name]}">${p.name}${p.retro?' <span style="color:var(--bear)">℞</span>':''} <span style="font-size:9px;color:var(--tx3);font-weight:400">(${klass})</span></div>
+          <div style="font-size:11px;color:var(--tx0);margin-top:2px;font-weight:700">${nk.n}</div>
+          <div style="font-size:10px;color:var(--tx1)">${p.sign} ${dmsC(p.deg)} Pd${nk.pada}</div>
+          <div style="font-size:10px;color:${pc(p.sub)};font-weight:700">${p.sub}</div>
+          ${vactive?`<div style="font-size:9px;color:${polCol};font-weight:700">Vedha: ${NAKS[vi]?.n} <span style="float:right">${polLabel}</span></div>`:''}
+        </div>`;
+      }).join('')}
     </div>
   </div>
+
 </div>`;
 }
 
@@ -2498,6 +3889,176 @@ function tTiming(){
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// TAB: ASTRO RULES  — FORECAST-DRIVEN
+// Pattern-matches today's planetary combinations to specific predicted
+// outcomes (session type, direction, intraday reversal times, sector
+// calls, trade plan). The diagnostic data tables (tithi/combust/papa
+// kartari/vedha) are kept below for reference but not the focus.
+// ═══════════════════════════════════════════════════════════════════
+function tRules(){
+  const D = DATA;
+  const R = D.rules;
+  const F = D.forecast;
+  if(!R || !F) return '<div style="padding:20px;color:var(--bear)">Forecast engine unavailable.</div>';
+
+  // Session-type colour
+  const sessCol = {
+    'WHIPSAW':  '#FF5366',
+    'VOLATILE': '#FFB300',
+    'TRENDING': F.direction === 'BULLISH' ? '#00d68f' : '#FF5366',
+    'RANGE':    '#5ad0e8',
+    'QUIET':    '#7a96a0',
+    'NORMAL':   '#7a96a0'
+  }[F.session.type] || '#7a96a0';
+  const dirCol  = F.direction === 'BULLISH' ? 'var(--bull)'
+                : F.direction === 'BEARISH' ? 'var(--bear)' : 'var(--neut)';
+  const sevCol = s => ({ EXTREME:'#FF3355', HIGH:'#FFB300', MED:'#5ad0e8', LOW:'#7a96a0' }[s]);
+
+  // ▒▒▒ TOP: SESSION VERDICT + TRADE PLAN ▒▒▒
+  const verdictCard = `
+  <div class="pnl" style="border:2px solid ${sessCol}66">
+    <div class="ph" style="background:linear-gradient(90deg,${sessCol}22 0%,transparent 100%)"><span class="dot" style="background:${sessCol}"></span>SESSION FORECAST · ${S.date}</div>
+    <div class="pb">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px">
+        <div style="background:${sessCol}15;border-left:3px solid ${sessCol};padding:8px 12px;border-radius:3px">
+          <div style="font-size:9px;color:var(--tx3);letter-spacing:.08em">SESSION TYPE</div>
+          <div style="font-size:20px;font-weight:800;color:${sessCol};line-height:1.1;letter-spacing:.05em;margin-top:2px">${F.session.type}</div>
+        </div>
+        <div style="background:${dirCol === 'var(--bull)' ? 'var(--bull3)' : dirCol === 'var(--bear)' ? 'var(--bear3)' : 'var(--bg2)'};border-left:3px solid ${dirCol};padding:8px 12px;border-radius:3px">
+          <div style="font-size:9px;color:var(--tx3);letter-spacing:.08em">DIRECTION</div>
+          <div style="font-size:20px;font-weight:800;color:${dirCol};line-height:1.1;letter-spacing:.05em;margin-top:2px">${F.direction} ${F.directionScore>0?'+':''}${F.directionScore}</div>
+        </div>
+        <div style="background:var(--bg2);border-left:3px solid var(--acc);padding:8px 12px;border-radius:3px">
+          <div style="font-size:9px;color:var(--tx3);letter-spacing:.08em">CONFIDENCE</div>
+          <div style="font-size:20px;font-weight:800;color:var(--acc);line-height:1.1;margin-top:2px">${F.confidence}%</div>
+          <div class="sbar" style="height:4px;margin-top:4px"><div class="sbar-fill" style="width:${F.confidence}%;background:var(--acc)"></div></div>
+        </div>
+        <div style="background:var(--bg2);border-left:3px solid #4DB8FF;padding:8px 12px;border-radius:3px">
+          <div style="font-size:9px;color:var(--tx3);letter-spacing:.08em">SPOTLIGHT INDEX</div>
+          <div style="font-size:18px;font-weight:800;color:#4DB8FF;line-height:1.1;letter-spacing:.05em;margin-top:2px">${F.indexSpotlight}</div>
+          <div style="font-size:9px;color:var(--tx3);margin-top:1px">BN:${F.indexImpacts.bn} · NF:${F.indexImpacts.nf} · US:${F.indexImpacts.us}${F.usFlag?' ★':''}</div>
+        </div>
+      </div>
+      <div style="background:var(--bg2);border-radius:3px;padding:10px 14px;border-left:3px solid ${sessCol};margin-bottom:8px">
+        <div style="font-size:9px;color:var(--tx3);letter-spacing:.08em;font-weight:700;margin-bottom:3px">SUMMARY</div>
+        <div style="font-size:12px;color:var(--tx0);line-height:1.5">${F.session.summary}</div>
+      </div>
+      <div style="background:linear-gradient(90deg,var(--acc)22,transparent);border-radius:3px;padding:10px 14px;border-left:3px solid var(--acc)">
+        <div style="font-size:9px;color:var(--acc);letter-spacing:.08em;font-weight:700;margin-bottom:3px">⇨ TRADE PLAN</div>
+        <div style="font-size:13px;color:var(--tx0);line-height:1.5;font-weight:600">${F.session.plan}</div>
+      </div>
+    </div>
+  </div>`;
+
+  // ▒▒▒ ACTIVE YOGAS — each with its specific forecast ▒▒▒
+  const yogaCard = F.yogas.length === 0 ? `
+    <div class="pnl"><div class="ph"><span class="dot"></span>ACTIVE COMBINATIONS</div>
+    <div class="pb"><div style="padding:10px;color:var(--tx3);font-size:11px">No high-significance combinations detected — calm session expected.</div></div></div>
+  ` : `
+  <div class="pnl">
+    <div class="ph"><span class="dot"></span>ACTIVE YOGAS &amp; THEIR SPECIFIC FORECASTS · ${F.yogas.length} detected</div>
+    <div class="pb">
+      <div style="display:flex;flex-direction:column;gap:8px">
+      ${F.yogas.map(o => {
+        const col = sevCol(o.severity);
+        const dirArr = o.dir > 0.5 ? '▲' : o.dir < -0.5 ? '▼' : '⟷';
+        const dirC   = o.dir > 0.5 ? 'var(--bull)' : o.dir < -0.5 ? 'var(--bear)' : 'var(--neut)';
+        const ixCol  = o.indexImpact === 'BANKNIFTY' ? '#4DB8FF' : o.indexImpact === 'NIFTY' ? '#FFB300' : '#9C7DFF';
+        return `<div style="background:var(--bg2);border-left:4px solid ${col};border-radius:3px;padding:10px 14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="background:${col}33;color:${col};font-size:9px;font-weight:700;letter-spacing:.08em;padding:2px 7px;border-radius:2px;border:1px solid ${col}55">${o.severity}</span>
+              <span style="font-size:13px;font-weight:700;color:var(--tx0)">${o.name}</span>
+              <span style="font-size:14px;color:${dirC};font-weight:700">${dirArr}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="background:${ixCol}22;color:${ixCol};font-size:9px;font-weight:700;padding:2px 6px;border-radius:2px">${o.indexImpact}</span>
+              ${o.usImpact === 'HIGH' ? `<span style="background:#4caf5022;color:#4caf50;font-size:9px;font-weight:700;padding:2px 6px;border-radius:2px">US★</span>` : ''}
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--tx1);line-height:1.55;margin-bottom:${o.sectors?.length ? 6 : 0}px">${o.forecast}</div>
+          ${o.sectors?.length ? `<div style="display:flex;gap:5px;flex-wrap:wrap;font-size:9px">${o.sectors.map(s=>`<span style="background:var(--bg3);color:var(--tx2);padding:1px 6px;border-radius:2px;border:1px solid var(--bd)">${s}</span>`).join('')}</div>` : ''}
+        </div>`;
+      }).join('')}
+      </div>
+    </div>
+  </div>`;
+
+  // ▒▒▒ REVERSAL WINDOWS ▒▒▒
+  const curMin = parseFloat(S.time)*60;
+  const reversalCard = `
+  <div class="pnl">
+    <div class="ph"><span class="dot"></span>INTRADAY REVERSAL WINDOWS · ${F.reversals.length} computed</div>
+    <div class="pb">
+      <div style="font-size:10px;color:var(--tx3);margin-bottom:8px;line-height:1.5">
+        Computed from Moon sub-lord transitions, planetary hour flips, and nakshatra changes during the session. The highest-strength events are inflections where intraday direction often pivots.
+      </div>
+      ${F.reversals.length === 0 ? `<div style="color:var(--tx3);font-size:11px;padding:6px">No major intraday inflections detected.</div>` : `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px">
+          ${F.reversals.map(r => {
+            const [h,m] = r.time.split(':').map(Number);
+            const rMin = h*60+m;
+            const past = curMin > rMin;
+            const upcoming = !past && (rMin - curMin) <= 30;
+            const baseCol = r.strength >= 90 ? 'var(--acc)' : r.strength >= 75 ? '#5ad0e8' : 'var(--tx2)';
+            const col = upcoming ? 'var(--acc)' : past ? 'var(--tx3)' : baseCol;
+            const bg  = upcoming ? 'rgba(0,200,255,0.15)' : past ? 'var(--bg2)' : 'var(--bg2)';
+            const dirA = r.dir > 0 ? '▲' : r.dir < 0 ? '▼' : '◆';
+            return `<div style="background:${bg};border:1px solid ${upcoming?'var(--acc)':'var(--bd)'};border-left:3px solid ${col};border-radius:3px;padding:6px 10px;${past?'opacity:0.5':''}">
+              <div style="display:flex;justify-content:space-between;align-items:baseline">
+                <span style="font-size:14px;font-weight:700;color:${col};font-family:monospace">${r.time} ${dirA}</span>
+                <span style="font-size:8px;color:var(--tx3);letter-spacing:.05em">${r.type.replace('_',' ')} · ${r.strength}</span>
+              </div>
+              <div style="font-size:10px;color:var(--tx2);margin-top:2px;line-height:1.4">${r.reason}</div>
+              ${upcoming?`<div style="font-size:9px;color:var(--acc);font-weight:700;margin-top:2px">◄ in ${Math.round(rMin-curMin)} min</div>`:''}
+            </div>`;
+          }).join('')}
+        </div>`}
+    </div>
+  </div>`;
+
+  // ▒▒▒ SECTOR CALLS ▒▒▒
+  const sectorCard = F.sectors.length === 0 ? '' : `
+  <div class="pnl">
+    <div class="ph"><span class="dot"></span>SECTOR CALLS · WEIGHTED FROM ACTIVE YOGAS</div>
+    <div class="pb">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px">
+        ${F.sectors.map(s => {
+          const col = s.score > 0.5 ? 'var(--bull)' : s.score < -0.5 ? 'var(--bear)' : 'var(--neut)';
+          const arr = s.score > 0.5 ? '▲' : s.score < -0.5 ? '▼' : '◆';
+          return `<div style="background:var(--bg2);border-left:3px solid ${col};border-radius:3px;padding:6px 10px;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:11px;color:var(--tx0);font-weight:700">${s.sector}</span>
+            <span style="font-family:monospace;color:${col};font-weight:700">${arr} ${s.score>0?'+':''}${s.score.toFixed(1)}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  </div>`;
+
+  // ▒▒▒ DIAGNOSTIC INFO (small, below) ▒▒▒
+  const diagCard = `
+  <div class="pnl">
+    <div class="ph"><span class="dot"></span>DAY CONTEXT · DIAGNOSTIC DATA</div>
+    <div class="pb">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px;font-size:11px">
+        <div class="pc"><div style="font-size:9px;color:var(--tx3)">TITHI</div><div style="font-weight:700;color:var(--tx0)">${R.tithi.paksha} ${R.tithi.name}</div><div style="font-size:9px;color:var(--tx2)">${R.tithi.klass} · ${(R.tithi.fraction*100).toFixed(0)}%</div></div>
+        <div class="pc"><div style="font-size:9px;color:var(--tx3)">MOON NAKSHATRA</div><div style="font-weight:700;color:${R.gandMool?'var(--bear)':'var(--tx0)'}">${R.moonNakName}${R.gandMool?' ⚠':''}</div><div style="font-size:9px;color:var(--tx2)">${R.gandMool?'Gand Mool':R.panchak?'Panchak':'Normal'}</div></div>
+        <div class="pc"><div style="font-size:9px;color:var(--tx3)">MOON DECL</div><div style="font-weight:700;color:${R.moonDecl.bias>0?'var(--bull)':'var(--bear)'}">${R.moonDecl.hemisphere} ${R.moonDecl.dec.toFixed(1)}°</div><div style="font-size:9px;color:var(--tx2)">→ ${R.moonDecl.movingToward}</div></div>
+        <div class="pc"><div style="font-size:9px;color:var(--tx3)">COMBUST</div><div style="font-weight:700;color:${R.combust.length?'var(--neut)':'var(--tx0)'}">${R.combust.length} planet${R.combust.length===1?'':'s'}</div><div style="font-size:9px;color:var(--tx2)">${R.combust.map(c=>c.name.slice(0,3)).join(',')||'None'}</div></div>
+        <div class="pc"><div style="font-size:9px;color:var(--tx3)">PAPA KARTARI</div><div style="font-weight:700;color:${R.papaKartari.filter(p=>p.tight).length?'var(--bear)':'var(--tx0)'}">${R.papaKartari.length} (${R.papaKartari.filter(p=>p.tight).length} tight)</div><div style="font-size:9px;color:var(--tx2)">${R.papaKartari.map(p=>p.target.slice(0,3)).join(',')||'None'}</div></div>
+        <div class="pc"><div style="font-size:9px;color:var(--tx3)">VEDHA Σ</div><div style="font-weight:700;color:${R.vedha.reduce((s,v)=>s+v.dir,0)>0?'var(--bull)':R.vedha.reduce((s,v)=>s+v.dir,0)<0?'var(--bear)':'var(--neut)'}">${(R.vedha.reduce((s,v)=>s+v.dir,0)>0?'+':'')}${R.vedha.reduce((s,v)=>s+v.dir,0).toFixed(1)}</div><div style="font-size:9px;color:var(--tx2)">${R.vedha.length} pair${R.vedha.length===1?'':'s'}</div></div>
+        <div class="pc"><div style="font-size:9px;color:var(--tx3)">JUP/SAT SPEED</div><div style="font-weight:700;color:var(--tx0)">${F.jupSpd.toFixed(3)} / ${F.satSpd.toFixed(3)}</div><div style="font-size:9px;color:var(--tx2)">${F.jupSpd<0.05?'JUP STN':F.satSpd<0.04?'SAT STN':'Normal'}</div></div>
+        <div class="pc"><div style="font-size:9px;color:var(--tx3)">PLUTO RX</div><div style="font-weight:700;color:${R.plutoRx.active?'var(--neut)':'var(--tx0)'}">${R.plutoRx.active?`Day ${R.plutoRx.daysIn}/163`:'Direct'}</div><div style="font-size:9px;color:var(--tx2)">${R.plutoRx.active?`${R.plutoRx.daysLeft}d left`:''}</div></div>
+      </div>
+    </div>
+  </div>`;
+
+  return verdictCard + yogaCard + reversalCard + sectorCard + diagCard;
+}
+
+
+
+// ═══════════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════════
 // TAB: GANN SQ9
 // ═══════════════════════════════════════════════════════════════════
@@ -2537,7 +4098,7 @@ function tVR(){
       <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px">
         <div>
           <div style="font-size:22px;font-weight:800;color:${scCol};letter-spacing:.12em">${D.combinedLabel}</div>
-          <div style="font-size:9px;color:var(--tx3);margin-top:3px;line-height:1.5">0.30 × KP-bias (${D.bias.score>0?'+':''}${D.bias.score}) + 0.20 × Aspect-grid (${D.aspSc.score>0?'+':''}${D.aspSc.score}) + 0.20 × Trio (${D.trio?(D.trio.trioScore>0?'+':'')+D.trio.trioScore:'—'}) + 0.20 × Lagna TM (${D.lagnaTM?(D.lagnaTM.score>0?'+':'')+D.lagnaTM.score:'—'}) + 0.10 × Kranti (${D.krantiScore>0?'+':''}${D.krantiScore})</div>
+          <div style="font-size:9px;color:var(--tx3);margin-top:3px;line-height:1.5">0.22 × KP-bias (${D.bias.score>0?'+':''}${D.bias.score}) + 0.16 × Aspect (${D.aspSc.score>0?'+':''}${D.aspSc.score}) + 0.16 × Trio (${D.trio?(D.trio.trioScore>0?'+':'')+D.trio.trioScore:'—'}) + 0.16 × Lagna (${D.lagnaTM?(D.lagnaTM.score>0?'+':'')+D.lagnaTM.score:'—'}) + 0.07 × Kranti (${D.krantiScore>0?'+':''}${D.krantiScore}) + 0.11 × Rules (${D.rulesScore>0?'+':''}${D.rulesScore}) + 0.12 × Forecast (${D.forecastDirScore>0?'+':''}${D.forecastDirScore})</div>
         </div>
         <div style="text-align:right">
           <div style="font-size:28px;font-weight:700;color:${scCol};font-family:monospace;line-height:1">${sc>0?'+':''}${sc}</div>
@@ -2932,6 +4493,190 @@ function tVR(){
 }
 
 
+// ═══════ NEW TABS: Day Forecast · Shar Parivartan · Natal/Intraday Kundali · Bhav Phal ═══════
+function _dirCls(d){return d==='BULLISH'?'pb-b':d==='BEARISH'?'pb-r':'pb-n';}
+function _dirCol(d){return d==='BULLISH'?'var(--bull)':d==='BEARISH'?'var(--bear)':'var(--neut)';}
+
+function tDayForecast(){
+  const D=DATA, df=D.astroDF, bh=D.bhadra, sbc=D.sbc;
+  const order=['NIFTY','BANKNIFTY','NASDAQ','DOW','SPX'];
+  const cards=order.map(k=>{
+    const f=df.indices[k];
+    const col=_dirCol(f.dir);
+    const revs=(f.reversals||[]).slice(0,5).map(r=>`<div style="font-size:10px;color:var(--tx2);white-space:nowrap"><span style="color:var(--acc);font-weight:700">${r.time}</span> ${r.reason}</div>`).join('')||'<div style="font-size:10px;color:var(--tx3)">none flagged</div>';
+    return`<div class="pnl" style="border-color:${col}55">
+      <div class="ph" style="justify-content:space-between"><span><span class="dot" style="background:${col}"></span>${f.name}</span>
+        <span style="color:var(--tx3);font-size:9px">ruler ${f.ruler}</span></div>
+      <div class="pb">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <span class="pill ${_dirCls(f.dir)}" style="font-size:13px;padding:3px 12px">${f.dir} ${f.score>0?'+':''}${f.score}</span>
+          <span style="font-weight:700;color:${f.strong?col:'var(--tx3)'};font-size:11px">${f.strong?'⚡ '+f.move:f.move}</span>
+        </div>
+        <div style="font-size:10px;color:var(--tx3);margin-bottom:4px">DRIVERS</div>
+        ${f.drivers.map(d=>`<div style="font-size:10px;color:var(--tx1)">• ${d}</div>`).join('')}
+        <div style="font-size:10px;color:var(--tx3);margin:6px 0 2px">REVERSAL WINDOWS (intraday)</div>
+        ${revs}
+      </div></div>`;
+  }).join('');
+
+  // Bhadra panel
+  const bhBody = bh.active
+    ? `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+         <span class="pill ${bh.net>0?'pb-b':bh.net<0?'pb-r':'pb-n'}" style="padding:3px 12px;font-size:12px">${bh.net>0?'POSITIVE':bh.net<0?'NEGATIVE':'MIXED'}</span>
+         <span style="color:var(--tx1);font-weight:700">${bh.typeLabel}</span>
+         <span style="color:var(--tx2)">phase: ${bh.phase}</span>
+         <span style="color:var(--tx2)">Moon ${bh.moonSignName} → <b style="color:${bh.lokaPol>0?'var(--bull)':'var(--bear)'}">${bh.loka}</b></span>
+         <span style="color:var(--tx2)">window ${bh.windowTxt}</span>
+       </div>
+       <div style="font-size:10px;color:var(--tx3);margin-top:6px">${bh.hint}</div>`
+    : `<div style="color:var(--tx2)">${bh.hint}</div>`;
+
+  // SBC panel (5 signals)
+  const sbcRows = sbc.sig.map(s=>`<tr class="${s.active?'tr-r':''}">
+      <td style="font-weight:700;color:${s.active?'var(--bear)':'var(--tx3)'}">${s.n}</td>
+      <td style="font-weight:700;white-space:nowrap;color:${s.active?'var(--bear)':'var(--tx2)'}">${s.key}</td>
+      <td style="text-align:center"><span class="pill ${s.active?'pb-r':'pb-n'}">${s.active?'ACTIVE ▼':'—'}</span></td>
+      <td style="font-size:10px;color:var(--tx1)">${s.detail}</td>
+      <td style="font-size:9px;color:var(--tx3)">${s.text}</td></tr>`).join('');
+
+  // Declination shifts (CHAPTER 21)
+  const shifts=(D.declShifts||[]).slice(0,8).map(s=>`<tr class="${Math.abs(s.daysFromNow)<=1?'tr-hl':''}">
+      <td style="color:${PC[s.body]||'var(--tx1)'};font-weight:700">${s.body}</td>
+      <td style="font-family:monospace;color:var(--tx2)">${s.daysFromNow>0?'+':''}${s.daysFromNow}d</td>
+      <td style="font-family:monospace;color:var(--tx2)">${s.decl}°</td>
+      <td style="font-weight:700;color:${s.change.includes('NORTH')?'var(--bear)':'var(--bull)'}">${s.change}</td>
+      <td>${s.baseBias}${s.reverse?` <span style="color:var(--neut)">⇄ reversed (${[s.retro?'R':'',s.combust?'combust':'',s.debil?'debil':''].filter(Boolean).join('/')})</span>`:''}</td>
+      <td style="font-weight:700;color:${s.dir>0?'var(--bull)':'var(--bear)'}">${s.dir>0?'BULLISH +':'BEARISH −'}</td>
+      <td style="font-size:9px;color:var(--tx3)">${s.note}</td></tr>`).join('');
+
+  return`
+<div style="display:flex;flex-direction:column;gap:10px">
+  <div class="pnl"><div class="ph"><span class="dot"></span>ASTRO DAY FORECAST · ALL INDICES · ${S.date} · aligned by Shar-Parivartan + Bhadra + SBC + Bhav-Phal + Natal-transit</div>
+    <div class="pb"><div class="g3">${cards}</div>
+      <div style="font-size:9px;color:var(--tx3);margin-top:8px">Score = blend of KP/aspect engine + new rule-pack (astroPack ${df.astroPack}, baseDay ${df.baseDay}). ⚡ Strong-move when |score|≥50, a declination turn is active, a Shar(latitude) crossing is ≤2d away, Purnima/Amavasya, or an EXTREME yoga. Nifty=Sun, BankNifty=Moon (rulers); US indices follow the overnight session.</div>
+    </div>
+  </div>
+  <div class="g2">
+    <div class="pnl"><div class="ph"><span class="dot"></span>◐ BHADRA (Vishti Karana) — bhadra.md</div><div class="pb">${bhBody}</div></div>
+    <div class="pnl"><div class="ph"><span class="dot"></span>⟐ DECLINATION CHANGE — Shar Parivartan / CHAPTER 21</div>
+      <div class="ts"><table class="tbl"><thead><tr><th>Planet</th><th>When</th><th>Decl</th><th>Change</th><th>Base</th><th>Net bias</th><th>Note</th></tr></thead><tbody>${shifts||'<tr><td colspan=7 style="color:var(--tx3)">No declination turning-points in window</td></tr>'}</tbody></table></div>
+    </div>
+  </div>
+  <div class="pnl"><div class="ph"><span class="dot"></span>⬡ SBC — FIVE BEARISH SIGNALS (sbc.md) · ${sbc.bearishCount}/5 active</div>
+    <div class="ts"><table class="tbl"><thead><tr><th>#</th><th>Signal</th><th>State</th><th>Reading</th><th>Rule</th></tr></thead><tbody>${sbcRows}</tbody></table></div>
+  </div>
+</div>`;
+}
+
+function tSharParivartan(){
+  const from = S.spFrom || S.date;
+  const to   = S.spTo || (()=>{const d=new Date(S.date+'T00:00:00');d.setDate(d.getDate()+30);return d.toISOString().slice(0,10);})();
+  const tbl = buildSharTable(from, to, S.ayMode);
+  const head = `<th style="position:sticky;left:0;background:#041e28">Date</th>` +
+    tbl.bodies.map(b=>`<th colspan="2" style="text-align:center;color:${PC[b]||'#5ad0e8'}">${b}</th>`).join('');
+  const sub  = `<th style="position:sticky;left:0;background:#041e28"></th>` +
+    tbl.bodies.map(()=>`<th style="font-size:8px">Shar</th><th style="font-size:8px">Kranti</th>`).join('');
+  const rows = tbl.rows.map(r=>{
+    const cells = r.cells.map(c=>{
+      const latCol = c.latDir==='N'?'#ff8a65':'#69f0ae';
+      const decCol = c.decDir==='N'?'#ff8a65':'#69f0ae';
+      const flip = c.latFlip?'background:#2a2000;border:1px solid var(--neut)':'';
+      return `<td style="font-family:monospace;font-size:10px;color:${latCol};${flip}" title="${c.latFlip?'SHAR PARIVARTAN — latitude crossed 0 (market driven by this planet)':''}">${c.lat}${c.latDir}</td>`+
+             `<td style="font-family:monospace;font-size:10px;color:${decCol}">${c.dec}${c.decDir}</td>`;
+    }).join('');
+    return `<tr><td style="position:sticky;left:0;background:#021520;font-weight:700;color:var(--tx1);white-space:nowrap">${r.date} <span style="color:var(--tx3)">${r.dow}</span></td>${cells}</tr>`;
+  }).join('');
+  const shifts=(DATA.declShifts||[]).slice(0,10).map(s=>`<tr class="${Math.abs(s.daysFromNow)<=1?'tr-hl':''}"><td style="color:${PC[s.body]};font-weight:700">${s.body}</td><td>${s.daysFromNow>0?'+':''}${s.daysFromNow}d</td><td style="font-weight:700;color:${s.change.includes('NORTH')?'var(--bear)':'var(--bull)'}">${s.change}</td><td>${s.baseBias}${s.reverse?' ⇄rev':''}</td><td style="font-weight:700;color:${s.dir>0?'var(--bull)':'var(--bear)'}">${s.dir>0?'BULLISH':'BEARISH'}</td><td style="font-size:9px;color:var(--tx3)">${s.note}</td></tr>`).join('');
+  return`
+<div style="display:flex;flex-direction:column;gap:10px">
+  <div class="pnl"><div class="ph"><span class="dot"></span>⟐ SHAR PARIVARTAN — Monthly Latitude (Shar) & Declination (Kranti) of Planets</div>
+    <div class="pb">
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px">
+        <div class="cg"><span class="cl">FROM</span><input type="date" value="${from}" class="ci w130" onchange="gs({spFrom:this.value})"></div>
+        <div class="cg"><span class="cl">TO</span><input type="date" value="${to}" class="ci w130" onchange="gs({spTo:this.value})"></div>
+        <div style="font-size:10px;color:var(--tx3);max-width:620px">CHAPTER 21: a planet changing to <b style="color:var(--bear)">NORTH</b> declination → <b style="color:var(--bear)">Bearishness</b>; to <b style="color:var(--bull)">SOUTH</b> → <b style="color:var(--bull)">Bullishness</b> (continues a long time). During a declination change, aspects & all three Vedh become ineffective — this is the strongest signal. Reverse the effect if the planet is Combust / Retrograde / Debilitated. Moon changes twice a month; big planets change when nearer Earth. Yellow cell = Shar Parivartan (latitude crossed 0°).</div>
+      </div>
+      <div class="ts" style="max-height:520px;overflow:auto"><table class="tbl"><thead><tr>${head}</tr><tr>${sub}</tr></thead><tbody>${rows}</tbody></table></div>
+      <div style="font-size:9px;color:var(--tx3);margin-top:6px">Shar = ecliptic latitude (N/S of ecliptic). Kranti = equatorial declination (N/S of equator). Orange = North, Green = South. Sun has no latitude (always 0). Snapshot at ~09:30 IST.</div>
+    </div>
+  </div>
+  <div class="pnl"><div class="ph"><span class="dot"></span>DECLINATION DIRECTION CHANGES — nearest first (drives the day per CHAPTER 21)</div>
+    <div class="ts"><table class="tbl"><thead><tr><th>Planet</th><th>When</th><th>Change</th><th>Base</th><th>Net bias</th><th>Note</th></tr></thead><tbody>${shifts||'<tr><td colspan=6 style="color:var(--tx3)">none in window</td></tr>'}</tbody></table></div>
+  </div>
+</div>`;
+}
+
+function tKundali(){
+  const D=DATA, nat=D.natal;
+  const t5 = S.time5 || S.time || '9.25';
+  const mom = computeMomentChart(S.date, parseFloat(t5)||9.25, S.ayMode);
+  // 5-min time options
+  const opts=[]; for(let m=9*60+15;m<=15*60+30;m+=5){const v=(m/60).toString();opts.push(`<option value="${v}" ${Math.abs(parseFloat(t5)-m/60)<0.001?'selected':''}>${mtt(m)}</option>`);}
+  const natalRows = nat.planets.map(p=>`<tr><td style="color:${PC[p.name]};font-weight:700">${p.abbr} ${p.name}</td><td>${p.sign} ${dmsC(p.deg)}</td><td>H${p.h}</td><td>${p.nak}</td><td>${p.retro?'<span style="color:var(--bear)">℞</span>':''}</td></tr>`).join('');
+  const tr = (D.natalTransit&&D.natalTransit.hits||[]).map(h=>`<tr><td style="color:${PC[h.planet]};font-weight:700">${h.planet}</td><td>natal H${h.house} ${BULL_HOUSES.has(h.house)?'<span style="color:var(--bull)">(bull)</span>':BEAR_HOUSES.has(h.house)?'<span style="color:var(--bear)">(bear)</span>':''}</td><td style="font-weight:700;color:${h.s>0?'var(--bull)':'var(--bear)'}">${h.s>0?'+':''}${h.s}</td><td style="font-size:10px;color:var(--tx2)">${h.note}</td></tr>`).join('');
+  const slots=D.slots5||[];
+  const slotRows = slots.map(s=>{
+    const hl=Math.abs((parseFloat(t5)*60)-s.min)<3;
+    return`<tr class="${s.lagChange||s.nakChange?'tr-hl':''}${hl?' tr-b':''}">
+      <td style="font-family:monospace;font-weight:700;color:${hl?'var(--acc)':'var(--tx1)'}">${s.time}${hl?' ◄':''}</td>
+      <td style="color:${s.lagChange?'var(--neut)':'var(--tx1)'};font-weight:${s.lagChange?'700':'400'}">${s.lagSign}${s.lagChange?' ⟲':''}</td>
+      <td>${s.moonSign}</td><td style="color:var(--tx2)">${s.moonNak}${s.nakChange?' <span style="color:var(--neut)">⟲</span>':''}</td>
+      <td style="color:${PC[s.moonSub]}">${s.moonSub}</td><td>${s.moonPada}</td></tr>`;
+  }).join('');
+  return`
+<div style="display:flex;flex-direction:column;gap:10px">
+  <div class="g2">
+    <div class="pnl"><div class="ph"><span class="dot"></span>☉ NIFTY NATAL — ${nat.label}</div>
+      <div class="pb">
+        <div style="display:flex;justify-content:center">${astroMakeChart(nat.planets, nat.ascSignIdx, 'D1', '27-Nov-1992 11:43')}</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0;font-size:11px">
+          <span><span class="ml">LAGNA</span> <b class="ca">${nat.ascSign.sign} ${dmsC(nat.ascSign.deg)}</b></span>
+          <span><span class="ml">DAY LORD</span> <b style="color:${PC[nat.dayLord]}">${nat.dayLord}</b></span>
+        </div>
+        <div class="ts"><table class="tbl"><thead><tr><th>Planet</th><th>Sign</th><th>House</th><th>Nakshatra</th><th>R</th></tr></thead><tbody>${natalRows}</tbody></table></div>
+      </div>
+    </div>
+    <div class="pnl"><div class="ph" style="justify-content:space-between"><span><span class="dot"></span>◇ INTRADAY KUNDALI · 5-MIN</span>
+        <select class="ci" style="font-size:10px;padding:2px 4px" onchange="gs({time5:this.value})">${opts.join('')}</select></div>
+      <div class="pb">
+        <div style="display:flex;justify-content:center">${astroMakeChart(mom.planets, mom.lagS, 'ID', S.date+' '+mtt(parseFloat(t5)*60))}</div>
+        <div style="font-size:11px;margin:8px 0"><span class="ml">LAGNA</span> <b class="ca">${mom.ascSign.sign} ${dmsC(mom.ascSign.deg)}</b> · <span class="ml">MOON</span> <b style="color:${PC.Moon}">${mom.planets.find(p=>p.name==='Moon').sign}</b></div>
+        <div style="color:var(--acc);font-size:10px;font-weight:700;margin-bottom:4px">TRANSIT OVER NATAL (today's push on Nifty · score ${D.natalTransit?D.natalTransit.score:0})</div>
+        <div class="ts"><table class="tbl"><thead><tr><th>Planet</th><th>Natal house</th><th>Push</th><th>Note</th></tr></thead><tbody>${tr||'<tr><td colspan=4 style="color:var(--tx3)">no strong transit hits</td></tr>'}</tbody></table></div>
+      </div>
+    </div>
+  </div>
+  <div class="pnl"><div class="ph"><span class="dot"></span>⏱ INTRADAY 5-MIN LAGNA / MOON TRANSITIONS · 09:15→15:30 (⟲ = inflection: lagna or nakshatra change)</div>
+    <div class="ts" style="max-height:340px;overflow:auto"><table class="tbl"><thead><tr><th>Time</th><th>Lagna</th><th>Moon Rashi</th><th>Nakshatra</th><th>Sub Lord</th><th>Pada</th></tr></thead><tbody>${slotRows}</tbody></table></div>
+  </div>
+</div>`;
+}
+
+function tBhavphal(){
+  const D=DATA;
+  function tbl(bv, title, sub){
+    const rows=bv.houses.map(h=>{
+      const vc = h.verdict.includes('STRONG ✓')?'var(--bull)':h.verdict.includes('Shubh')?'#7fe0b0':h.verdict.includes('STRONG ✗')?'var(--bear)':h.verdict.includes('Ashubh')?'#ff8a90':'var(--neut)';
+      const mk = BULL_HOUSES.has(h.h)?'<span style="color:var(--bull)">▲</span>':BEAR_HOUSES.has(h.h)?'<span style="color:var(--bear)">▼</span>':'';
+      return`<tr><td style="font-weight:700;color:var(--tx1)">H${h.h} ${mk}</td><td>${h.cuspSignName}</td><td style="color:${PC[h.lord]};font-weight:700">${h.lord}</td><td>H${h.lordHouse??'?'}</td><td style="font-size:11px">${h.occupants.join(' ')||'—'}</td><td style="font-family:monospace;color:${h.score>0?'var(--bull)':h.score<0?'var(--bear)':'var(--tx2)'}">${h.score>0?'+':''}${h.score}</td><td style="font-weight:700;color:${vc}">${h.verdict}</td><td style="font-size:9px;color:var(--tx3)">${h.factors.join(' · ')}</td></tr>`;
+    }).join('');
+    const mc=bv.marketScore;
+    return`<div class="pnl"><div class="ph" style="justify-content:space-between"><span><span class="dot"></span>${title}</span>
+        <span class="pill ${mc>0?'pb-b':mc<0?'pb-r':'pb-n'}">MARKET ${mc>0?'+':''}${mc}</span></div>
+      <div style="font-size:9px;color:var(--tx3);padding:4px 12px">${sub}</div>
+      <div class="ts"><table class="tbl"><thead><tr><th>House</th><th>Sign</th><th>Lord</th><th>Lord in</th><th>Occupants</th><th>Score</th><th>Verdict</th><th>Sutra factors</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  }
+  return`
+<div style="display:flex;flex-direction:column;gap:10px">
+  <div class="pnl"><div class="pb" style="font-size:10px;color:var(--tx2)">
+    <b style="color:var(--acc)">Bhav-Phal Sutra (bhavphal.md):</b> house lord in 6/8/12 weakens the house; in kendra(1,4,7,10)/trikona(1,5,9) it prospers; in 2/3/11 benefic. Lord combust(अस्त)/retrograde(वक्री) → reduction/delay. Lord within 5° of Rahu/Ketu → reduction. Natural malefics (Sun,Mars,Saturn,Rahu,Ketu) harm where they sit/aspect — except in upachaya 3/6/11. Market read: bull houses ▲ 1·2·5·9·11 vs bear houses ▼ 6·8·12.
+  </div></div>
+  ${tbl(D.bhavDay, '⌂ BHAV-PHAL — TODAY ('+S.date+') chart', 'Intraday house-strength on the day chart — drives the daily push.')}
+  ${tbl(D.bhavNatal, '⌂ BHAV-PHAL — NIFTY NATAL chart', 'Structural backdrop strength of the Nifty birth chart — the long-term bias the day modulates.')}
+</div>`;
+}
+
+
 function tGann(){
   const D=DATA;
   const dateObj=new Date(S.date);
@@ -2943,13 +4688,27 @@ function tGann(){
   const nC = parseFloat(S.niftyPC)   || PS.niftyPrev;
   const bO = parseFloat(S.bnOpen)    || PS.bnOpen;
   const bC = parseFloat(S.bnPC)      || PS.bnPrev;
+  // US indices
+  const nqO = parseFloat(S.nasdaqOpen) || PS.nasdaqOpen;
+  const nqC = parseFloat(S.nasdaqPC)   || PS.nasdaqPrev;
+  const djO = parseFloat(S.dowOpen)    || PS.dowOpen;
+  const djC = parseFloat(S.dowPC)      || PS.dowPrev;
+  const spO = parseFloat(S.spxOpen)    || PS.spxOpen;
+  const spC = parseFloat(S.spxPC)      || PS.spxPrev;
   const nA = resolveAnchor(S.gannAnchor, nO, nC);
   const bA = resolveAnchor(S.gannAnchor, bO, bC);
+  const nqA = resolveAnchor(S.gannAnchor, nqO, nqC);
+  const djA = resolveAnchor(S.gannAnchor, djO, djC);
+  const spA = resolveAnchor(S.gannAnchor, spO, spC);
   // Recompute Gann levels off the resolved anchor
-  const nGann = nA.price > 0 ? gannLevels(Math.round(nA.price)) : [];
-  const bGann = bA.price > 0 ? gannLevels(Math.round(bA.price)) : [];
+  const nGann  = nA.price > 0  ? gannLevels(Math.round(nA.price))  : [];
+  const bGann  = bA.price > 0  ? gannLevels(Math.round(bA.price))  : [];
+  const nqGann = nqA.price > 0 ? gannLevels(Math.round(nqA.price)) : [];
+  const djGann = djA.price > 0 ? gannLevels(Math.round(djA.price)) : [];
+  const spGann = spA.price > 0 ? gannLevels(Math.round(spA.price)) : [];
 
-  function gT(levels,name,anchor,altPrice,altLabel){
+  function gT(levels,name,anchor,altPrice,altLabel,locale){
+    locale = locale || 'en-IN';
     if(anchor.price <= 0){
       return `<div class="pnl">
         <div class="ph"><span class="dot"></span>GANN SQ9 · ${name}</div>
@@ -2959,7 +4718,7 @@ function tGann(){
     const drift = altPrice ? ((altPrice-anchor.price)/anchor.price*100) : 0;
     const driftCol = Math.abs(drift)<0.3?'var(--tx3)':drift>0?'var(--bull)':'var(--bear)';
     return`<div class="pnl">
-      <div class="ph"><span class="dot"></span>GANN SQ9 · ${name} · <span style="color:var(--acc)">${anchor.label} ${Math.round(anchor.price).toLocaleString('en-IN')}</span> · √${Math.round(anchor.price)}=${Math.sqrt(Math.round(anchor.price)).toFixed(4)}${altPrice?` · <span style="color:${driftCol};font-size:10px">${altLabel} ${Math.round(altPrice).toLocaleString('en-IN')} (${drift>=0?'+':''}${drift.toFixed(2)}%)</span>`:''}</div>
+      <div class="ph"><span class="dot"></span>GANN SQ9 · ${name} · <span style="color:var(--acc)">${anchor.label} ${Math.round(anchor.price).toLocaleString(locale)}</span> · √${Math.round(anchor.price)}=${Math.sqrt(Math.round(anchor.price)).toFixed(4)}${altPrice?` · <span style="color:${driftCol};font-size:10px">${altLabel} ${Math.round(altPrice).toLocaleString(locale)} (${drift>=0?'+':''}${drift.toFixed(2)}%)</span>`:''}</div>
       <div class="ts"><table class="tbl">
         <thead><tr><th>Units</th><th>Type</th><th>Price</th><th>Change %</th><th>Significance</th></tr></thead>
         <tbody>${levels.map(l=>{
@@ -2969,7 +4728,7 @@ function tGann(){
           return`<tr class="${base?'gbase':''}">
             <td style="font-family:monospace;color:var(--tx2)">${l.u===0?'BASE':l.u>0?`+${l.u}u`:`${l.u}u`}</td>
             <td style="color:#5ad0e0;font-size:10px">${l.type}</td>
-            <td style="font-family:monospace;color:${col};font-weight:${base?700:400};font-size:${base?13:11}px">${l.p.toLocaleString('en-IN')}</td>
+            <td style="font-family:monospace;color:${col};font-weight:${base?700:400};font-size:${base?13:11}px">${l.p.toLocaleString(locale)}</td>
             <td style="font-family:monospace;color:${col}">${l.pct>0?'+':''}${l.pct}%</td>
             <td style="color:var(--tx2);font-size:10px">${sig}</td>
           </tr>`;
@@ -2989,6 +4748,9 @@ function tGann(){
   // Cross-comparison: when anchor is Open, show PrevClose drift; vice versa
   const nAlt    = S.gannAnchor==='open' ? nC : nO;
   const bAlt    = S.gannAnchor==='open' ? bC : bO;
+  const nqAlt   = S.gannAnchor==='open' ? nqC : nqO;
+  const djAlt   = S.gannAnchor==='open' ? djC : djO;
+  const spAlt   = S.gannAnchor==='open' ? spC : spO;
   const altLbl  = S.gannAnchor==='open' ? 'PrevC' : 'Open';
 
   const anchorSelector = `
@@ -3000,20 +4762,29 @@ function tGann(){
       </select>
       <span style="color:var(--tx3);font-size:10px;border-left:1px solid var(--bd2);padding-left:14px">
         Nifty: <span style="color:var(--acc)">${nA.label}</span> <strong>${Math.round(nA.price||0).toLocaleString('en-IN')}</strong>
-        ${nO?` · Open ${Math.round(nO).toLocaleString('en-IN')}`:''}
-        ${nC?` · PC ${Math.round(nC).toLocaleString('en-IN')}`:''}
       </span>
       <span style="color:var(--tx3);font-size:10px;border-left:1px solid var(--bd2);padding-left:14px">
         BankN: <span style="color:var(--acc)">${bA.label}</span> <strong>${Math.round(bA.price||0).toLocaleString('en-IN')}</strong>
-        ${bO?` · Open ${Math.round(bO).toLocaleString('en-IN')}`:''}
-        ${bC?` · PC ${Math.round(bC).toLocaleString('en-IN')}`:''}
+      </span>
+      <span style="color:var(--tx3);font-size:10px;border-left:1px solid var(--bd2);padding-left:14px">
+        NASDAQ: <span style="color:#69F0AE">${nqA.label}</span> <strong>${Math.round(nqA.price||0).toLocaleString('en-US')}</strong>
+      </span>
+      <span style="color:var(--tx3);font-size:10px;border-left:1px solid var(--bd2);padding-left:14px">
+        DOW: <span style="color:#FF8A65">${djA.label}</span> <strong>${Math.round(djA.price||0).toLocaleString('en-US')}</strong>
+      </span>
+      <span style="color:var(--tx3);font-size:10px;border-left:1px solid var(--bd2);padding-left:14px">
+        SPX: <span style="color:#F06292">${spA.label}</span> <strong>${Math.round(spA.price||0).toLocaleString('en-US')}</strong>
       </span>
     </div>`;
 
   return`
 <div style="display:flex;flex-direction:column;gap:10px">
   ${anchorSelector}
-  <div class="g2">${gT(nGann,'Nifty 50',nA,nAlt,altLbl)}${gT(bGann,'Bank Nifty',bA,bAlt,altLbl)}</div>
+  <div style="font-size:10px;color:var(--acc);letter-spacing:.08em;font-weight:700;padding:4px 4px 0;text-transform:uppercase">🇮🇳 India Indices</div>
+  <div class="g2">${gT(nGann,'Nifty 50',nA,nAlt,altLbl,'en-IN')}${gT(bGann,'Bank Nifty',bA,bAlt,altLbl,'en-IN')}</div>
+  <div style="font-size:10px;color:var(--acc);letter-spacing:.08em;font-weight:700;padding:4px 4px 0;text-transform:uppercase;border-top:1px dashed var(--bd);padding-top:10px;margin-top:6px">🇺🇸 US Indices</div>
+  <div class="g2">${gT(nqGann,'NASDAQ Composite',nqA,nqAlt,altLbl,'en-US')}${gT(djGann,'Dow Jones',djA,djAlt,altLbl,'en-US')}</div>
+  <div class="g2">${gT(spGann,'S&P 500',spA,spAlt,altLbl,'en-US')}<div></div></div>
   <div class="pnl">
     <div class="ph"><span class="dot"></span>GANN TIME CYCLES · Day ${doy} / ${dateObj.getFullYear()}</div>
     <div class="ts"><table class="tbl">
@@ -3068,6 +4839,9 @@ function rEvents(){
   b('iD','change','date');b('iT','change','time');
   b('iNO','change','niftyOpen');b('iNC','change','niftyPC');
   b('iBO','change','bnOpen');b('iBC','change','bnPC');
+  b('iNQO','change','nasdaqOpen');b('iNQC','change','nasdaqPC');
+  b('iDJO','change','dowOpen');  b('iDJC','change','dowPC');
+  b('iSPO','change','spxOpen');  b('iSPC','change','spxPC');
   b('iA','change','ayMode');b('iGA','change','gannAnchor');
   // Lat/Lon binding — these mutate the module-level constants and re-render
   const eLA=document.getElementById('iLA');
@@ -3190,6 +4964,34 @@ const PRICE_SOURCES = [
     bn:   await yfFetch('^NSEBANK',  PROXIES[3])})},
 ];
 
+// ── US INDEX SOURCES ──────────────────────────────────────────────
+// NASDAQ Composite = ^IXIC, Dow Jones Industrial Average = ^DJI,
+// S&P 500 = ^GSPC. Yahoo doesn't serve direct CORS so we proxy. The
+// "open" returned is the US session's 09:30 ET open — during IST market
+// hours US markets are closed and the data is from the prior US session.
+const US_SOURCES = [
+  {name:'Yahoo US via allorigins/raw', go:async()=>({
+    nasdaq:await yfFetch('^IXIC', PROXIES[0]),
+    dow:   await yfFetch('^DJI',  PROXIES[0]),
+    spx:   await yfFetch('^GSPC', PROXIES[0])})},
+  {name:'Yahoo US via allorigins/get', go:async()=>({
+    nasdaq:await yfFetch('^IXIC', PROXIES[1]),
+    dow:   await yfFetch('^DJI',  PROXIES[1]),
+    spx:   await yfFetch('^GSPC', PROXIES[1])})},
+  {name:'Yahoo US via cors.lol', go:async()=>({
+    nasdaq:await yfFetch('^IXIC', PROXIES[4]),
+    dow:   await yfFetch('^DJI',  PROXIES[4]),
+    spx:   await yfFetch('^GSPC', PROXIES[4])})},
+  {name:'Yahoo US via corsproxy.io', go:async()=>({
+    nasdaq:await yfFetch('^IXIC', PROXIES[2]),
+    dow:   await yfFetch('^DJI',  PROXIES[2]),
+    spx:   await yfFetch('^GSPC', PROXIES[2])})},
+  {name:'Yahoo US via codetabs', go:async()=>({
+    nasdaq:await yfFetch('^IXIC', PROXIES[3]),
+    dow:   await yfFetch('^DJI',  PROXIES[3]),
+    spx:   await yfFetch('^GSPC', PROXIES[3])})},
+];
+
 function fmtPrice(p){
   if(!isFinitePos(p)) return '—';
   return Number(p).toLocaleString('en-IN',{maximumFractionDigits:2,minimumFractionDigits:2});
@@ -3216,6 +5018,9 @@ async function fetchPrices(){
   PS={...PS,state:'fetching',src:'',ts:nowISTStr(),tried:[]};
   const pb=document.getElementById('price-bar');
   if(pb) pb.innerHTML=buildPriceBar();
+
+  // Kick off US fetch in parallel — independent failure mode
+  fetchUSPrices();
 
   // ── Pre-market awareness ──────────────────────────────────────
   // Before 09:15 IST on a trading day, the "OPEN" field returned by
@@ -3268,6 +5073,63 @@ async function fetchPrices(){
   if(pb) pb.innerHTML=buildPriceBar();
 }
 
+// ── US INDEX FETCHER ──────────────────────────────────────────────
+// Runs in parallel with the India fetch. Independent failure mode.
+// US "open" is the 09:30 ET (= ~19:00 IST in summer, 20:00 IST in winter)
+// session open. During IST market hours US is closed → data is from the
+// previous US session. That's fine for KP analysis (uses PrevClose anchor
+// by default).
+async function fetchUSPrices(){
+  PS.usState = 'fetching'; PS.usSrc = ''; PS.usTried = [];
+  const pb = document.getElementById('price-bar');
+  if(pb) pb.innerHTML = buildPriceBar();
+  for(const src of US_SOURCES){
+    try{
+      PS.usTried.push(src.name);
+      if(pb) pb.innerHTML = buildPriceBar();
+      const r = await src.go();
+      const nqO=r.nasdaq?.open, djO=r.dow?.open, spO=r.spx?.open;
+      const nqP=r.nasdaq?.prevClose, djP=r.dow?.prevClose, spP=r.spx?.prevClose;
+      // Need at least Open or PrevClose for each
+      if(!isFinitePos(nqO)&&!isFinitePos(nqP)) throw new Error('no nasdaq data');
+      if(!isFinitePos(djO)&&!isFinitePos(djP)) throw new Error('no dow data');
+      if(!isFinitePos(spO)&&!isFinitePos(spP)) throw new Error('no spx data');
+      PS = {...PS,
+        usState:'ok', usSrc:src.name, usTs:nowISTStr(),
+        nasdaqOpen: isFinitePos(nqO)?nqO:PS.nasdaqOpen,
+        nasdaqPrev: isFinitePos(nqP)?nqP:PS.nasdaqPrev,
+        dowOpen:    isFinitePos(djO)?djO:PS.dowOpen,
+        dowPrev:    isFinitePos(djP)?djP:PS.dowPrev,
+        spxOpen:    isFinitePos(spO)?spO:PS.spxOpen,
+        spxPrev:    isFinitePos(spP)?spP:PS.spxPrev
+      };
+      // Auto-populate state inputs if user hasn't edited US values
+      if(!S._userEditedUSPrices){
+        // PrevClose always safe
+        if(isFinitePos(nqP)) S.nasdaqPC = String(Math.round(nqP));
+        if(isFinitePos(djP)) S.dowPC    = String(Math.round(djP));
+        if(isFinitePos(spP)) S.spxPC    = String(Math.round(spP));
+        // Open from prior US session (always at 09:30 ET — meaningful)
+        if(isFinitePos(nqO)) S.nasdaqOpen = String(Math.round(nqO));
+        if(isFinitePos(djO)) S.dowOpen    = String(Math.round(djO));
+        if(isFinitePos(spO)) S.spxOpen    = String(Math.round(spO));
+        // Re-render the inputs (price bar already updated)
+        ['iNQO','iNQC','iDJO','iDJC','iSPO','iSPC'].forEach(id=>{
+          const e = document.getElementById(id);
+          if(e){
+            const map = {iNQO:'nasdaqOpen',iNQC:'nasdaqPC',iDJO:'dowOpen',iDJC:'dowPC',iSPO:'spxOpen',iSPC:'spxPC'};
+            e.value = S[map[id]];
+          }
+        });
+      }
+      if(pb) pb.innerHTML = buildPriceBar();
+      return;
+    } catch(e){ /* try next */ }
+  }
+  PS.usState = 'error'; PS.usSrc = 'all US sources failed'; PS.usTs = nowISTStr();
+  if(pb) pb.innerHTML = buildPriceBar();
+}
+
 function buildPriceBar(){
   const stCol = PS.state==='ok' ? 'var(--bull)' :
                 PS.state==='error' ? 'var(--bear)' :
@@ -3287,82 +5149,129 @@ function buildPriceBar(){
     : PS.preMarket
       ? '⏳ Pre-market — today\'s 09:15 open does not exist yet. "Open" shown is previous session\'s open. Refresh after 09:15.'
       : '';
+
+  // US fetch status (independent from India fetch state)
+  const usStCol = PS.usState==='ok' ? 'var(--bull)' :
+                  PS.usState==='error' ? 'var(--bear)' :
+                  PS.usState==='fetching' ? 'var(--neut)' : 'var(--tx3)';
+  const usStIco = PS.usState==='ok' ? '●' :
+                  PS.usState==='fetching' ? '<span class="spin-anim">⟳</span>' :
+                  PS.usState==='error' ? '⚠' : '○';
+
+  // Helper to render one index unit (label + open + prev close)
+  const idxUnit = (name, openVal, prevVal, labelCol = '#3a8898') => `
+    <div style="display:flex;align-items:center;gap:10px;font-size:11px">
+      <span style="color:${labelCol};font-weight:700;letter-spacing:.05em">${name}</span>
+      <span style="display:flex;flex-direction:column;line-height:1.2">
+        <span style="font-size:9px;color:${stale?'var(--neut)':'var(--tx3)'};font-weight:${stale?700:400}">${openLbl}</span>
+        <strong style="color:${openCol};font-family:monospace;font-size:14px">${fmtPrice(openVal)}</strong>
+      </span>
+      <span style="display:flex;flex-direction:column;line-height:1.2">
+        <span style="font-size:9px;color:var(--tx3)">PREV CLOSE</span>
+        <strong style="color:var(--tx1);font-family:monospace;font-size:14px">${fmtPrice(prevVal)}</strong>
+      </span>
+    </div>`;
+
   return `
 <div style="background:var(--bg2);border-bottom:1px solid var(--bd);padding:8px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-  <div style="display:flex;align-items:center;gap:12px;font-size:11px">
-    <span style="color:#3a8898;font-weight:700;letter-spacing:.05em">NIFTY 50</span>
-    <span style="display:flex;flex-direction:column;line-height:1.2">
-      <span style="font-size:9px;color:${stale?'var(--neut)':'var(--tx3)'};font-weight:${stale?700:400}">${openLbl}</span>
-      <strong style="color:${openCol};font-family:monospace;font-size:14px">${fmtPrice(PS.niftyOpen||parseFloat(S.niftyOpen))}</strong>
-    </span>
-    <span style="display:flex;flex-direction:column;line-height:1.2">
-      <span style="font-size:9px;color:var(--tx3)">PREV CLOSE</span>
-      <strong style="color:var(--tx1);font-family:monospace;font-size:14px">${fmtPrice(PS.niftyPrev||parseFloat(S.niftyPC))}</strong>
-    </span>
-  </div>
+  ${idxUnit('NIFTY 50',  PS.niftyOpen||parseFloat(S.niftyOpen), PS.niftyPrev||parseFloat(S.niftyPC))}
   <div style="color:var(--bd2)">|</div>
-  <div style="display:flex;align-items:center;gap:12px;font-size:11px">
-    <span style="color:#3a8898;font-weight:700;letter-spacing:.05em">BANK NIFTY</span>
-    <span style="display:flex;flex-direction:column;line-height:1.2">
-      <span style="font-size:9px;color:${stale?'var(--neut)':'var(--tx3)'};font-weight:${stale?700:400}">${openLbl}</span>
-      <strong style="color:${openCol};font-family:monospace;font-size:14px">${fmtPrice(PS.bnOpen||parseFloat(S.bnOpen))}</strong>
-    </span>
-    <span style="display:flex;flex-direction:column;line-height:1.2">
-      <span style="font-size:9px;color:var(--tx3)">PREV CLOSE</span>
-      <strong style="color:var(--tx1);font-family:monospace;font-size:14px">${fmtPrice(PS.bnPrev||parseFloat(S.bnPC))}</strong>
-    </span>
-  </div>
+  ${idxUnit('BANK NIFTY', PS.bnOpen||parseFloat(S.bnOpen), PS.bnPrev||parseFloat(S.bnPC))}
   <div style="color:var(--bd2)">|</div>
   <div style="display:flex;align-items:center;gap:6px;font-size:10px;color:${stCol}">
     ${stIco}
     <span>${
-      PS.state==='ok'      ? `${PS.src} · ${PS.ts}` :
-      PS.state==='fetching'? `Fetching… (${tried||'starting'})` :
-      PS.state==='error'   ? `Auto-fetch failed — use ⎘ PASTE PRICES or edit values in header` :
-                              'Idle'
+      PS.state==='ok'      ? `IN: ${PS.src} · ${PS.ts}` :
+      PS.state==='fetching'? `IN: Fetching… (${tried||'starting'})` :
+      PS.state==='error'   ? `IN: Auto-fetch failed — use ⎘ PASTE or edit inputs` :
+                              'IN: Idle'
     }</span>
   </div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
     <span style="font-size:9px;color:${mh?'var(--bull)':'var(--tx3)'}">
       ${mh?'● MARKET LIVE':'○ MARKET CLOSED'}
     </span>
-    <button onclick="pastePrompt()" style="background:var(--bg3);color:var(--tx1);border:1px solid var(--bd2);padding:4px 10px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;letter-spacing:.05em" title="Paste 4 prices: Nifty Open, Nifty PC, BankN Open, BankN PC">
+    <button onclick="pastePrompt()" style="background:var(--bg3);color:var(--tx1);border:1px solid var(--bd2);padding:4px 10px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;letter-spacing:.05em" title="Paste prices: 4 India or 10 (India + US)">
       ⎘ PASTE PRICES
     </button>
     <button onclick="fetchPrices()" style="background:var(--bg3);color:var(--acc);border:1px solid var(--bd2);padding:4px 10px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px;letter-spacing:.05em">
       ⟳ REFRESH
     </button>
   </div>
+</div>
+<div style="background:var(--bg1);border-bottom:1px solid var(--bd);padding:6px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+  ${idxUnit('NASDAQ',     PS.nasdaqOpen||parseFloat(S.nasdaqOpen), PS.nasdaqPrev||parseFloat(S.nasdaqPC), '#69F0AE')}
+  <div style="color:var(--bd2)">|</div>
+  ${idxUnit('DOW JONES',  PS.dowOpen||parseFloat(S.dowOpen),       PS.dowPrev||parseFloat(S.dowPC),       '#FF8A65')}
+  <div style="color:var(--bd2)">|</div>
+  ${idxUnit('S&P 500',    PS.spxOpen||parseFloat(S.spxOpen),       PS.spxPrev||parseFloat(S.spxPC),       '#F06292')}
+  <div style="color:var(--bd2)">|</div>
+  <div style="display:flex;align-items:center;gap:6px;font-size:10px;color:${usStCol}">
+    ${usStIco}
+    <span>${
+      PS.usState==='ok'      ? `US: ${PS.usSrc} · ${PS.usTs}` :
+      PS.usState==='fetching'? `US: Fetching… (${(PS.usTried||[]).join(', ')||'starting'})` :
+      PS.usState==='error'   ? `US: Auto-fetch failed — edit values manually` :
+                                'US: Idle'
+    }</span>
+  </div>
+  <div style="margin-left:auto;font-size:9px;color:var(--tx3)">
+    NASDAQ ^IXIC · DOW ^DJI · SPX ^GSPC · NY 09:30 ET = ~19:00 IST
+  </div>
 </div>${staleMsg?`<div style="background:var(--neut3);border-bottom:1px solid var(--neut2);color:var(--neut);padding:5px 16px;font-size:10.5px;font-weight:700;letter-spacing:.05em">${staleMsg}</div>`:''}`;
 }
 
-// Paste 4 prices in any common separator format
+// Paste 4 (India only) or 10 (India + US) prices in any common separator format
 window.pastePrompt = function(){
-  const cur = `${S.niftyOpen},${S.niftyPC},${S.bnOpen},${S.bnPC}`;
+  const cur4  = `${S.niftyOpen},${S.niftyPC},${S.bnOpen},${S.bnPC}`;
+  const cur10 = `${cur4},${S.nasdaqOpen},${S.nasdaqPC},${S.dowOpen},${S.dowPC},${S.spxOpen},${S.spxPC}`;
   const txt = prompt(
-    'Paste 4 prices (any separator: comma, space, tab, newline):\n\n' +
-    'Order: NIFTY OPEN, NIFTY PREV CLOSE, BANKN OPEN, BANKN PREV CLOSE\n\n' +
+    'Paste 4 or 10 prices (any separator: comma, space, tab, newline):\n\n' +
+    '4 prices — INDIA ONLY:\n' +
+    '  NIFTY OPEN, NIFTY PC, BANKN OPEN, BANKN PC\n\n' +
+    '10 prices — INDIA + US:\n' +
+    '  NIFTY OPEN, NIFTY PC, BANKN OPEN, BANKN PC,\n' +
+    '  NASDAQ OPEN, NASDAQ PC, DOW OPEN, DOW PC, SPX OPEN, SPX PC\n\n' +
     'Examples:\n' +
     '  23970, 24176, 54832, 55310\n' +
-    '  23970 24176 54832 55310\n' +
-    '  23970.10  24176.15  54832.45  55310.55',
-    cur
+    '  23970 24176 54832 55310 21850 21900 44200 44150 6320 6310',
+    cur10
   );
   if(!txt) return;
-  // Parse: split on any non-number-ish char, keep digits/dot/minus
   const nums = txt.split(/[^\d.\-]+/).filter(Boolean).map(parseFloat).filter(n=>!isNaN(n)&&n>0);
   if(nums.length < 4){
-    alert(`Need 4 numbers, got ${nums.length}. Make sure to include:\nNifty Open, Nifty PC, BankN Open, BankN PC`);
+    alert(`Need 4 or 10 numbers, got ${nums.length}. India minimum:\nNifty Open, Nifty PC, BankN Open, BankN PC`);
     return;
   }
+  // India (always)
   S.niftyOpen = String(Math.round(nums[0]));
   S.niftyPC   = String(Math.round(nums[1]));
   S.bnOpen    = String(Math.round(nums[2]));
   S.bnPC      = String(Math.round(nums[3]));
   S._userEditedPrices = true;
-  // Also populate PS so the price bar shows them as authoritative
   PS = {...PS, state:'ok', src:'Manual paste', ts:nowISTStr(),
         niftyOpen:nums[0], niftyPrev:nums[1], bnOpen:nums[2], bnPrev:nums[3]};
+  // US (optional — only if 10 numbers given)
+  if(nums.length >= 10){
+    S.nasdaqOpen = String(Math.round(nums[4]));
+    S.nasdaqPC   = String(Math.round(nums[5]));
+    S.dowOpen    = String(Math.round(nums[6]));
+    S.dowPC      = String(Math.round(nums[7]));
+    S.spxOpen    = String(Math.round(nums[8]));
+    S.spxPC      = String(Math.round(nums[9]));
+    S._userEditedUSPrices = true;
+    PS = {...PS, usState:'ok', usSrc:'Manual paste', usTs:nowISTStr(),
+          nasdaqOpen:nums[4], nasdaqPrev:nums[5],
+          dowOpen:nums[6],    dowPrev:nums[7],
+          spxOpen:nums[8],    spxPrev:nums[9]};
+  } else if(nums.length >= 6){
+    // Partial US (e.g. 6 numbers = India + just NASDAQ): take what we have
+    if(nums[4]) S.nasdaqOpen = String(Math.round(nums[4]));
+    if(nums[5]) S.nasdaqPC   = String(Math.round(nums[5]));
+    if(nums[6]) S.dowOpen    = String(Math.round(nums[6]));
+    if(nums[7]) S.dowPC      = String(Math.round(nums[7]));
+    S._userEditedUSPrices = true;
+  }
   render();
 };
 
@@ -3378,6 +5287,7 @@ function scheduleAutoRefresh(){
 document.addEventListener('input', e=>{
   const id = e.target?.id;
   if(id==='iNO' || id==='iNC' || id==='iBO' || id==='iBC') S._userEditedPrices=true;
+  if(id==='iNQO' || id==='iNQC' || id==='iDJO' || id==='iDJC' || id==='iSPO' || id==='iSPC') S._userEditedUSPrices=true;
 });
 
 // ═══════════════════════════════════════════════════════════════════
