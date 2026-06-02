@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>KP Financial Astrology Terminal</title>
+<title>Financial Astrology Terminal</title>
 <!-- Astronomy Engine: VSOP87/ELP-2000 ephemeris (~150KB, cached after first load) -->
 <!-- Provides sub-arcsecond accuracy matching JPL Horizons / Swiss Ephemeris -->
 <script src="https://cdn.jsdelivr.net/npm/astronomy-engine@2.1.19/astronomy.browser.min.js"
@@ -91,7 +91,7 @@ html,body{width:100%;min-height:100vh;background:var(--bg0);color:var(--tx0);fon
 </div>
 <script>
 // ═══════════════════════════════════════════════════════════════════
-// KP FINANCIAL ASTROLOGY TERMINAL
+// FINANCIAL ASTROLOGY TERMINAL
 // ───────────────────────────────────────────────────────────────────
 // COMPLETE IMPLEMENTATION of Pt. Hardev Sharma Trivedi & Pt. Gopesh
 // Kumar Ojha, "Vyapaar Ratna" (व्यापार-रत्न), 9 modules:
@@ -2990,6 +2990,231 @@ function buildTransitCalendar(year, month, ayMode){
   events.sort((x,y)=>x.startMs-y.startMs || x.type.localeCompare(y.type));
   return {events, monthLabel:['January','February','March','April','May','June','July','August','September','October','November','December'][month-1]+' '+year};
 }
+// ═══════════════════════════════════════════════════════════════════
+// ★★★  RULE BOOK — Financial Astrology (Mukesh Garg) + BankNifty study ★★★
+//   Every X-folder rule, applied to the DAY forecast and INTRADAY movement.
+// ═══════════════════════════════════════════════════════════════════
+const YOG_BULL_SHAD = new Set(['0-7','1-6','2-9','3-8','4-11','5-10']);
+const YOG_BEAR_SHAD = new Set(['0-5','1-8','2-7','3-10','4-9','6-11']);
+const YOG_BULL_DWID = new Set(['1-2','3-4','5-6','7-8','9-10','0-11']);
+const YOG_BEAR_DWID = new Set(['0-1','2-3','4-5','6-7','8-9','10-11']);
+function _pairKey(a,b){ const lo=Math.min(a,b),hi=Math.max(a,b); return lo+'-'+hi; }
+const GROUP_A = new Set(['Moon','Sun','Mars','Jupiter']);
+const GROUP_B = new Set(['Mercury','Venus','Saturn']);
+const DEG_DIV = [
+  {d:0,pol:+1,name:'Purnansh (Conjunction)'},{d:180,pol:-1,name:'Dwitiyash (Opposition)'},
+  {d:120,pol:-1,name:'Tritiyans (Trekon 5/9)'},{d:90,pol:-1,name:'Chaturtayans (Kendra)'},
+  {d:72,pol:+1,name:'Panchamans (3/11)'},{d:60,pol:+1,name:'Shastans (Dwidarsh)'},
+  {d:45,pol:-1,name:'Ashtamans (Kendra)'},{d:40,pol:+1,name:'Navams (2/12·3/11)'},
+  {d:36,pol:+1,name:'Dashans (2/12)'},{d:30,pol:+1,name:'Dwadasans (2/12)'},
+  {d:24,pol:+1,name:'Panchdasans'},{d:22.5,pol:+1,name:'Shodsans'},{d:20,pol:-1,name:'Ashtadasans'},
+];
+const VASU_SG1 = new Set([0,1,4,7,8,9]);
+const VASU_A   = new Set([0,360,30,72,36,150,135]);
+const VASU_TABLE = {
+  Sun:[['Steep rise',1],['Rise with corrections',0.5],['Likely rise',0.8],['Steady',0]],
+  Moon:[['Rise/Steady, downward tendency',-0.2],['Steady',0],['Firm',0.5],['Fall with recovery',-0.5]],
+  Mars:[['Rise with minor fall',0.4],['Steady, no recovery',-0.3],['Steady',0],['Bearishness',-1]],
+  Mercury:[['Steady with reactions',0.2],['Steady tendency to fall',-0.4],['Firm with occasional fall',0.3],['Fall with recovery',-0.5]],
+  Jupiter:[['Rise with corrections',0.5],['Fall with recovery',-0.5],['Firm',0.5],['Fall with minor rise',-0.3]],
+  Venus:[['Bullish',1],['Steady',0],['Rise with correction',0.5],['Firm',0.5]],
+  Saturn:[['Good rise',0.8],['Rise with corrections',0.4],['Firm',0.5],['Bearish',-0.8]],
+  Rahu:[['Rise',0.6],['Rise with minor fall',-0.3],['Steady tends to fall',-0.3],['Bearish tendency',-0.6]],
+  Uranus:[['Sudden rise',1],['Rise with minor fall',-0.3],['Firm',0.5],['Steady with small rise',0.3]],
+  Neptune:[['Steady likely to fall',-0.3],['Fall to rise later',-0.2],['Steady',0],['Fall with recovery',-0.5]],
+  Pluto:[['Rise',0.6],['Rise with minor fall',-0.3],['Firm',0.5],['Fall with short rise',-0.4]],
+};
+const HORA = {
+  1:{shukla:{fav:['Venus','Sun','Mars','Saturn','Mercury'],unfav:['Rahu','Ketu','Jupiter']},krishna:{fav:['Rahu','Ketu','Jupiter'],unfav:['Venus','Sun','Mars','Saturn','Mercury']}},
+  2:{shukla:{fav:['Moon','Rahu','Ketu'],unfav:['Jupiter','Venus']},krishna:{fav:['Jupiter','Venus'],unfav:['Moon','Rahu','Ketu']}},
+  3:{shukla:{fav:['Moon','Rahu','Ketu'],unfav:['Jupiter','Venus']},krishna:{fav:['Jupiter','Venus'],unfav:['Moon','Rahu','Ketu']}},
+  4:{shukla:{fav:['Rahu','Ketu','Venus'],unfav:['Moon','Sun','Mars','Saturn','Mercury']},krishna:{fav:['Moon','Sun','Mars','Saturn','Mercury'],unfav:['Rahu','Ketu','Venus']}},
+  5:{shukla:{fav:['Moon','Jupiter'],unfav:['Rahu','Ketu','Sun','Mars','Saturn','Mercury']},krishna:{fav:['Rahu','Ketu','Sun','Mars','Saturn','Mercury'],unfav:['Moon','Jupiter']}},
+  0:{shukla:{fav:[],unfav:[]},krishna:{fav:[],unfav:[]}}, 6:{shukla:{fav:[],unfav:[]},krishna:{fav:[],unfav:[]}},
+};
+function horaClass(planet, weekday, paksha){
+  const h=HORA[weekday]; if(!h) return 0;
+  const p = paksha==='Shukla' ? h.shukla : h.krishna;
+  if(p.fav.includes(planet)) return +1;
+  if(p.unfav.includes(planet)) return -1;
+  return 0;
+}
+const MOON_OWN_SIGN = 3;
+const MOON_OWN_NAKS = new Set([3,12,21]);
+function moonDLNL(planets){
+  const mo=planets.find(p=>p.name==='Moon'); if(!mo) return {power:false, where:[]};
+  const where=[];
+  if(mo.s===MOON_OWN_SIGN) where.push('own sign (Cancer)');
+  if(MOON_OWN_NAKS.has(getNak(mo.lon).idx)) where.push('own nakshatra');
+  if(mo.d9Sign===MOON_OWN_SIGN) where.push('own navamsa');
+  return {power:where.length>0, where};
+}
+function moonDistanceKm(J){
+  try{ if(isAELoaded()){ const A=window.Astronomy, d=jdToDate(J); const v=A.GeoVector(A.Body.Moon,d,false); return Math.sqrt(v.x*v.x+v.y*v.y+v.z*v.z)*149597870.7; } }catch(e){}
+  return 384400;
+}
+function apogeePerigee(J){
+  const km=moonDistanceKm(J);
+  const d0=moonDistanceKm(J-0.5), d1=moonDistanceKm(J+0.5);
+  const trend = d1>d0 ? 'receding (→ apogee)' : 'approaching (→ perigee)';
+  let state='mid';
+  if(km<362000) state='PERIGEE (near)';
+  else if(km>402000) state='APOGEE (far)';
+  return { km:Math.round(km), state, trend,
+           hint: state.startsWith('PERIGEE')?'Moon nearest — emotional intensity & volatility high':
+                 state.startsWith('APOGEE')?'Moon farthest — sentiment flat / low conviction':'Moon mid-distance' };
+}
+function eclipseCheck(planets, rules){
+  const sun=planets.find(p=>p.name==='Sun'), moon=planets.find(p=>p.name==='Moon'),
+        rahu=planets.find(p=>p.name==='Rahu'), ketu=planets.find(p=>p.name==='Ketu');
+  if(!sun||!moon||!rahu) return {active:false, hint:'No eclipse proximity'};
+  const sep=(a,b)=>Math.abs(((a-b+180)%360)-180);
+  const sunNode=Math.min(sep(sun.lon,rahu.lon), sep(sun.lon,ketu.lon));
+  const t=rules.tithi;
+  if(t.name==='Amavasya' && sunNode<15) return {active:true, type:'SOLAR', sep:sunNode, hint:'Solar-eclipse season — sharp trend reset / high volatility'};
+  if(t.name==='Purnima'  && sunNode<15) return {active:true, type:'LUNAR', sep:sunNode, hint:'Lunar-eclipse season — emotional reversals / panic risk'};
+  if(sunNode<18) return {active:true, type:'NODE-NEAR', sep:sunNode, hint:'Sun near node — eclipse window approaching'};
+  return {active:false, sep:sunNode, hint:'Sun far from nodes — no eclipse'};
+}
+
+function computeRuleX(D){
+  const {planets, aspects, rules, J, dayLord, ascSid}=D;
+  const weekday=new Date(D.dateStr).getDay();
+  const paksha=rules.tithi.paksha;
+  const sep=(a,b)=>Math.abs(((a.lon-b.lon+180)%360)-180);
+  const byName=n=>planets.find(p=>p.name===n);
+  const core=planets.filter(p=>!['Uranus','Neptune','Pluto'].includes(p.name));
+
+  // 1. SHADASTAK / DWIDWADASH sign-pair yogs
+  const yogs=[];
+  for(let i=0;i<core.length;i++)for(let j=i+1;j<core.length;j++){
+    const a=core[i], b=core[j];
+    const d=((a.s-b.s)%12+12)%12, rel=Math.min(d,12-d);
+    if(rel!==1 && rel!==5) continue;
+    const key=_pairKey(a.s,b.s);
+    let kind=null, pol=0;
+    if(rel===5){ if(YOG_BULL_SHAD.has(key)){kind='Bullish Shadastak';pol=1;} else if(YOG_BEAR_SHAD.has(key)){kind='Bearish Shadastak';pol=-1;} }
+    if(rel===1){ if(YOG_BULL_DWID.has(key)){kind='Bullish Dwidwadash';pol=1;} else if(YOG_BEAR_DWID.has(key)){kind='Bearish Dwidwadash';pol=-1;} }
+    if(!kind) continue;
+    const aRC=a.retro||rules.combust.some(c=>c.name===a.name);
+    const bRC=b.retro||rules.combust.some(c=>c.name===b.name);
+    const contra=aRC||bRC;
+    const eff=contra? -pol : pol;
+    yogs.push({p1:a.name,p2:b.name,abb1:a.abbr,abb2:b.abbr,sign1:a.sign,sign2:b.sign,kind,pol,contra,eff,
+      impact:(!aRC&&!bRC)?'HIGH (both direct)':'CONTRA (retro/combust)'});
+  }
+
+  // 2. 2/12 · 3/11 · 6/8 GROUP rules
+  const groupRules=[];
+  for(let i=0;i<core.length;i++)for(let j=i+1;j<core.length;j++){
+    const a=core[i], b=core[j];
+    const d=((a.s-b.s)%12+12)%12, rel=Math.min(d,12-d);
+    const sameGroup=(GROUP_A.has(a.name)&&GROUP_A.has(b.name))||(GROUP_B.has(a.name)&&GROUP_B.has(b.name));
+    if(rel===1){ groupRules.push({p1:a.name,p2:b.name,rule:'2/12',pol:sameGroup?+1:-1,note:sameGroup?'same group (benefic)':'cross group (malefic)'}); }
+    else if(rel===5){ groupRules.push({p1:a.name,p2:b.name,rule:'6/8',pol:sameGroup?+1:-1,note:sameGroup?'same group (benefic)':'opposite group (malefic)'}); }
+    else if(rel===2){
+      const withSat=(a.name==='Saturn'||b.name==='Saturn');
+      let pol=+1, note='3/11 always benefic';
+      if(withSat){ if(d===2||d===10){ pol=(d===10)?+1:-1; note=(d===10)?'Saturn 11th aspect (benefic)':'Saturn 3rd aspect (bearish)'; } }
+      groupRules.push({p1:a.name,p2:b.name,rule:'3/11',pol,note});
+    }
+  }
+
+  // 3. Degree-division aspect polarity
+  const degAspects=aspects.map(a=>{
+    const m=DEG_DIV.find(x=>Math.abs(x.d-a.deg)<0.6)||DEG_DIV.find(x=>Math.abs((360-x.d)-a.deg)<0.6);
+    return m? {p1:a.p1,p2:a.p2,abb1:a.abb1,abb2:a.abb2,deg:a.deg,sym:a.sym,pol:m.pol,name:m.name,strength:a.strength}:null;
+  }).filter(Boolean);
+
+  // 4. P K Vasudev per-planet effect
+  const vasu=[];
+  for(const p of planets){
+    if(!VASU_TABLE[p.name]) continue;
+    const asp=aspects.filter(x=>x.p1===p.name||x.p2===p.name);
+    if(!asp.length) continue;
+    const best=asp.reduce((m,x)=>x.strength>m.strength?x:m, asp[0]);
+    const inA=VASU_A.has(Math.round(best.deg))||VASU_A.has(best.deg);
+    const sg1=VASU_SG1.has(p.s);
+    const col=(inA?0:2)+(sg1?0:1);
+    const cell=VASU_TABLE[p.name][col];
+    vasu.push({planet:p.name, abbr:p.abbr, angle:Math.round(best.deg), grp:inA?'A':'B', signGrp:sg1?'SG1':'SG2', effect:cell[0], pol:cell[1]});
+  }
+
+  // 5. HORA
+  const phNow = (D.slots&&D.slots.length)? (D.slots.find(s=>Math.abs(s.min-(D.timeIST*60))<8)||D.slots[0]).planet : dayLord;
+  const horaNow = { planet:phNow, cls:horaClass(phNow, weekday, paksha), weekday, paksha };
+  let horaFav=0, horaUnfav=0;
+  for(const s of (D.slots||[])){ const c=horaClass(s.planet, weekday, paksha); if(c>0)horaFav++; else if(c<0)horaUnfav++; }
+
+  // 6. Drasy / Drashta BEFORE-AFTER
+  const drasy=[];
+  const decTrendCache={};
+  const declAny=(name,Jx)=>{
+    if(name==='Rahu'||name==='Ketu'){ const lon=((name==='Rahu'?rahuLon(Jx):n360(rahuLon(Jx)+180)))*Math.PI/180;
+      const T=(Jx-2451545)/36525, eps=(23.4392911-0.0130042*T)*Math.PI/180; return Math.asin(Math.sin(eps)*Math.sin(lon))*180/Math.PI; }
+    try{ return declination(name,Jx); }catch(e){ return 0; } };
+  const decOf=n=>{ if(decTrendCache[n]) return decTrendCache[n]; const d0=declAny(n,J), dm=declAny(n,J-1); const r={dec:d0, rising:d0>dm}; decTrendCache[n]=r; return r; };
+  for(const a of aspects.slice(0,8)){
+    const p1=byName(a.p1), p2=byName(a.p2); if(!p1||!p2) continue;
+    let decisive=null, looser=null;
+    if(p1.h>=7 && p2.h<=6){decisive=p1;looser=p2;} else if(p2.h>=7 && p1.h<=6){decisive=p2;looser=p1;}
+    else { decisive = p1.h>=p2.h?p1:p2; looser = decisive===p1?p2:p1; }
+    const benefic=SHUBH_SET.has(decisive.name);
+    const dd=decOf(decisive.name);
+    let timing;
+    if(dd.dec>=0) timing = dd.rising ? 'AFTER' : 'BEFORE';
+    else timing = dd.rising===false ? 'AFTER' : 'BEFORE';
+    drasy.push({pair:`${a.abb1}${a.sym}${a.abb2}`, decisive:decisive.name, looser:looser.name,
+      effect:benefic?'Teji (bullish)':'Mandi (bearish)', dir:benefic?+1:-1, timing,
+      decl:dd.dec.toFixed(1)+(dd.dec>=0?'N':'S')});
+  }
+
+  // 7. Moon rules
+  const dlnl=moonDLNL(planets);
+  const moon=byName('Moon'), rahu=byName('Rahu'), ketu=byName('Ketu');
+  const moonNode = moon&&rahu&&ketu ? (Math.min(sep(moon,rahu),sep(moon,ketu))<6) : false;
+  const moonNodeWhich = moonNode ? (sep(moon,rahu)<sep(moon,ketu)?'Rahu':'Ketu') : null;
+  const bigMoon = (rules.tithi.name==='Purnima'||rules.tithi.name==='Amavasya');
+  const moonRules = {
+    dlnl, moonNode, moonNodeWhich, bigMoon, decl: rules.moonDecl,
+    hint: [
+      dlnl.power?`Moon strong (${dlnl.where.join(', ')}) — moves amplified`:'',
+      moonNode?`Moon conjunct ${moonNodeWhich} — strong ${moonNodeWhich==='Rahu'?'volatile':'sharp'} move likely`:'',
+      bigMoon?`${rules.tithi.name} — big move either side / trend change`:'',
+    ].filter(Boolean)
+  };
+
+  // 8. Tithi rules
+  const ta=rules.tithiAnomaly, tn=rules.tithi;
+  const tithiRules=[];
+  if(ta.type==='VRIDDHI') tithiRules.push({txt:`Tithi Vriddhi in ${paksha}`, pol: paksha==='Shukla'?+1:-1});
+  if(ta.type==='KSHAY')   tithiRules.push({txt:`Tithi Kshay in ${paksha}`,   pol: paksha==='Shukla'?-1:+1});
+  if(tn.name==='Trayodashi') tithiRules.push({txt:'Trayodashi (both paksha bearish)', pol:-1});
+  if(tn.name==='Ekadashi' && weekday===5) tithiRules.push({txt:'Ekadashi on Friday (high bearish)', pol:-1});
+  if(tn.name==='Amavasya' && weekday===1) tithiRules.push({txt:'Amavasya on Monday (bearish)', pol:-1});
+  if(tn.name==='Amavasya' && weekday===2) tithiRules.push({txt:'Amavasya on Tuesday (bullish)', pol:+1});
+
+  // 9. Apogee/Perigee + Eclipse
+  const lunarDist=apogeePerigee(J);
+  const eclipse=eclipseCheck(planets, rules);
+
+  // NET SCORE
+  const yogNet   = yogs.reduce((s,y)=>s+y.eff,0);
+  const grpNet   = groupRules.reduce((s,g)=>s+g.pol,0);
+  const degNet   = degAspects.reduce((s,a)=>s+a.pol*a.strength,0);
+  const vasuNet  = vasu.reduce((s,v)=>s+v.pol,0);
+  const tithiNet = tithiRules.reduce((s,t)=>s+t.pol,0);
+  const moonNet  = (moonRules.decl.movingToward==='SOUTH'?+1:-1) + (moonNode?(moonNodeWhich==='Ketu'?-1:0):0);
+  const horaNet  = horaNow.cls*2 + Math.sign(horaFav-horaUnfav);
+  const eclNet   = eclipse.active? -1 : 0;
+  const netScore = Math.max(-100,Math.min(100, Math.round(
+      yogNet*6 + grpNet*1.5 + degNet*4 + vasuNet*4 + tithiNet*5 + moonNet*4 + horaNet*3 + eclNet*4 )));
+
+  return { yogs, groupRules, degAspects, vasu, horaNow, horaFav, horaUnfav, drasy,
+           moonRules, tithiRules, lunarDist, eclipse,
+           sub:{yogNet,grpNet,degNet,vasuNet,tithiNet,moonNet,horaNet,eclNet}, netScore };
+}
+
 function buildIndexForecast(D){
   const {planets, aspects, rules, forecast, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, combinedScore}=D;
   const clamp=(v)=>Math.max(-100,Math.min(100,Math.round(v)));
@@ -3001,7 +3226,8 @@ function buildIndexForecast(D){
   const sb = sbc.netDir;
   const dn = declNet*22;
   const bvD = Math.max(-30,Math.min(30, bhavDay.marketScore*3));
-  const astroPack = clamp(fc*1.0 + bh + sb + dn + bvD);
+  const rx = D.ruleX? D.ruleX.netScore : 0;
+  const astroPack = clamp(fc*1.0 + bh + sb + dn + bvD + rx*0.5);
   const baseDay = clamp(combinedScore*0.55 + astroPack*0.55);
   const t=rules.tithi;
   const bigMoon = (t.name==='Purnima'||t.name==='Amavasya');
@@ -3180,7 +3406,8 @@ function computeAll(dateStr,timeIST,ayMode){
     + forecastDirScore    * 0.12
   );
   const combinedLabel = combinedScore>15?'BULLISH':combinedScore<-15?'BEARISH':'NEUTRAL';
-  const astroDF = buildIndexForecast({planets, aspects, rules, forecast, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, combinedScore, sharCrossings});
+  const ruleX = computeRuleX({planets, aspects, rules, J, dayLord, ascSid, dateStr, timeIST, slots});
+  const astroDF = buildIndexForecast({planets, aspects, rules, forecast, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, combinedScore, sharCrossings, ruleX});
 
   return{J,ay,ayMode,ascSid,ascSign,ascSub,ascNak,mcSid,planets,dayLord,moon,rp,
     rMin,sMin,hlMin,phpHours,slots,bias,dateStr,timeIST,
@@ -3194,7 +3421,7 @@ function computeAll(dateStr,timeIST,ayMode){
     // forecast engine
     forecast, forecastDirScore,
     combinedScore, combinedLabel,
-    natal, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, slots5, astroDF};
+    natal, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, slots5, astroDF, ruleX};
 }
 
 function mtt(m){let h=Math.floor(m/60),mn=Math.floor(m%60);return`${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}`;}
@@ -3312,7 +3539,7 @@ function rHdr(){
 <header class="hdr">
   <div class="hdr-r1">
     <div>
-      <div class="brand">⬡ KP FINANCIAL ASTROLOGY TERMINAL</div>
+      <div class="brand">⬡FINANCIAL ASTROLOGY TERMINAL</div>
       <div class="brand-sub">MUMBAI ${LAT.toFixed(4)}°N ${LON.toFixed(4)}°E · NSE/BSE · ${ayLabel.toUpperCase()} ${dms(D.ay,2)} · ${days[dateObj.getDay()]} ${mons[dateObj.getMonth()]} ${dateObj.getDate()} ${dateObj.getFullYear()} · IST ${mtt(parseFloat(S.time)*60)} → UTC ${mtt((parseFloat(S.time)-5.5)*60)} · EPH ${D.ephSrc}</div>
     </div>
     <div class="ctrl-row">
@@ -3365,12 +3592,12 @@ function rHdr(){
 // NAV
 // ═══════════════════════════════════════════════════════════════════
 function rNav(){
-  const tabs=[['overview','▦ Overview'],['dayfc','☉ Day Forecast'],['shar','⟐ Shar Parivartan'],['transit','⊞ Transit Cal'],['kundali','◇ Natal·Intraday'],['bhav','⌂ Bhav Phal'],['vr','★ Vyapaar Ratna'],['rules','⚖ Astro Rules'],['kp','⊕ KP Planets'],['charts','◈ D1·D9'],['sbc','⬡ SBC Grid'],['timing','⏱ 15-min Timing'],['gann','⌇ Gann SQ9']];
+  const tabs=[['overview','▦ Overview'],['dayfc','☉ Day Forecast'],['shar','⟐ Shar Parivartan'],['transit','⊞ Transit Cal'],['kundali','◇ Natal·Intraday'],['bhav','⌂ Bhav Phal'],['rulebook','⚜ Rule Book'],['vr','★ Vyapaar Ratna'],['rules','⚖ Astro Rules'],['kp','⊕ KP Planets'],['charts','◈ D1·D9'],['sbc','⬡ SBC Grid'],['timing','⏱ 15-min Timing'],['gann','⌇ Gann SQ9']];
   document.getElementById('NAV').innerHTML=tabs.map(([k,v])=>`<button class="nb${S.tab===k?' on':''}" onclick="gs({tab:'${k}'})">${v}</button>`).join('');
 }
 
 function rMain(){
-  const fns={overview:tOverview,dayfc:tDayForecast,shar:tSharParivartan,transit:tTransit,kundali:tKundali,bhav:tBhavphal,vr:tVR,rules:tRules,kp:tKP,charts:tCharts,sbc:tSBC,timing:tTiming,gann:tGann};
+  const fns={overview:tOverview,dayfc:tDayForecast,shar:tSharParivartan,transit:tTransit,kundali:tKundali,bhav:tBhavphal,rulebook:tRuleBook,vr:tVR,rules:tRules,kp:tKP,charts:tCharts,sbc:tSBC,timing:tTiming,gann:tGann};
   document.getElementById('MAIN').innerHTML=(fns[S.tab]||tOverview)();
 }
 
@@ -3959,6 +4186,7 @@ function tSBC(){
 // ═══════════════════════════════════════════════════════════════════
 function tTiming(){
   const D=DATA;
+  const _hw=new Date(S.date).getDay(), _hp=D.ruleX?D.ruleX.horaNow.paksha:(D.rules?D.rules.tithi.paksha:'Shukla');
   const curMin=parseFloat(S.time)*60;
   return`
 <div style="display:flex;flex-direction:column;gap:10px">
@@ -3969,7 +4197,7 @@ function tTiming(){
     <div class="ts">
       <table class="tbl">
         <thead><tr>
-          <th>Time IST</th><th>PL Hour</th><th>Bias</th>
+          <th>Time IST</th><th>PL Hour</th><th>Hora</th><th>Bias</th>
           <th>Moon Rashi</th><th>Moon °</th><th>Nakshatra</th><th>Nak Lord</th><th>Sub Lord</th><th>SS Lord</th><th>Pada</th>
           <th>KP Indication</th><th>Action</th>
         </tr></thead>
@@ -3980,6 +4208,7 @@ function tTiming(){
             return`<tr class="${cls}${hl?' tr-hl':''}">
               <td style="font-family:monospace;font-weight:700;color:${hl?'var(--acc)':'var(--tx1)'};white-space:nowrap">${sl.time}${hl?' ◄':''}</td>
               <td style="color:${PC[sl.planet]};font-weight:700">${sl.planet}</td>
+              <td style="font-weight:700;font-size:10px">${(()=>{const c=horaClass(sl.planet,_hw,_hp);return c>0?'<span style="color:var(--bull)">FAV</span>':c<0?'<span style="color:var(--bear)">UNFAV</span>':'<span style="color:var(--tx3)">—</span>';})()}</td>
               <td style="white-space:nowrap"><span style="color:${sl.hb.col};font-weight:700">${sl.hb.arrow} ${sl.hb.bias}</span></td>
               <td style="color:var(--tx1)">${sl.moonSign.slice(0,4)}</td>
               <td style="font-family:monospace;color:var(--tx1)">${dmsC(sl.moonDeg)}</td>
@@ -4816,6 +5045,115 @@ function tBhavphal(){
 </div>`;
 }
 
+
+function tRuleBook(){
+  const D=DATA, R=D.ruleX;
+  if(!R) return '<div style="padding:20px;color:var(--tx3)">Rule engine not available.</div>';
+  const sgn=v=>v>0?'var(--bull)':v<0?'var(--bear)':'var(--tx2)';
+  const pill=(v,lbl)=>`<span class="pill ${v>0?'pb-b':v<0?'pb-r':'pb-n'}">${lbl} ${v>0?'+':''}${v}</span>`;
+  // yogs
+  const yogRows=R.yogs.map(y=>`<tr>
+    <td><strong style="color:${pc(y.p1)}">${y.abb1}</strong> <span style="color:var(--tx3)">${y.sign1.slice(0,3)}</span> · <strong style="color:${pc(y.p2)}">${y.abb2}</strong> <span style="color:var(--tx3)">${y.sign2.slice(0,3)}</span></td>
+    <td style="font-weight:700;color:${y.kind.startsWith('Bullish')?'var(--bull)':'var(--bear)'}">${y.kind}</td>
+    <td style="text-align:center;font-weight:700;color:${sgn(y.eff)}">${y.eff>0?'▲ BULL':'▼ BEAR'}</td>
+    <td style="font-size:10px;color:${y.contra?'var(--neut)':'var(--tx2)'}">${y.impact}${y.contra?' ⇄ contra':''}</td></tr>`).join('');
+  // group rules (summarize)
+  const grpBull=R.groupRules.filter(g=>g.pol>0).length, grpBear=R.groupRules.filter(g=>g.pol<0).length;
+  const grpRows=R.groupRules.slice(0,16).map(g=>`<tr>
+    <td><strong style="color:${pc(g.p1)}">${g.p1.slice(0,2)}</strong>·<strong style="color:${pc(g.p2)}">${g.p2.slice(0,2)}</strong></td>
+    <td style="color:var(--tx2)">${g.rule}</td>
+    <td style="font-weight:700;color:${sgn(g.pol)}">${g.pol>0?'Benefic':'Malefic'}</td>
+    <td style="font-size:10px;color:var(--tx3)">${g.note}</td></tr>`).join('');
+  // degree division
+  const degRows=R.degAspects.map(a=>`<tr>
+    <td><strong style="color:${pc(a.p1)}">${a.abb1}</strong> ${a.sym} <strong style="color:${pc(a.p2)}">${a.abb2}</strong></td>
+    <td style="font-family:monospace">${a.deg}°</td><td style="font-size:10px;color:var(--tx2)">${a.name}</td>
+    <td style="font-weight:700;color:${sgn(a.pol)}">${a.pol>0?'▲':'▼'}</td>
+    <td style="font-family:monospace;color:var(--tx3)">${(a.strength*100).toFixed(0)}%</td></tr>`).join('');
+  // vasudev
+  const vasuRows=R.vasu.map(v=>`<tr>
+    <td><strong style="color:${pc(v.planet)}">${v.abbr} ${v.planet}</strong></td>
+    <td style="font-family:monospace">${v.angle}° (${v.grp})</td><td>${v.signGrp}</td>
+    <td style="color:${sgn(v.pol)};font-weight:700">${v.effect}</td></tr>`).join('');
+  // hora
+  const hw=R.horaNow.weekday, hp=R.horaNow.paksha;
+  const HRA=(typeof HORA!=='undefined')?HORA[hw]:null;
+  const horaSide=HRA?(hp==='Shukla'?HRA.shukla:HRA.krishna):{fav:[],unfav:[]};
+  const drasyRows=R.drasy.map(d=>`<tr>
+    <td style="font-weight:700">${d.pair}</td>
+    <td style="color:${pc(d.decisive)}">${d.decisive}</td>
+    <td style="font-weight:700;color:${sgn(d.dir)}">${d.effect}</td>
+    <td style="font-weight:700;color:var(--acc)">${d.timing}</td>
+    <td style="font-family:monospace;color:var(--tx3)">${d.decl}</td></tr>`).join('');
+  return `
+<div style="display:flex;flex-direction:column;gap:10px">
+  <div class="pnl"><div class="ph"><span class="dot"></span>RULE-BOOK NET BIAS · ${D.dateStr}</div>
+    <div class="pb"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <span class="pill ${R.netScore>15?'pb-b':R.netScore<-15?'pb-r':'pb-n'}" style="font-size:13px;padding:3px 12px">${R.netScore>15?'BULLISH':R.netScore<-15?'BEARISH':'NEUTRAL'} ${R.netScore>0?'+':''}${R.netScore}</span>
+      ${pill(R.sub.yogNet,'Yog')} ${pill(R.sub.grpNet,'2-12/6-8')} ${pill(R.sub.degNet|0,'Degree')} ${pill(R.sub.vasuNet|0,'Vasudev')} ${pill(R.sub.tithiNet,'Tithi')} ${pill(R.sub.moonNet,'Moon')} ${pill(R.sub.horaNet,'Hora')} ${pill(R.sub.eclNet,'Eclipse')}
+    </div>
+    <div style="font-size:9px;color:var(--tx3);margin-top:6px">All rules from the X-folder pages (Mukesh Garg "Financial Astrology" + BankNifty Astro study), applied to the day. Feeds the Day Forecast.</div></div>
+  </div>
+  <div class="g2">
+    <div class="pnl"><div class="ph"><span class="dot"></span>SHADASTAK (6/8) & DWIDWADASH (2/12) YOGS</div>
+      <div class="ts"><table class="tbl"><thead><tr><th>Pair</th><th>Yog</th><th>Bias</th><th>Impact</th></tr></thead><tbody>${yogRows||'<tr><td colspan=4 style="color:var(--tx3)">none active</td></tr>'}</tbody></table></div>
+      <div style="padding:4px 12px;font-size:9px;color:var(--tx3)">Both planets direct = high impact; if either retro/combust the result is contra (flipped); degree checked.</div>
+    </div>
+    <div class="pnl"><div class="ph"><span class="dot"></span>2/12 · 3/11 · 6/8 GROUP RULES · ${grpBull}▲ / ${grpBear}▼</div>
+      <div class="ts" style="max-height:300px;overflow:auto"><table class="tbl"><thead><tr><th>Pair</th><th>Rel</th><th>Result</th><th>Why</th></tr></thead><tbody>${grpRows}</tbody></table></div>
+      <div style="padding:4px 12px;font-size:9px;color:var(--tx3)">Group A: Moon·Sun·Mars·Jupiter · Group B: Mercury·Venus·Saturn. Same group = benefic, cross/opposite = malefic. 3/11 always benefic except Saturn 3rd (bearish).</div>
+    </div>
+  </div>
+  <div class="g2">
+    <div class="pnl"><div class="ph"><span class="dot"></span>P K VASUDEV — ASPECT/DECLINATION PRICE EFFECT</div>
+      <div class="ts"><table class="tbl"><thead><tr><th>Planet</th><th>Angle (grp)</th><th>Sign grp</th><th>Price effect</th></tr></thead><tbody>${vasuRows||'<tr><td colspan=4 style="color:var(--tx3)">no aspects</td></tr>'}</tbody></table></div>
+      <div style="padding:4px 12px;font-size:9px;color:var(--tx3)">Angle grp A = 0·30·36·72·135·150 · grp B = 45·60·90·120·180. Sign grp SG1 = Ar·Ta·Le·Sc·Sg·Cp · SG2 = Ge·Cn·Vi·Li·Aq·Pi.</div>
+    </div>
+    <div class="pnl"><div class="ph"><span class="dot"></span>DEGREE-DIVISION ASPECTS (book p.33)</div>
+      <div class="ts" style="max-height:300px;overflow:auto"><table class="tbl"><thead><tr><th>Pair</th><th>°</th><th>Division</th><th>Bias</th><th>Exact</th></tr></thead><tbody>${degRows||'<tr><td colspan=5 style="color:var(--tx3)">none</td></tr>'}</tbody></table></div>
+    </div>
+  </div>
+  <div class="g2">
+    <div class="pnl"><div class="ph"><span class="dot"></span>STOCK-MARKET HORA (Ashok Kumar) · ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][hw]} · ${hp} paksha</div>
+      <div class="pb">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+          <span class="ml">NOW</span> <strong style="color:${pc(R.horaNow.planet)}">${R.horaNow.planet}</strong>
+          <span class="pill ${R.horaNow.cls>0?'pb-b':R.horaNow.cls<0?'pb-r':'pb-n'}">${R.horaNow.cls>0?'FAVOURABLE':R.horaNow.cls<0?'UNFAVOURABLE':'NEUTRAL'}</span>
+          <span style="color:var(--tx3);font-size:10px">Day hours: <b style="color:var(--bull)">${R.horaFav} fav</b> / <b style="color:var(--bear)">${R.horaUnfav} unfav</b></span>
+        </div>
+        <div style="font-size:11px"><span style="color:var(--bull);font-weight:700">Favourable:</span> ${horaSide.fav.map(p=>`<span style="color:${pc(p)}">${p}</span>`).join(', ')||'N/A'}</div>
+        <div style="font-size:11px;margin-top:3px"><span style="color:var(--bear);font-weight:700">Unfavourable:</span> ${horaSide.unfav.map(p=>`<span style="color:${pc(p)}">${p}</span>`).join(', ')||'N/A'}</div>
+        <div style="font-size:9px;color:var(--tx3);margin-top:6px">Trade with favourable planetary hours; avoid/contra during unfavourable. Shown live per planetary hour in the 15-min Timing tab.</div>
+      </div>
+    </div>
+    <div class="pnl"><div class="ph"><span class="dot"></span>DRASY/DRASHTA — BEFORE/AFTER (intraday timing)</div>
+      <div class="ts" style="max-height:300px;overflow:auto"><table class="tbl"><thead><tr><th>Aspect</th><th>Decisive</th><th>Effect</th><th>Timing</th><th>Decl</th></tr></thead><tbody>${drasyRows||'<tr><td colspan=5 style="color:var(--tx3)">none</td></tr>'}</tbody></table></div>
+      <div style="padding:4px 12px;font-size:9px;color:var(--tx3)">Decisive (Drasy) = planet in 7th–12th house. Benefic decisive = Teji. Declination North rising → AFTER, falling → BEFORE; South increasing → BEFORE — effect lands relative to the exact aspect, within Ardh Bhag.</div>
+    </div>
+  </div>
+  <div class="pnl"><div class="ph"><span class="dot"></span>MOON · TITHI · LUNAR DISTANCE · ECLIPSE</div>
+    <div class="pb" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;font-size:11px">
+      <div><div style="color:var(--acc);font-weight:700;margin-bottom:3px">MOON RULES</div>
+        ${R.moonRules.hint.length?R.moonRules.hint.map(h=>`<div style="color:var(--tx1)">• ${h}</div>`).join(''):'<div style="color:var(--tx3)">Moon neutral today</div>'}
+        <div style="color:var(--tx2);margin-top:3px">Decl ${R.moonRules.decl.dec.toFixed(1)}° ${R.moonRules.decl.hemisphere}, moving ${R.moonRules.decl.movingToward} ${R.moonRules.decl.movingToward==='SOUTH'?'<span style="color:var(--bull)">(bullish)</span>':'<span style="color:var(--bear)">(pressure)</span>'}</div>
+        <div style="color:var(--tx3);font-size:9px;margin-top:3px">DLNL: ${R.moonRules.dlnl.power?R.moonRules.dlnl.where.join(', '):'not in own sign/nak/navamsa'}</div>
+      </div>
+      <div><div style="color:var(--acc);font-weight:700;margin-bottom:3px">TITHI RULES</div>
+        ${R.tithiRules.length?R.tithiRules.map(t=>`<div style="color:${sgn(t.pol)}">• ${t.txt} ${t.pol>0?'▲':'▼'}</div>`).join(''):'<div style="color:var(--tx3)">no special tithi rule today</div>'}
+      </div>
+      <div><div style="color:var(--acc);font-weight:700;margin-bottom:3px">LUNAR DISTANCE</div>
+        <div style="color:var(--tx1)">${R.lunarDist.km.toLocaleString()} km</div>
+        <div style="font-weight:700;color:${R.lunarDist.state.startsWith('PERIGEE')?'var(--bear)':R.lunarDist.state.startsWith('APOGEE')?'var(--neut)':'var(--tx2)'}">${R.lunarDist.state}</div>
+        <div style="color:var(--tx3);font-size:9px">${R.lunarDist.trend} · ${R.lunarDist.hint}</div>
+      </div>
+      <div><div style="color:var(--acc);font-weight:700;margin-bottom:3px">ECLIPSE</div>
+        <div style="font-weight:700;color:${R.eclipse.active?'var(--bear)':'var(--tx2)'}">${R.eclipse.active?(R.eclipse.type||'ACTIVE'):'None'}</div>
+        <div style="color:var(--tx3);font-size:9px">${R.eclipse.hint}</div>
+      </div>
+    </div>
+  </div>
+</div>`;
+}
 
 function tTransit(){
   const D=DATA;
