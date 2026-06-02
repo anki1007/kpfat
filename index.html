@@ -2933,6 +2933,63 @@ function planetCondition(name, planets, aspects){
   return { score:Math.round(s*10)/10, notes };
 }
 
+function _signOf(lon){return Math.floor(n360(lon)/30);}
+function segmentBy(series, keyFn, emit){
+  let a=0, prev=keyFn(series[0]);
+  for(let i=1;i<series.length;i++){ const k=keyFn(series[i]); if(k!==prev){ emit(a,i-1,prev); a=i; prev=k; } }
+  emit(a, series.length-1, prev);
+}
+function buildTransitCalendar(year, month, ayMode){
+  const PLN=['Sun','Mercury','Venus','Mars','Jupiter','Saturn','Rahu','Ketu','Uranus','Neptune'];
+  const CONJ_SET=['Sun','Mercury','Venus','Mars','Jupiter','Saturn'];
+  const SLOW=new Set(['Jupiter','Saturn','Rahu','Ketu','Uranus','Neptune']);
+  const COMB_ORB={Mars:17,Mercury:14,Jupiter:11,Venus:10,Saturn:15};
+  const monthStartMs=new Date(year,month-1,1).getTime();
+  const monthEndMs=new Date(year,month,0).getTime();
+  const DAYS=212;
+  const series=[];
+  for(let i=-3;i<DAYS;i++){
+    const dt=new Date(year,month-1,1+i);
+    const J=JD(dt.getFullYear(),dt.getMonth()+1,dt.getDate(),12);
+    const ay=getAyanamsa(J,ayMode);
+    const pos={};
+    for(const b of PLN){ const raw=(b==='Rahu')?rahuLon(J):(b==='Ketu')?n360(rahuLon(J)+180):geoLon(b,J); pos[b]=n360(raw-ay); }
+    const st={};
+    for(const b of PLN){
+      const lon=pos[b], sg=_signOf(lon), nk=getNak(lon);
+      const retro=(b==='Rahu'||b==='Ketu')?true:isRetrograde(b,J);
+      let combust=false; const orb=COMB_ORB[b];
+      if(orb){ const sep=Math.abs(((lon-pos.Sun+180)%360)-180); combust=sep<=orb; }
+      const dignity=(EXALT_SIGN[b]===sg)?'Exalted':(DEBIL_SIGN[b]===sg)?'Debilitated':null;
+      st[b]={lon,sign:sg,nak:nk.idx,pada:nk.pada,retro,combust,dignity};
+    }
+    series.push({ms:dt.getTime(),date:dt,st});
+  }
+  const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const fmt=d=>MON[d.getMonth()]+' '+String(d.getDate()).padStart(2,'0');
+  const events=[];
+  function pushSeg(type,planet,a,z,label,extra){
+    const sMs=series[a].ms, eMs=series[z].ms;
+    if(eMs<monthStartMs||sMs>monthEndMs) return;
+    const ongoing=(z===series.length-1);
+    const dispStartMs=Math.max(sMs,monthStartMs);
+    events.push({type,planet,label,startMs:dispStartMs,
+      range:fmt(new Date(dispStartMs))+' → '+(ongoing?'ongoing':fmt(series[z].date)),
+      fromBefore:sMs<monthStartMs, ...(extra||{})});
+  }
+  for(const b of PLN){
+    segmentBy(series,x=>x.st[b].sign,(a,z,v)=>pushSeg('SIGN',b,a,z,`${b} in ${SIGNS[v]}`,{deg0:a>0?series[a].st[b].lon%30:null}));
+    segmentBy(series,x=>x.st[b].nak,(a,z,v)=>pushSeg('NAK',b,a,z,`${b} in ${NAKS[v].n}`,{deg0:a>0?series[a].st[b].lon%30:null}));
+    if(SLOW.has(b)) segmentBy(series,x=>x.st[b].nak*4+x.st[b].pada,(a,z,v)=>{const nk=series[a].st[b].nak,pd=series[a].st[b].pada;pushSeg('PADA',b,a,z,`${b} in ${NAKS[nk].n} Pada ${pd}`,{});});
+    segmentBy(series,x=>x.st[b].retro,(a,z,v)=>{if(v && b!=='Rahu' && b!=='Ketu')pushSeg('RETRO',b,a,z,`${b} Retrograde in ${SIGNS[series[a].st[b].sign]}`,{});});
+    segmentBy(series,x=>x.st[b].combust,(a,z,v)=>{if(v)pushSeg('COMBUST',b,a,z,`${b} Combust`,{});});
+    segmentBy(series,x=>x.st[b].dignity||'',(a,z,v)=>{if(v)pushSeg('DIGNITY',b,a,z,`${b} ${v} in ${SIGNS[series[a].st[b].sign]}`,{dig:v});});
+  }
+  for(let i=0;i<CONJ_SET.length;i++)for(let j=i+1;j<CONJ_SET.length;j++){const PA=CONJ_SET[i],PB=CONJ_SET[j];
+    segmentBy(series,x=>(x.st[PA].sign===x.st[PB].sign)?x.st[PA].sign:-1,(a,z,v)=>{if(v>=0)pushSeg('CONJ',PA+'+'+PB,a,z,`${PA}, ${PB} Conjunction in ${SIGNS[v]}`,{});});}
+  events.sort((x,y)=>x.startMs-y.startMs || x.type.localeCompare(y.type));
+  return {events, monthLabel:['January','February','March','April','May','June','July','August','September','October','November','December'][month-1]+' '+year};
+}
 function buildIndexForecast(D){
   const {planets, aspects, rules, forecast, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, combinedScore}=D;
   const clamp=(v)=>Math.max(-100,Math.min(100,Math.round(v)));
@@ -3203,7 +3260,7 @@ let S={date:todayStr(),time:nowTimeIST(),
        dowOpen:'44200',dowPC:'44150',
        spxOpen:'6320',spxPC:'6310',
        tab:'overview',ayMode:'lahiri',gannAnchor:'open',
-       spFrom:'',spTo:'',time5:''};
+       spFrom:'',spTo:'',time5:'',calYear:0,calMonth:0};
 let DATA=null;
 let PS={state:'idle',src:'',ts:'',
         niftyOpen:null,bnOpen:null,niftyPrev:null,bnPrev:null,
@@ -3308,12 +3365,12 @@ function rHdr(){
 // NAV
 // ═══════════════════════════════════════════════════════════════════
 function rNav(){
-  const tabs=[['overview','▦ Overview'],['dayfc','☉ Day Forecast'],['shar','⟐ Shar Parivartan'],['kundali','◇ Natal·Intraday'],['bhav','⌂ Bhav Phal'],['vr','★ Vyapaar Ratna'],['rules','⚖ Astro Rules'],['kp','⊕ KP Planets'],['charts','◈ D1·D9'],['sbc','⬡ SBC Grid'],['timing','⏱ 15-min Timing'],['gann','⌇ Gann SQ9']];
+  const tabs=[['overview','▦ Overview'],['dayfc','☉ Day Forecast'],['shar','⟐ Shar Parivartan'],['transit','⊞ Transit Cal'],['kundali','◇ Natal·Intraday'],['bhav','⌂ Bhav Phal'],['vr','★ Vyapaar Ratna'],['rules','⚖ Astro Rules'],['kp','⊕ KP Planets'],['charts','◈ D1·D9'],['sbc','⬡ SBC Grid'],['timing','⏱ 15-min Timing'],['gann','⌇ Gann SQ9']];
   document.getElementById('NAV').innerHTML=tabs.map(([k,v])=>`<button class="nb${S.tab===k?' on':''}" onclick="gs({tab:'${k}'})">${v}</button>`).join('');
 }
 
 function rMain(){
-  const fns={overview:tOverview,dayfc:tDayForecast,shar:tSharParivartan,kundali:tKundali,bhav:tBhavphal,vr:tVR,rules:tRules,kp:tKP,charts:tCharts,sbc:tSBC,timing:tTiming,gann:tGann};
+  const fns={overview:tOverview,dayfc:tDayForecast,shar:tSharParivartan,transit:tTransit,kundali:tKundali,bhav:tBhavphal,vr:tVR,rules:tRules,kp:tKP,charts:tCharts,sbc:tSBC,timing:tTiming,gann:tGann};
   document.getElementById('MAIN').innerHTML=(fns[S.tab]||tOverview)();
 }
 
@@ -4760,6 +4817,71 @@ function tBhavphal(){
 }
 
 
+function tTransit(){
+  const D=DATA;
+  const hd=new Date(S.date+'T00:00:00');
+  const cy=S.calYear||hd.getFullYear();
+  const cm=S.calMonth||(hd.getMonth()+1);
+  const cal=buildTransitCalendar(cy,cm,S.ayMode);
+  const attrs=planetAttributes(D);
+  const aMap={}; attrs.forEach(a=>aMap[a.name]=a);
+  const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const monthOpts=months.map((m,i)=>`<option value="${i+1}" ${cm===i+1?'selected':''}>${m}</option>`).join('');
+  const pm=cm===1?{y:cy-1,m:12}:{y:cy,m:cm-1}, nm=cm===12?{y:cy+1,m:1}:{y:cy,m:cm+1};
+  const TC={SIGN:'#00e8ff',NAK:'#5ad0e8',PADA:'#4ab0c8',RETRO:'#ff3355',COMBUST:'#ffc107',DIGNITY:'#00f07a',CONJ:'#CE93D8'};
+  const TLBL={SIGN:'SIGN INGRESS',NAK:'NAKSHATRA',PADA:'PADA',RETRO:'RETROGRADE',COMBUST:'COMBUST',DIGNITY:'DIGNITY',CONJ:'CONJUNCTION'};
+  const evs=cal.events.filter(e=>!(['SIGN','NAK','PADA'].includes(e.type)&&e.fromBefore));
+  const cards=evs.slice(0,120).map(e=>{
+    let col=TC[e.type]||'#7ecad8';
+    if(e.type==='DIGNITY') col=e.dig==='Exalted'?'#00f07a':'#ff3355';
+    const pdot=e.planet&&PC[e.planet]?PC[e.planet]:col;
+    return `<div class="pnl" style="border-color:${col}55">
+      <div style="padding:8px 10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+          <span style="font-size:8px;letter-spacing:.08em;color:${col};font-weight:700">${TLBL[e.type]}</span>
+          <span style="font-size:9px;color:var(--tx2);font-family:monospace;white-space:nowrap">${e.range}</span>
+        </div>
+        <div style="margin-top:5px;font-size:12px;color:var(--tx0);font-weight:700">${e.label}</div>
+        ${e.deg0!=null?`<div style="font-size:9px;color:var(--tx3)">enters @ ${dmsC(e.deg0)}</div>`:''}
+        ${e.fromBefore?`<div style="font-size:8px;color:var(--tx3)">(in progress from before)</div>`:''}
+      </div></div>`;
+  }).join('');
+  const posRows=D.planets.map(p=>{const a=aMap[p.name];return `<tr>
+    <td><strong style="color:${pc(p.name)}">${p.abbr} ${p.name}${p.retro?' <span style="color:var(--bear)">℞</span>':''}</strong></td>
+    <td style="color:var(--tx0)">${p.sign} <span style="font-family:monospace;color:var(--tx1)">${dmsC(p.deg)}</span></td>
+    <td style="color:var(--tx2);font-size:10px">${p.nak} p${p.pada}</td>
+    <td style="color:var(--acc);font-weight:700">H${p.h}</td>
+    <td style="font-family:monospace;color:var(--tx1)">${a.speed>=0?'+':''}${a.speed.toFixed(2)}</td>
+    <td style="font-weight:700;color:${a.retro?'var(--bear)':a.stationary?'var(--neut)':'var(--bull)'}">${a.retro?'Retro ℞':a.stationary?'Statn':'Direct'}</td>
+    <td style="color:${a.combust?'var(--bear)':'var(--tx3)'};font-weight:${a.combust?700:400}">${a.combust?'Yes':'—'}</td>
+    <td style="font-weight:700;color:${a.digCls==='up'?'var(--bull)':a.digCls==='dn'?'var(--bear)':'var(--tx1)'}">${a.dignity}</td>
+    <td style="text-align:center">${a.vargottama?'<span style="color:var(--bull)">★</span>':'—'}</td>
+    <td style="font-weight:700;color:${ELEM_COL[a.element]}">${a.element}</td>
+    <td style="color:var(--tx1)">${a.modality}</td>
+    <td style="font-size:11px">${a.aspects.map(x=>`<span style="color:${x.nature==='easy'?'var(--bull)':x.nature==='tense'?'var(--bear)':'var(--tx2)'}" title="${x.name} ${x.deg}°">${x.sym}${x.other}</span>`).join(' ')||'—'}</td>
+  </tr>`}).join('');
+  return `
+<div style="display:flex;flex-direction:column;gap:10px">
+  <div class="pnl"><div class="ph" style="justify-content:space-between">
+      <span><span class="dot"></span>TRANSIT CALENDAR · ${cal.monthLabel}</span>
+      <span style="display:flex;gap:6px;align-items:center">
+        <button class="nb" style="padding:2px 8px" onclick="gs({calYear:${pm.y},calMonth:${pm.m}})">◀</button>
+        <select class="ci" style="font-size:11px;padding:2px 6px" onchange="gs({calMonth:+this.value})">${monthOpts}</select>
+        <input class="ci w80" style="font-size:11px" type="number" value="${cy}" onchange="gs({calYear:+this.value})">
+        <button class="nb" style="padding:2px 8px" onclick="gs({calYear:${nm.y},calMonth:${nm.m}})">▶</button>
+      </span></div>
+    <div style="padding:5px 12px;font-size:9px;color:var(--tx3)">Sidereal (${D.ayMode==='kp'?'KP':'Lahiri'}). Events = sign/nakshatra/pada ingresses, retrograde & combust windows, exaltation/debilitation, and same-sign conjunctions — with date ranges (end dates scanned up to ~7 months). Moon excluded (too fast). "ongoing" = extends beyond the scan window.</div>
+  </div>
+  <div class="pnl"><div class="ph"><span class="dot"></span>PLANETARY POSITIONS · STATE · DIGNITY · ELEMENT · MODALITY — as of ${S.date} ${mtt(parseFloat(S.time)*60)}</div>
+    <div class="ts"><table class="tbl">
+      <thead><tr><th>Planet</th><th>Sign °</th><th>Nak/Pada</th><th>House</th><th>Speed</th><th>Motion</th><th>Combust</th><th>Dignity/Relation</th><th>Vargo</th><th>Element</th><th>Modality</th><th>Aspects</th></tr></thead>
+      <tbody>${posRows}</tbody></table></div>
+  </div>
+  <div class="pnl"><div class="ph"><span class="dot"></span>TRANSIT EVENTS · ${cal.monthLabel} · ${evs.length} changes this month</div>
+    <div class="pb"><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(225px,1fr));gap:8px">${cards||'<div style="color:var(--tx3)">No events</div>'}</div></div>
+  </div>
+</div>`;
+}
 function tGann(){
   const D=DATA;
   const dateObj=new Date(S.date);
