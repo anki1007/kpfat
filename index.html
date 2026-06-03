@@ -40,9 +40,9 @@ html,body{width:100%;min-height:100vh;background:var(--bg0);color:var(--tx0);fon
 .ml{color:#3a8090;font-size:9px}
 .mv{color:#e0f4fc;font-weight:700;font-size:11px}
 .nav{display:flex;background:var(--bg1);border-bottom:1px solid var(--bd);overflow-x:auto}
-.nb{background:none;border:none;color:#4ab8cc;padding:9px 15px;font-family:inherit;font-size:11px;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;letter-spacing:.04em;transition:all .15s}
+.nb{background:none;border:none;color:#d2eef6;font-weight:700;padding:9px 15px;font-family:inherit;font-size:11.5px;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;letter-spacing:.05em;transition:all .15s}
 .nb:hover{color:var(--tx1);background:var(--bg2)}
-.nb.on{color:#00e8ff;border-bottom-color:#00e8ff;background:#031c28}
+.nb.on{color:#8df7ff;border-bottom-color:#00e8ff;background:#06303f;font-weight:800}
 .main{padding:10px 16px;flex:1;display:flex;flex-direction:column;gap:10px}
 .pnl{background:#021520;border:1px solid #0d3848;border-radius:4px;overflow:hidden}
 .ph{background:#031820;border-bottom:1px solid var(--bd);padding:5px 12px;font-size:9px;color:#5ad0e8;letter-spacing:.1em;font-weight:700;text-transform:uppercase;display:flex;align-items:center;gap:6px}
@@ -91,7 +91,7 @@ html,body{width:100%;min-height:100vh;background:var(--bg0);color:var(--tx0);fon
 </div>
 <script>
 // ═══════════════════════════════════════════════════════════════════
-// FINANCIAL ASTROLOGY TERMINAL
+// KP FINANCIAL ASTROLOGY TERMINAL
 // ───────────────────────────────────────────────────────────────────
 // COMPLETE IMPLEMENTATION of Pt. Hardev Sharma Trivedi & Pt. Gopesh
 // Kumar Ojha, "Vyapaar Ratna" (व्यापार-रत्न), 9 modules:
@@ -1423,7 +1423,7 @@ function findShararParivartan(J, daysAhead = 30, daysBack = 7){
           const daysFromNow = Jcross - J;
           const direction = prevLat < 0 ? 'S→N (ascending)' : 'N→S (descending)';
           out.push({
-            body, Jcross,
+            body, Jcross, at: jdToISTParts(Jcross),
             daysFromNow: Math.round(daysFromNow * 10) / 10,
             direction,
             note: daysFromNow < 0 ? 'recent — effects may still be in play'
@@ -1686,6 +1686,8 @@ function ephemerisStatus(){
 
 // Geocentric apparent ecliptic longitude (tropical, ecliptic of date)
 function geoLon(body,J){
+  if(body==='Rahu') return n360(rahuLon(J));
+  if(body==='Ketu') return n360(rahuLon(J)+180);
   if(isAELoaded()){
     try{
       const A=window.Astronomy, d=jdToDate(J);
@@ -2809,7 +2811,7 @@ function declinationShifts(J, planets){
 }
 
 function buildSharTable(fromStr, toStr, ayMode){
-  const bodies=['Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn','Uranus','Neptune','Pluto'];
+  const bodies=['Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn','Rahu','Ketu','Uranus','Neptune','Pluto'];
   const d0=new Date(fromStr+'T00:00:00'), d1=new Date(toStr+'T00:00:00');
   const rows=[]; let cur=new Date(d0); let n=0;
   const prevLat={};
@@ -2823,6 +2825,13 @@ function buildSharTable(fromStr, toStr, ayMode){
       prevLat[b]=lat;
       return { b, lat:Math.round(lat*100)/100, latDir, dec:Math.round(dec*100)/100, decDir, latFlip };
     });
+    for(let i2=0;i2<cells.length;i2++)for(let j2=i2+1;j2<cells.length;j2++){
+      if(Math.abs(Math.abs(cells[i2].dec)-Math.abs(cells[j2].dec))<1){
+        const k2=[cells[i2].b,cells[j2].b].sort().join('-'); const col2=PARALLEL_PALETTE[_parHash(k2)%PARALLEL_PALETTE.length];
+        if(!cells[i2].parColor){cells[i2].parColor=col2;cells[i2].parWith=cells[j2].b;}
+        if(!cells[j2].parColor){cells[j2].parColor=col2;cells[j2].parWith=cells[i2].b;}
+      }
+    }
     rows.push({ date:`${y}-${String(mo).padStart(2,'0')}-${String(dy).padStart(2,'0')}`,
                 dow:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][cur.getDay()], cells });
     cur.setDate(cur.getDate()+1); n++;
@@ -3215,6 +3224,121 @@ function computeRuleX(D){
            sub:{yogNet,grpNet,degNet,vasuNet,tithiNet,moonNet,horaNet,eclNet}, netScore };
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// FAT-TERMINAL ADDITIONS: JD→IST, declination-parallel palette,
+// ±30d Kranti-Samya events, and the ASHTAKAVARGA system.
+// ═══════════════════════════════════════════════════════════════════
+function jdToISTParts(J){
+  const d=new Date((J-2440587.5)*86400000 + 5.5*3600000);
+  const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return { date: MON[d.getUTCMonth()]+' '+String(d.getUTCDate()).padStart(2,'0'),
+           time: String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0') };
+}
+
+// Distinct colors for declination-parallel groups (item 2)
+const PARALLEL_PALETTE=['#ffd54f','#4fc3f7','#ba68c8','#aed581','#ff8a65','#4db6ac','#f06292','#9575cd','#dce775','#4dd0e1'];
+function _parHash(key){ let h=0; for(let i=0;i<key.length;i++) h=(h*31+key.charCodeAt(i))>>>0; return h; }
+
+// ±30-day Kranti-Samya (declination-parallel) events with date+time (item 4)
+function _ksEvt(a,b,Jc,J,type,dec){ const p=jdToISTParts(Jc); return {p1:a,p2:b,type,date:p.date,time:p.time,daysFromNow:Math.round((Jc-J)*10)/10,dec:Math.round(dec*10)/10}; }
+function findKrantiSamyaEvents(J, back=15, ahead=30){
+  const bodies=['Sun','Mars','Mercury','Jupiter','Venus','Saturn','Rahu','Ketu','Uranus','Neptune'];
+  const decAt=(b,Jx)=>{ try{ return declination(b,Jx); }catch(e){ return 0; } };
+  const out=[];
+  for(let i=0;i<bodies.length;i++)for(let j=i+1;j<bodies.length;j++){
+    const a=bodies[i], b=bodies[j];
+    if((a==='Rahu'&&b==='Ketu')||(a==='Ketu'&&b==='Rahu')) continue;
+    let prevDiff=null, prevSum=null, prevJ=null;
+    for(let off=-back; off<=ahead; off+=1){
+      const Jx=J+off, da=decAt(a,Jx), db=decAt(b,Jx);
+      const diff=da-db, sum=da+db;
+      if(prevDiff!==null){
+        if(Math.sign(diff)!==Math.sign(prevDiff) && prevDiff!==0){
+          const f=Math.abs(prevDiff)/(Math.abs(prevDiff)+Math.abs(diff)||1); const Jc=prevJ+f*(Jx-prevJ);
+          out.push(_ksEvt(a,b,Jc,J,'Parallel',decAt(a,Jc)));
+        }
+        if(Math.sign(sum)!==Math.sign(prevSum) && prevSum!==0){
+          const f=Math.abs(prevSum)/(Math.abs(prevSum)+Math.abs(sum)||1); const Jc=prevJ+f*(Jx-prevJ);
+          out.push(_ksEvt(a,b,Jc,J,'Contra-parallel',decAt(a,Jc)));
+        }
+      }
+      prevDiff=diff; prevSum=sum; prevJ=Jx;
+    }
+  }
+  out.sort((x,y)=>Math.abs(x.daysFromNow)-Math.abs(y.daysFromNow));
+  return out.slice(0,24);
+}
+
+// ── ASHTAKAVARGA (Parashari benefic-point tables) ──────────────────
+// For planet P, from each contributor C (7 planets + Lagna), the houses
+// (counted from C's sign) that receive a bindu. BAV totals: Su48 Mo49
+// Ma39 Me54 Ju56 Ve52 Sa39 → SAV 337.
+const AV_TABLES = {
+  Sun:    {Sun:[1,2,4,7,8,9,10,11],Moon:[3,6,10,11],Mars:[1,2,4,7,8,9,10,11],Mercury:[3,5,6,9,10,11,12],Jupiter:[5,6,9,11],Venus:[6,7,12],Saturn:[1,2,4,7,8,9,10,11],Lagna:[3,4,6,10,11,12]},
+  Moon:   {Sun:[3,6,7,8,10,11],Moon:[1,3,6,7,10,11],Mars:[2,3,5,6,9,10,11],Mercury:[1,3,4,5,7,8,10,11],Jupiter:[1,4,7,8,10,11,12],Venus:[3,4,5,7,9,10,11],Saturn:[3,5,6,11],Lagna:[3,6,10,11]},
+  Mars:   {Sun:[3,5,6,10,11],Moon:[3,6,11],Mars:[1,2,4,7,8,10,11],Mercury:[3,5,6,11],Jupiter:[6,10,11,12],Venus:[6,8,11,12],Saturn:[1,4,7,8,9,10,11],Lagna:[1,3,6,10,11]},
+  Mercury:{Sun:[5,6,9,11,12],Moon:[2,4,6,8,10,11],Mars:[1,2,4,7,8,9,10,11],Mercury:[1,3,5,6,9,10,11,12],Jupiter:[6,8,11,12],Venus:[1,2,3,4,5,8,9,11],Saturn:[1,2,4,7,8,9,10,11],Lagna:[1,2,4,6,8,10,11]},
+  Jupiter:{Sun:[1,2,3,4,7,8,9,10,11],Moon:[2,5,7,9,11],Mars:[1,2,4,7,8,10,11],Mercury:[1,2,4,5,6,9,10,11],Jupiter:[1,2,3,4,7,8,10,11],Venus:[2,5,6,9,10,11],Saturn:[3,5,6,12],Lagna:[1,2,4,5,6,7,9,10,11]},
+  Venus:  {Sun:[8,11,12],Moon:[1,2,3,4,5,8,9,11,12],Mars:[3,5,6,9,11,12],Mercury:[3,5,6,9,11],Jupiter:[5,8,9,10,11],Venus:[1,2,3,4,5,8,9,10,11],Saturn:[3,4,5,8,9,10,11],Lagna:[1,2,3,4,5,8,9,11]},
+  Saturn: {Sun:[1,2,4,7,8,10,11],Moon:[3,6,11],Mars:[3,5,6,10,11,12],Mercury:[6,8,9,10,11,12],Jupiter:[5,6,11,12],Venus:[6,11,12],Saturn:[3,5,6,11],Lagna:[1,3,4,6,10,11]},
+};
+const AV_PLANETS=['Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn'];
+function computeAshtakavarga(planets, ascSignIdx){
+  const sign={}; for(const n of AV_PLANETS){ const p=planets.find(x=>x.name===n); sign[n]=p?p.s:0; } sign.Lagna=((ascSignIdx%12)+12)%12;
+  const bav={}; const bavTot={}; const sav=new Array(12).fill(0);
+  for(const P of AV_PLANETS){
+    const arr=new Array(12).fill(0); const tbl=AV_TABLES[P];
+    for(const C of Object.keys(tbl)){ const base=sign[C]; for(const h of tbl[C]){ arr[((base+h-1)%12+12)%12]++; } }
+    bav[P]=arr; bavTot[P]=arr.reduce((a,b)=>a+b,0);
+    for(let i=0;i<12;i++) sav[i]+=arr[i];
+  }
+  const savTotal=sav.reduce((a,b)=>a+b,0);
+  const moonSign=sign.Moon;
+  return { bav, bavTot, sav, savTotal, sign, moonSign,
+           moonSAV:sav[moonSign], moonBAV:bav.Moon[moonSign] };
+}
+
+function tAshtaka(){
+  const D=DATA, AV=D.ashtaka;
+  if(!AV) return '<div style="padding:20px;color:var(--tx3)">Ashtakavarga not available.</div>';
+  const moonS=AV.moonSign, lagS=AV.sign.Lagna;
+  const savColor=v=>v>=30?'var(--bull)':v<=25?'var(--bear)':'var(--tx1)';
+  // SAV row of cards
+  const savCards=AV.sav.map((v,i)=>{
+    const isMoon=i===moonS, isLag=i===lagS;
+    return `<div style="border:1px solid ${isMoon?PC.Moon:isLag?'var(--acc)':'var(--bd)'};border-radius:4px;padding:6px 4px;text-align:center;background:${isMoon?'rgba(77,184,255,.12)':isLag?'rgba(0,232,255,.08)':'var(--bg2)'}">
+      <div style="font-size:10px;color:${isMoon?PC.Moon:'var(--tx2)'};font-weight:700">${SIGNS[i].slice(0,3)}${isMoon?' ☾':''}${isLag?' La':''}</div>
+      <div style="font-size:18px;font-weight:800;color:${savColor(v)}">${v}</div>
+    </div>`;
+  }).join('');
+  // BAV table
+  const bavHead=`<th>Planet</th>`+SIGNS.map((s,i)=>`<th style="text-align:center;${i===moonS?'color:'+PC.Moon:''}">${s.slice(0,2)}</th>`).join('')+`<th style="text-align:right">Tot</th>`;
+  const bavRows=AV_PLANETS.map(p=>`<tr>
+    <td><strong style="color:${pc(p)}">${PA[p]} ${p}</strong></td>
+    ${AV.bav[p].map((v,i)=>`<td style="text-align:center;font-family:monospace;${i===moonS?'background:rgba(77,184,255,.12);font-weight:700':''};color:${v>=5?'var(--bull)':v<=2?'var(--bear)':'var(--tx1)'}">${v}</td>`).join('')}
+    <td style="text-align:right;font-family:monospace;color:var(--tx2);font-weight:700">${AV.bavTot[p]}</td>
+  </tr>`).join('');
+  const savRow=`<tr style="border-top:2px solid var(--bd3)"><td style="font-weight:800;color:var(--acc)">SARVA (SAV)</td>${AV.sav.map((v,i)=>`<td style="text-align:center;font-family:monospace;font-weight:800;color:${savColor(v)};${i===moonS?'background:rgba(77,184,255,.12)':''}">${v}</td>`).join('')}<td style="text-align:right;font-weight:800;color:var(--acc)">${AV.savTotal}</td></tr>`;
+  return `
+<div style="display:flex;flex-direction:column;gap:10px">
+  <div class="pnl"><div class="ph"><span class="dot"></span>SARVASHTAKAVARGA (SAV) · total ${AV.savTotal} bindus · ${S.date}</div>
+    <div class="pb">
+      <div style="display:grid;grid-template-columns:repeat(12,1fr);gap:5px">${savCards}</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:11px">
+        <span><span class="ml">MOON RASHI</span> <b style="color:${PC.Moon}">${SIGNS[moonS]}</b></span>
+        <span><span class="ml">MOON SAV</span> <b style="color:${savColor(AV.moonSAV)};font-size:14px">${AV.moonSAV}</b> <span style="color:var(--tx3)">bindus in rashi</span></span>
+        <span><span class="ml">MOON BAV</span> <b style="color:${PC.Moon}">${AV.moonBAV}</b> <span style="color:var(--tx3)">(Chandra ashtakavarga in own rashi)</span></span>
+      </div>
+      <div style="font-size:9px;color:var(--tx3);margin-top:6px">SAV ≥ 30 = strong/supportive rashi (price holds & rises there); ≤ 25 = weak (gives way). ☾ = Moon's rashi, La = Lagna rashi. Transit through high-SAV signs favours strength; low-SAV signs favour weakness.</div>
+    </div>
+  </div>
+  <div class="pnl"><div class="ph"><span class="dot"></span>BHINNASHTAKAVARGA (BAV) — per-planet bindus by rashi</div>
+    <div class="ts"><table class="tbl"><thead><tr>${bavHead}</tr></thead><tbody>${bavRows}${savRow}</tbody></table></div>
+    <div style="font-size:9px;color:var(--tx3);padding:4px 12px">Each planet's bindus across the 12 rashis (Parashari benefic-point tables). A planet transiting a rashi where its own BAV ≥ 5 gives strong results; ≤ 2 weak. Column highlighted = Moon's rashi.</div>
+  </div>
+</div>`;
+}
+
 function buildIndexForecast(D){
   const {planets, aspects, rules, forecast, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, combinedScore}=D;
   const clamp=(v)=>Math.max(-100,Math.min(100,Math.round(v)));
@@ -3366,6 +3490,8 @@ function computeAll(dateStr,timeIST,ayMode){
   const sharCrossings = findShararParivartan(J, 30, 7);
   // Module 8: Kranti-samya / declination parallels (pp.320-322, p.329)
   const krantiSamya = findKrantiSamya(planets, J);
+  const krantiSamyaEvents = findKrantiSamyaEvents(J, 15, 30);
+  const ashtaka = computeAshtakavarga(planets, Math.floor(ascSid/30));
   // Module 9: Forward aspect-timing scan (p.283 lead-time rule)
   const upcomingAspects = findUpcomingAspects(J, 15);
 
@@ -3414,7 +3540,7 @@ function computeAll(dateStr,timeIST,ayMode){
     ephSrc:ephemerisStatus(),
     // v4 fields
     aspects, aspSc, sankr, khadi, vargesha, sectorRank, trio,
-    lagnaTM, sharNow, sharCrossings, krantiSamya, upcomingAspects,
+    lagnaTM, sharNow, sharCrossings, krantiSamya, krantiSamyaEvents, ashtaka, upcomingAspects,
     krantiScore,
     // rules module
     rules, rulesScore,
@@ -3539,7 +3665,7 @@ function rHdr(){
 <header class="hdr">
   <div class="hdr-r1">
     <div>
-      <div class="brand">⬡FINANCIAL ASTROLOGY TERMINAL</div>
+      <div class="brand">⬡ FINANCIAL ASTROLOGY TERMINAL</div>
       <div class="brand-sub">MUMBAI ${LAT.toFixed(4)}°N ${LON.toFixed(4)}°E · NSE/BSE · ${ayLabel.toUpperCase()} ${dms(D.ay,2)} · ${days[dateObj.getDay()]} ${mons[dateObj.getMonth()]} ${dateObj.getDate()} ${dateObj.getFullYear()} · IST ${mtt(parseFloat(S.time)*60)} → UTC ${mtt((parseFloat(S.time)-5.5)*60)} · EPH ${D.ephSrc}</div>
     </div>
     <div class="ctrl-row">
@@ -3592,12 +3718,12 @@ function rHdr(){
 // NAV
 // ═══════════════════════════════════════════════════════════════════
 function rNav(){
-  const tabs=[['overview','▦ Overview'],['dayfc','☉ Day Forecast'],['shar','⟐ Shar Parivartan'],['transit','⊞ Transit Cal'],['kundali','◇ Natal·Intraday'],['bhav','⌂ Bhav Phal'],['rulebook','⚜ Rule Book'],['vr','★ Vyapaar Ratna'],['rules','⚖ Astro Rules'],['kp','⊕ KP Planets'],['charts','◈ D1·D9'],['sbc','⬡ SBC Grid'],['timing','⏱ 15-min Timing'],['gann','⌇ Gann SQ9']];
+  const tabs=[['overview','▦ Overview'],['dayfc','☉ Day Forecast'],['shar','⟐ Shar Parivartan'],['transit','⊞ Transit Cal'],['kundali','◇ Natal·Intraday'],['bhav','⌂ Bhav Phal'],['rulebook','⚜ Rule Book'],['ashtaka','⊡ Ashtakavarga'],['vr','★ Vyapaar Ratna'],['rules','⚖ Astro Rules'],['kp','⊕ KP Planets'],['charts','◈ D1·D9'],['sbc','⬡ SBC Grid'],['timing','⏱ 15-min Timing'],['gann','⌇ Gann SQ9']];
   document.getElementById('NAV').innerHTML=tabs.map(([k,v])=>`<button class="nb${S.tab===k?' on':''}" onclick="gs({tab:'${k}'})">${v}</button>`).join('');
 }
 
 function rMain(){
-  const fns={overview:tOverview,dayfc:tDayForecast,shar:tSharParivartan,transit:tTransit,kundali:tKundali,bhav:tBhavphal,rulebook:tRuleBook,vr:tVR,rules:tRules,kp:tKP,charts:tCharts,sbc:tSBC,timing:tTiming,gann:tGann};
+  const fns={overview:tOverview,dayfc:tDayForecast,shar:tSharParivartan,transit:tTransit,kundali:tKundali,bhav:tBhavphal,rulebook:tRuleBook,ashtaka:tAshtaka,vr:tVR,rules:tRules,kp:tKP,charts:tCharts,sbc:tSBC,timing:tTiming,gann:tGann};
   document.getElementById('MAIN').innerHTML=(fns[S.tab]||tOverview)();
 }
 
@@ -3644,6 +3770,15 @@ function tOverview(){
       <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--bd);font-size:10px;color:var(--tx2)">
         ↳ Lagna verdict: ${D.lagnaTM?`<strong style="color:${D.lagnaTM.verdict==='BUY'?'var(--bull)':D.lagnaTM.verdict==='SELL'||D.lagnaTM.verdict==='AVOID'?'var(--bear)':'var(--neut)'}">${D.lagnaTM.verdict} ${D.lagnaTM.score>0?'+':''}${D.lagnaTM.score}</strong>`:'—'} · Sankranti: <strong style="color:var(--acc)">${D.sankr.sign}</strong> ${D.sankr.peak?'<span style="color:var(--bull)">(PEAK)</span>':''}${D.trio?` · ★ Trio: <strong style="color:${D.trio.trioBias==='BULL'?'var(--bull)':D.trio.trioBias==='BEAR'?'var(--bear)':'var(--neut)'}">${D.trio.trioBias} ${D.trio.trioScore>0?'+':''}${D.trio.trioScore}</strong>`:''}${D.forecast?` · ⚖ Forecast: <strong style="color:${D.forecast.direction==='BULLISH'?'var(--bull)':D.forecast.direction==='BEARISH'?'var(--bear)':'var(--neut)'}">${D.forecast.session.type} · ${D.forecast.direction} ${D.forecast.directionScore>0?'+':''}${D.forecast.directionScore}</strong> · Confidence <strong style="color:var(--acc)">${D.forecast.confidence}%</strong> · Spot: <strong style="color:#4DB8FF">${D.forecast.indexSpotlight}</strong>${D.forecast.usFlag?' <span style="color:#4caf50">US★</span>':''} · ${D.forecast.yogas.length} yogas`:''} · Tap <strong>⚖ Astro Rules</strong>.
       </div>
+    </div>
+  </div>
+  <div class="pnl"><div class="ph"><span class="dot"></span>ASHTAKAVARGA — MOON RASHI STRENGTH</div>
+    <div class="pb" style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:12px">
+      <span><span class="ml">MOON IN</span> <b style="color:${PC.Moon}">${D.ashtaka?SIGNS[D.ashtaka.moonSign]:'—'}</b></span>
+      <span><span class="ml">MOON SAV (in rashi)</span> <b style="font-size:18px;color:${D.ashtaka?(D.ashtaka.moonSAV>=30?'var(--bull)':D.ashtaka.moonSAV<=25?'var(--bear)':'var(--neut)'):'var(--tx2)'}">${D.ashtaka?D.ashtaka.moonSAV:'—'}</b></span>
+      <span><span class="ml">MOON BAV</span> <b style="color:${PC.Moon}">${D.ashtaka?D.ashtaka.moonBAV:''}</b></span>
+      <span><span class="ml">TOTAL SAV</span> <b style="color:var(--tx2)">${D.ashtaka?D.ashtaka.savTotal:''}</b></span>
+      <span style="font-size:9px;color:var(--tx3)">SAV \u2265 30 strong rashi \u00b7 \u2264 25 weak \u2014 see \u229f Ashtakavarga tab</span>
     </div>
   </div>
   <div class="pnl">
@@ -4817,12 +4952,13 @@ function tVR(){
             ${D.sharCrossings.length > 0 ? `
               <div style="font-size:11px;color:var(--acc);letter-spacing:.07em;font-weight:700;margin:10px 0 6px">UPCOMING NODE CROSSINGS (±30d)</div>
               <table class="tbl" style="font-size:11px">
-                <thead><tr><th>Body</th><th>Direction</th><th style="text-align:right">Days</th><th>Note</th></tr></thead>
+                <thead><tr><th>Body</th><th>Direction</th><th>Date · Time IST</th><th style="text-align:right">Days</th><th>Note</th></tr></thead>
                 <tbody>${D.sharCrossings.slice(0,8).map(c=>{
                   const isImminent = Math.abs(c.daysFromNow) < 3;
                   return `<tr>
                     <td style="color:${PC[c.body]||'var(--tx0)'};font-weight:700">${c.body}</td>
                     <td style="font-size:10px">${c.direction}</td>
+                    <td style="font-family:monospace;font-size:10px;color:var(--acc)">${c.at?c.at.date+' '+c.at.time:'—'}</td>
                     <td style="font-family:monospace;text-align:right;color:${isImminent?'var(--bear)':'var(--tx2)'};font-weight:${isImminent?700:400}">${c.daysFromNow>0?'+':''}${c.daysFromNow}d</td>
                     <td style="font-size:10px;color:${isImminent?'var(--bear)':'var(--tx2)'}">${c.note}</td>
                   </tr>`;
@@ -4849,6 +4985,17 @@ function tVR(){
                     </tr>`;
                   }).join('')}</tbody>
                 </table>`}
+            ${(D.krantiSamyaEvents&&D.krantiSamyaEvents.length)?`
+              <div style="font-size:11px;color:var(--acc);letter-spacing:.07em;font-weight:700;margin:10px 0 6px">KRANTI-SAMYA EVENTS (\u00b130d)</div>
+              <table class="tbl" style="font-size:10px">
+                <thead><tr><th>Pair</th><th>Type</th><th>Date · Time IST</th><th style="text-align:right">Days</th><th style="text-align:right">Decl</th></tr></thead>
+                <tbody>${D.krantiSamyaEvents.map(e=>{const im=Math.abs(e.daysFromNow)<3;return `<tr>
+                  <td style="font-family:monospace;font-weight:700;color:${im?'var(--bear)':'var(--tx1)'}">${e.p1}\u2013${e.p2}</td>
+                  <td style="font-size:9px;color:${e.type==='Parallel'?'var(--bull)':'var(--neut)'}">${e.type}</td>
+                  <td style="font-family:monospace;font-size:9px;color:var(--acc)">${e.date} ${e.time}</td>
+                  <td style="font-family:monospace;text-align:right;color:${im?'var(--bear)':'var(--tx2)'}">${e.daysFromNow>0?'+':''}${e.daysFromNow}d</td>
+                  <td style="font-family:monospace;text-align:right;color:var(--tx2)">${e.dec}\u00b0</td></tr>`;}).join('')}</tbody>
+              </table>`:''}
           </div>
         </div>
 
@@ -4951,7 +5098,7 @@ function tSharParivartan(){
       const decCol = c.decDir==='N'?'#ff8a65':'#69f0ae';
       const flip = c.latFlip?'background:#2a2000;border:1px solid var(--neut)':'';
       return `<td style="font-family:monospace;font-size:10px;color:${latCol};${flip}" title="${c.latFlip?'SHAR PARIVARTAN — latitude crossed 0 (market driven by this planet)':''}">${c.lat}${c.latDir}</td>`+
-             `<td style="font-family:monospace;font-size:10px;color:${decCol}">${c.dec}${c.decDir}</td>`;
+             `<td style="font-family:monospace;font-size:10px;color:${decCol};${c.parColor?'background:'+c.parColor+'33;border:1px solid '+c.parColor:''}" title="${c.parWith?'Declination parallel with '+c.parWith+' (|\u0394decl|<1\u00b0)':''}">${c.dec}${c.decDir}</td>`;
     }).join('');
     return `<tr><td style="position:sticky;left:0;background:#021520;font-weight:700;color:var(--tx1);white-space:nowrap">${r.date} <span style="color:var(--tx3)">${r.dow}</span></td>${cells}</tr>`;
   }).join('');
@@ -4966,7 +5113,7 @@ function tSharParivartan(){
         <div style="font-size:10px;color:var(--tx3);max-width:620px">CHAPTER 21: a planet changing to <b style="color:var(--bear)">NORTH</b> declination → <b style="color:var(--bear)">Bearishness</b>; to <b style="color:var(--bull)">SOUTH</b> → <b style="color:var(--bull)">Bullishness</b> (continues a long time). During a declination change, aspects & all three Vedh become ineffective — this is the strongest signal. Reverse the effect if the planet is Combust / Retrograde / Debilitated. Moon changes twice a month; big planets change when nearer Earth. Yellow cell = Shar Parivartan (latitude crossed 0°).</div>
       </div>
       <div class="ts" style="max-height:520px;overflow:auto"><table class="tbl"><thead><tr>${head}</tr><tr>${sub}</tr></thead><tbody>${rows}</tbody></table></div>
-      <div style="font-size:9px;color:var(--tx3);margin-top:6px">Shar = ecliptic latitude (N/S of ecliptic). Kranti = equatorial declination (N/S of equator). Orange = North, Green = South. Sun has no latitude (always 0). Snapshot at ~09:30 IST.</div>
+      <div style="font-size:9px;color:var(--tx3);margin-top:6px">Shar = ecliptic latitude (N/S of ecliptic). Kranti = equatorial declination (N/S of equator). Orange = North, Green = South. Sun/Rahu/Ketu have no latitude (Shar 0). Snapshot ~09:30 IST. A COLOURED Kranti cell = declination parallel — two planets within 1\u00b0 (same colour = same pair), held while the parallel lasts.</div>
     </div>
   </div>
   <div class="pnl"><div class="ph"><span class="dot"></span>DECLINATION DIRECTION CHANGES — nearest first (drives the day per CHAPTER 21)</div>
