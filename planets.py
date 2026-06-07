@@ -84,7 +84,6 @@ def retro_color(hex_color: str) -> str:
     """
     r, g, b = (x / 255 for x in hex_to_rgb(hex_color))
     h, l, s = colorsys.rgb_to_hls(r, g, b)
-    # Shift hue ~15° toward orange-red, desaturate, lighten
     h_new = (h + 0.04) % 1.0
     s_new = max(0.0, s * 0.45)
     l_new = min(1.0, l * 1.45 + 0.15)
@@ -96,19 +95,70 @@ def retro_color(hex_color: str) -> str:
 # ------------------------------------------------------------------
 @st.cache_data(show_spinner=False, ttl=60 * 30)
 def fetch_prices(symbol: str, start: date, end: date) -> pd.DataFrame:
-    df = yf.download(
-        symbol,
-        start=start,
-        end=end + timedelta(days=1),
-        progress=False,
-        auto_adjust=False,
-    )
-    if df is None or df.empty:
-        return pd.DataFrame()
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    df.index = pd.to_datetime(df.index)
-    return df
+    """
+    Robust price fetch — handles yfinance API quirks across versions.
+
+    Strategy:
+      1. Try yf.Ticker(sym).history()  — single-level columns, more reliable
+      2. Fall back to yf.download()    — with MultiIndex flattening
+      3. Try alternate Yahoo tickers   — e.g. NIFTY.NS if ^NSEI fails
+    """
+    # Alternate tickers to try if the primary one fails
+    _FALLBACKS: dict[str, list[str]] = {
+        "^NSEI":               ["^NSEI",    "NIFTY.NS"],
+        "^NSEBANK":            ["^NSEBANK", "BANKNIFTY.NS"],
+        "^BSESN":              ["^BSESN"],
+        "^CNXIT":              ["^CNXIT",   "CNXIT.NS"],
+        "NIFTY_MIDCAP_100.NS": ["NIFTY_MIDCAP_100.NS"],
+    }
+    candidates = _FALLBACKS.get(symbol, [symbol])
+
+    def _strip_tz(idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
+        """Remove timezone info so Plotly doesn't complain."""
+        return idx.tz_convert(None) if idx.tz is not None else idx
+
+    def _normalise(df: pd.DataFrame) -> pd.DataFrame:
+        """Flatten MultiIndex columns, strip tz, drop NaN closes."""
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        df.columns = [str(c).strip() for c in df.columns]
+        df.index = _strip_tz(pd.to_datetime(df.index))
+        df = df[df["Close"].notna()].copy()
+        return df
+
+    for sym in candidates:
+        # ── Method A: Ticker.history (preferred) ─────────────────────────────
+        try:
+            raw = yf.Ticker(sym).history(
+                start=start,
+                end=end + timedelta(days=1),
+                auto_adjust=True,
+                raise_errors=False,
+            )
+            if raw is not None and not raw.empty and "Close" in raw.columns:
+                df = _normalise(raw)
+                if not df.empty:
+                    return df
+        except Exception:
+            pass
+
+        # ── Method B: yf.download fallback ───────────────────────────────────
+        try:
+            raw = yf.download(
+                sym,
+                start=start,
+                end=end + timedelta(days=1),
+                progress=False,
+                auto_adjust=True,        # True avoids Adj-Close column split issues
+            )
+            if raw is not None and not raw.empty:
+                df = _normalise(raw)
+                if not df.empty and "Close" in df.columns:
+                    return df
+        except Exception:
+            pass
+
+    return pd.DataFrame()
 
 
 @st.cache_data(show_spinner=False, ttl=60 * 60)
@@ -147,9 +197,7 @@ def compute_planet_longitudes(
         rahu_lon, rahu_spd = None, None
         for name, (pid, _) in PLANETS.items():
             if name == "Ketu":
-                # Ketu is always exactly 180° opposite Rahu
                 row[name]          = (rahu_lon + 180.0) % 360.0 if rahu_lon is not None else None
-                # Ketu speed mirrors Rahu (same magnitude, same direction — both retrograde)
                 row[f"{name}_spd"] = rahu_spd if rahu_spd is not None else None
             elif name == "Rahu":
                 xx, _ = swe.calc_ut(jd, rahu_id, flags)
@@ -172,11 +220,6 @@ def compute_planet_longitudes(
 def split_motion_segments(
     df: pd.DataFrame, name: str
 ) -> list[dict]:
-    """
-    Splits a planet series into consecutive direct / retrograde segments.
-    Each segment overlaps by one point so the drawn line stays continuous.
-    Returns list of dicts: {is_retro, x, y}
-    """
     spd_col = f"{name}_spd"
     if spd_col not in df.columns or df.empty:
         return [{"is_retro": False, "x": df["datetime"].tolist(), "y": df[name].tolist()}]
@@ -191,7 +234,7 @@ def split_motion_segments(
 
     for i in range(1, len(xs)):
         if is_retro[i] != cur_retro:
-            seg_x.append(xs[i])   # one-point overlap for seamless join
+            seg_x.append(xs[i])
             seg_y.append(ys[i])
             segments.append({"is_retro": cur_retro, "x": seg_x, "y": seg_y})
             cur_retro = is_retro[i]
@@ -207,17 +250,13 @@ def split_motion_segments(
 def find_stations(
     df: pd.DataFrame, name: str
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Returns (retro_stations, direct_stations) — rows where the planet
-    changes from direct→retrograde (R) or retrograde→direct (D).
-    """
     spd_col = f"{name}_spd"
     if spd_col not in df.columns or len(df) < 2:
         empty = df.iloc[0:0]
         return empty, empty
     spd = df[spd_col]
-    r_mask = (spd < 0) & (spd.shift(1) >= 0)   # just turned retrograde
-    d_mask = (spd >= 0) & (spd.shift(1) < 0)   # just turned direct
+    r_mask = (spd < 0) & (spd.shift(1) >= 0)
+    d_mask = (spd >= 0) & (spd.shift(1) < 0)
     return df[r_mask].copy(), df[d_mask].copy()
 
 
@@ -226,11 +265,6 @@ def find_conjunctions(
     planets: list[str],
     orb: float = 6.0,
 ) -> list[dict]:
-    """
-    For every pair of selected planets, finds the moment of closest approach
-    within each conjunction window (angular separation ≤ orb).
-    Returns list of dicts: {datetime, p1, p2, sep}.
-    """
     results: list[dict] = []
     valid = [p for p in planets if p in df.columns]
     for i, p1 in enumerate(valid):
@@ -242,7 +276,6 @@ def find_conjunctions(
             if not in_conj.any():
                 continue
 
-            # Group consecutive True runs
             group_ids = (in_conj != in_conj.shift()).cumsum()
             for _, grp in df[in_conj].groupby(group_ids[in_conj]):
                 peak_idx = abs_diff.loc[grp.index].idxmin()
@@ -306,22 +339,17 @@ with st.sidebar.expander("Advanced", expanded=False):
     hide_weekends = st.checkbox(
         "Hide weekends on price axis",
         value=False,
-        help="Collapses Sat/Sun on the price chart. "
-             "When OFF (recommended), planet curves stay mathematically continuous.",
+        help="Collapses Sat/Sun on the price chart.",
     )
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Motion overlays")
 
-show_retro_lines    = st.sidebar.checkbox("Retrograde / Direct lines", value=True,
-                                          help="Dotted line during retrograde, solid during direct motion.")
-show_station_labels = st.sidebar.checkbox("R / D station markers", value=True,
-                                          help="Mark exact Retrograde (R) and Direct (D) ingress points.")
-show_conjunctions   = st.sidebar.checkbox("Conjunction lines", value=True,
-                                          help="Vertical dotted lines when two selected planets are within orb.")
+show_retro_lines    = st.sidebar.checkbox("Retrograde / Direct lines", value=True)
+show_station_labels = st.sidebar.checkbox("R / D station markers", value=True)
+show_conjunctions   = st.sidebar.checkbox("Conjunction lines", value=True)
 conj_orb = st.sidebar.slider(
     "Conjunction orb (°)", min_value=1, max_value=15, value=6, step=1,
-    help="Angular separation threshold to detect a conjunction.",
     disabled=not show_conjunctions,
 )
 
@@ -341,7 +369,11 @@ if hide_weekends:
     planet_df = planet_df[dow < 5].reset_index(drop=True)
 
 if price_df.empty:
-    st.error(f"No price data returned for {symbol}. Try a different date range.")
+    st.error(
+        f"⚠️ No price data returned for **{instrument_name}** ({symbol}).\n\n"
+        f"Try: `pip install --upgrade yfinance` then restart the app. "
+        f"If the issue persists, try a shorter date range or a different instrument."
+    )
     st.stop()
 
 # ------------------------------------------------------------------
@@ -409,7 +441,6 @@ today_str = today_dt.strftime("%Y-%m-%d")
 
 if forecast_days > 0:
     forecast_end_str = forecast_end.strftime("%Y-%m-%d")
-    # Shaded forecast region on both panels
     for row_idx in (1, 2):
         fig.add_vrect(
             x0=today_str, x1=forecast_end_str,
@@ -418,9 +449,6 @@ if forecast_days > 0:
             row=row_idx, col=1,
         )
 
-# "Today" vertical dashed line on both panels
-# NOTE: Plotly 6.7.0 has a bug where annotation= on add_vline crashes with
-# date-string x-axes. We split into add_vline + add_annotation separately.
 for row_idx in (1, 2):
     fig.add_vline(
         x=today_str,
@@ -428,28 +456,24 @@ for row_idx in (1, 2):
         row=row_idx, col=1,
     )
 
-# "◀ Today" label — anchored to the price panel top (paper y ≈ 0.99)
 fig.add_annotation(
     x=today_str,
-    xref="x",          # shared x-axis ref
-    yref="paper",
+    xref="x", yref="paper",
     y=0.99,
     text="◀ Today",
     font=dict(size=10, color="rgba(230,180,30,1.0)"),
-    xanchor="right",
-    yanchor="top",
+    xanchor="right", yanchor="top",
     showarrow=False,
 )
 
 # ── Conjunction vertical lines (both panels) ─────────────────────────
-CONJ_LINE_COLOR  = "rgba(160,120,220,0.55)"   # soft purple
+CONJ_LINE_COLOR  = "rgba(160,120,220,0.55)"
 CONJ_LABEL_COLOR = "rgba(130,90,200,0.90)"
 
 for ev in conjunction_events:
     dt_str = str(ev["datetime"])
     label  = f"{ev['p1']}∥{ev['p2']} ({ev['sep']:.1f}°)"
 
-    # Draw line on both panels — no annotation= to avoid Plotly 6.7 date-string crash
     for row_idx in (1, 2):
         fig.add_vline(
             x=dt_str,
@@ -457,17 +481,14 @@ for ev in conjunction_events:
             row=row_idx, col=1,
         )
 
-    # Label in the planet panel only (paper y ≈ 0–0.42 for row 2)
     fig.add_annotation(
         x=dt_str,
-        xref="x",
-        yref="paper",
+        xref="x", yref="paper",
         y=0.38,
         text=label,
         font=dict(size=9, color=CONJ_LABEL_COLOR),
         textangle=-90,
-        xanchor="center",
-        yanchor="top",
+        xanchor="center", yanchor="top",
         showarrow=False,
     )
 
@@ -475,7 +496,6 @@ for ev in conjunction_events:
 PLOT_ORDER = ["Sun", "Moon", "Mercury", "Venus", "Mars",
               "Jupiter", "Saturn", "Rahu", "Ketu"]
 
-# Collect station points for a combined legend-friendly scatter
 station_r_x, station_r_y, station_r_text, station_r_color = [], [], [], []
 station_d_x, station_d_y, station_d_text, station_d_color = [], [], [], []
 
@@ -485,13 +505,11 @@ for name in PLOT_ORDER:
 
     _, base_color = PLANETS[name]
     retro_col     = retro_color(base_color)
-    first_seg     = True   # for legend grouping
+    first_seg     = True
 
-    # ── Direct / retrograde line segments ──
     if show_retro_lines:
         segments = split_motion_segments(planet_df, name)
     else:
-        # Single solid trace (original behaviour)
         segments = [{"is_retro": False,
                      "x": planet_df["datetime"].tolist(),
                      "y": planet_df[name].tolist()}]
@@ -521,7 +539,6 @@ for name in PLOT_ORDER:
         )
         first_seg = False
 
-    # ── Station markers (R / D) ──
     if show_station_labels:
         r_df, d_df = find_stations(planet_df, name)
         for _, row_data in r_df.iterrows():
@@ -535,21 +552,15 @@ for name in PLOT_ORDER:
             station_d_text.append(f"{name} D")
             station_d_color.append(base_color)
 
-# Add all R stations as one scatter trace
 if show_station_labels and station_r_x:
     fig.add_trace(
         go.Scatter(
-            x=station_r_x,
-            y=station_r_y,
+            x=station_r_x, y=station_r_y,
             mode="markers+text",
             name="Station ℞",
             legendgroup="stations",
-            marker=dict(
-                symbol="circle",
-                size=9,
-                color=station_r_color,
-                line=dict(width=1.5, color="rgba(180,60,60,0.9)"),
-            ),
+            marker=dict(symbol="circle", size=9, color=station_r_color,
+                        line=dict(width=1.5, color="rgba(180,60,60,0.9)")),
             text=["℞"] * len(station_r_x),
             textposition="top center",
             textfont=dict(size=9, color="rgba(180,60,60,0.95)"),
@@ -560,21 +571,15 @@ if show_station_labels and station_r_x:
         row=2, col=1,
     )
 
-# Add all D stations as one scatter trace
 if show_station_labels and station_d_x:
     fig.add_trace(
         go.Scatter(
-            x=station_d_x,
-            y=station_d_y,
+            x=station_d_x, y=station_d_y,
             mode="markers+text",
             name="Station D",
             legendgroup="stations",
-            marker=dict(
-                symbol="diamond",
-                size=9,
-                color=station_d_color,
-                line=dict(width=1.5, color="rgba(30,120,30,0.9)"),
-            ),
+            marker=dict(symbol="diamond", size=9, color=station_d_color,
+                        line=dict(width=1.5, color="rgba(30,120,30,0.9)")),
             text=["D"] * len(station_d_x),
             textposition="bottom center",
             textfont=dict(size=9, color="rgba(30,120,30,0.95)"),
