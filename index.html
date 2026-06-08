@@ -5839,430 +5839,176 @@ function resolveAnchor(mode, open, prevClose){
 // ═══════════════════════════════════════════════════════════════════
 // TAB: VYAPAAR RATNA — multi-aspect grid, sankranti, year-lords, sectors
 // ═══════════════════════════════════════════════════════════════════
-function tVR(){
-  const D=DATA;
-  const sc=D.combinedScore;
-  const scCol=sc>15?'var(--bull)':sc<-15?'var(--bear)':'var(--neut)';
-  const barW=Math.abs(sc);
+// ════════════════════════════════════════════════════════════════════
+// VYAPAAR RATNA (व्यापार रत्न) — dṛṣṭि-yoga teji/mandi engine + intraday
+//   Faithful to Vyaapar_ratna part 1 & 2: harmonic aspect-yogas on
+//   SAYANA (tropical) longitudes → शुभ(तेजी)/अशुभ(मंदी), via benefic/
+//   malefic + jaya-parajaya (उत्तर शर विजयी) + retro reversal (वक्री).
+//   Evaluable at ANY instant → 15-min intraday teji/mandi/volatile band.
+// ════════════════════════════════════════════════════════════════════
+const VR_BEN={Moon:1,Mercury:1,Jupiter:1,Venus:1};
+const VR_DEV={Sun:'सूर्य',Moon:'चन्द्र',Mars:'मंगल',Mercury:'बुध',Jupiter:'गुरु',Venus:'शुक्र',Saturn:'शनि',Rahu:'राहु',Ketu:'केतु',Uranus:'हर्षल',Neptune:'नेपच्यून',Pluto:'प्लूटो'};
+const VR_NAMES=['Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn','Rahu','Ketu','Uranus','Neptune','Pluto'];
+const VR_ASP=[
+  {a:0,orb:6,nm:'Yuti',dev:'युति',mode:'cond'},
+  {a:180,orb:6,nm:'Pratiyoga',dev:'प्रतियोग',mode:'cond'},
+  {a:120,orb:5,nm:'Trikona',dev:'त्रिकोण',mode:'teji'},
+  {a:60,orb:3,nm:'Shashthamsha',dev:'षष्ठांश/त्रिरेकादश',mode:'shubh'},
+  {a:72,orb:2.5,nm:'Panchamamsha',dev:'पञ्चमांश',mode:'panch'},
+  {a:51.4286,orb:1.5,nm:'Saptamamsha',dev:'सप्तमांश',mode:'sapt'},
+  {a:45,orb:1.5,nm:'Ashtamamsha',dev:'अष्टमांश',mode:'sapt'},
+  {a:40,orb:1.3,nm:'Navamamsha',dev:'नवमांश',mode:'sapt'},
+  {a:36,orb:1.3,nm:'Dashamamsha',dev:'दशमांश',mode:'sapt'},
+  {a:32.7273,orb:1.3,nm:'Ekadashamsha',dev:'एकादशांश',mode:'sapt'},
+  {a:30,orb:1.5,nm:'Dwadashamsha',dev:'द्वादशांश',mode:'dwidwa'},
+  {a:22.5,orb:1.2,nm:'Shodashamsha',dev:'षोडशांश',mode:'dwidwa'},
+  {a:108,orb:2,nm:'Shashtha-rahit',dev:'षष्ठांशरहित',mode:'kt'},
+  {a:135,orb:1.6,nm:'Ashtamamsha-rahit',dev:'अष्टमांशरहित',mode:'shad'},
+  {a:144,orb:1.3,nm:'Dashamamsha-rahit',dev:'दशमांशरहित',mode:'shad'},
+  {a:147.273,orb:1.3,nm:'Ekadashamsha-rahit',dev:'एकादशांशरहित',mode:'shad'},
+  {a:150,orb:1.8,nm:'Dwadashamsha-rahit',dev:'द्वादशांशरहित',mode:'shad'}
+];
+function vrSep(a,b){let d=Math.abs(a-b)%360; return d>180?360-d:d;}
+// planet snapshot at Julian day J (tropical lon, shar, kranti, retro)
+function vrPlanetsAt(J){
+  return VR_NAMES.map(name=>{ let tlon=0,retro=false,lat=0,dec=0;
+    try{tlon=n360(geoLon(name,J));}catch(e){} try{retro=isRetrograde(name,J);}catch(e){}
+    try{lat=geoLat(name,J);}catch(e){} try{dec=declination(name,J);}catch(e){}
+    return {name,dev:VR_DEV[name],tlon,lat,dec,retro,ben:!!VR_BEN[name]}; });
+}
+// evaluate dṛṣṭि-yogas for a planet array → {yogas, net, tejiSum, mandiSum, moonNear}
+function vrYogas(P){
+  const jaya=(p1,p2)=>p1.lat>=p2.lat?p1:p2;
+  function verdict(mode,p1,p2){ const bb=p1.ben&&p2.ben, mm=!p1.ben&&!p2.ben, win=jaya(p1,p2); let v;
+    if(mode==='teji')v=1; else if(mode==='shubh')v=mm?0.6:1;
+    else if(mode==='panch')v=bb?0.8:mm?-0.8:(win.ben?0.5:-0.5);
+    else if(mode==='kt')v=bb?0.6:mm?-0.6:(win.ben?0.4:-0.4);
+    else if(mode==='shad')v=bb?0.5:mm?-1.0:(win.ben?0.3:-0.7);
+    else if(mode==='dwidwa')v=bb?0.6:mm?-0.6:(win.ben?0.4:-0.4);
+    else if(mode==='sapt')v=bb?0.7:mm?-0.7:(win.ben?0.45:-0.45);
+    else v=bb?1:mm?-1:(win.ben?0.7:-0.7);
+    if(((p1.retro?1:0)+(p2.retro?1:0))%2===1)v=-v; return Math.round(v*100)/100; }
+  const yogas=[]; let moonHard=false;
+  const HARD=new Set([180,150,147.273,144,135,45,51.4286]);   // प्रतियोग / षडष्टक-रहित / केन्द्रार्ध — turbulence
+  for(let i=0;i<P.length;i++)for(let j=i+1;j<P.length;j++){
+    const s=vrSep(P[i].tlon,P[j].tlon); let best=null;
+    for(const A of VR_ASP){ const off=Math.abs(s-A.a); if(off<=A.orb&&(!best||off<best.off))best={A,off}; }
+    if(best){ const v=verdict(best.A.mode,P[i],P[j]);
+      yogas.push({p1:P[i],p2:P[j],sep:s,asp:best.A,off:best.off,v,win:jaya(P[i],P[j]).name});
+      if(P[i].name==='Moon'||P[j].name==='Moon'){ const oth=P[i].name==='Moon'?P[j]:P[i];
+        if(!oth.ben && best.off<0.45 && HARD.has(best.A.a)) moonHard=true; } } }
+  for(let i=0;i<P.length;i++)for(let j=i+1;j<P.length;j++){ const dd=Math.abs(P[i].dec-P[j].dec);
+    if(dd<=1.0){ yogas.push({p1:P[i],p2:P[j],sep:null,kranti:true,off:dd,asp:{nm:'Kranti-Samya',dev:'क्रान्ति-साम्य',a:null,mode:'cond'},v:verdict('cond',P[i],P[j]),win:jaya(P[i],P[j]).name}); } }
+  yogas.sort((a,b)=>Math.abs(b.v)-Math.abs(a.v));
+  let net=0,tejiSum=0,mandiSum=0; for(const y of yogas){net+=y.v; if(y.v>0)tejiSum+=y.v; else mandiSum+=-y.v;}
+  const moon=P.find(p=>p.name==='Moon');
+  return {yogas,net:Math.round(net*100)/100,tejiSum:Math.round(tejiSum*100)/100,mandiSum:Math.round(mandiSum*100)/100,moonHard,moonLat:moon?moon.lat:0};
+}
+// classify a slot → bull / bear / volatile / neutral
+function vrState(r){
+  // volatile = Moon tightly hitting a hard aspect to a malefic, or shar-parivartan (Moon ~ on ecliptic)
+  if(r.moonHard || Math.abs(r.moonLat)<0.3) return 'volatile';
+  if(r.net>=0.4) return 'bull';
+  if(r.net<=-0.4) return 'bear';
+  return 'neutral';
+}
+const VR_STCOL={bull:'#00c050',bear:'#ff3355',volatile:'#ff9020',neutral:'#3a6678'};
+const VR_STLBL={bull:'तेजी · Bullish',bear:'मंदी · Bearish',volatile:'अस्थिर · Volatile',neutral:'सम · Neutral'};
 
-  // ── Top: combined score header ────────────────────────────────
-  const hdr=`
-  <div class="pnl" style="border-color:${scCol}55">
-    <div class="ph"><span class="dot" style="background:${scCol}"></span>VYAPAAR RATNA · COMBINED SIGNAL · ${D.combinedLabel}</div>
-    <div class="pb">
-      <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px">
-        <div>
-          <div style="font-size:22px;font-weight:800;color:${scCol};letter-spacing:.12em">${D.combinedLabel}</div>
-          <div style="font-size:9px;color:var(--tx3);margin-top:3px;line-height:1.5">0.22 × KP-bias (${D.bias.score>0?'+':''}${D.bias.score}) + 0.16 × Aspect (${D.aspSc.score>0?'+':''}${D.aspSc.score}) + 0.16 × Trio (${D.trio?(D.trio.trioScore>0?'+':'')+D.trio.trioScore:'—'}) + 0.16 × Lagna (${D.lagnaTM?(D.lagnaTM.score>0?'+':'')+D.lagnaTM.score:'—'}) + 0.07 × Kranti (${D.krantiScore>0?'+':''}${D.krantiScore}) + 0.11 × Rules (${D.rulesScore>0?'+':''}${D.rulesScore}) + 0.12 × Forecast (${D.forecastDirScore>0?'+':''}${D.forecastDirScore})</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:28px;font-weight:700;color:${scCol};font-family:monospace;line-height:1">${sc>0?'+':''}${sc}</div>
-          <div style="font-size:8px;color:var(--tx3)">SCORE / ±100</div>
-        </div>
-      </div>
-      <div class="sbar"><div class="sbar-fill" style="width:${barW}%;background:${scCol};margin-left:${sc<0?100-barW:0}%"></div></div>
-      <div style="font-size:10px;color:var(--tx2);margin-top:6px;line-height:1.5">
-        Per <em>Vyapaar Ratna</em> by Pt. Hardev Sharma Trivedi & Pt. Gopesh Kumar Ojha.
-        Multi-aspect grid uses 11 aspects × 45 planet-pairs with the book's orb table (pp.273–286).
-        This is traditional Hindu market astrology — back-test before trading.
-      </div>
-    </div>
-  </div>`;
-
-  // ── Sankranti panel ──────────────────────────────────────────
-  const sk = D.sankr;
-  const kh = D.khadi;
-  const skCol = sk.peak ? 'var(--acc)' : 'var(--tx2)';
-  const sankrPanel=`
-  <div class="pnl">
-    <div class="ph"><span class="dot" style="background:${skCol}"></span>SANKRANTI OVERLAY · CH.4 pp.102–137</div>
-    <div class="pb">
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
-        <div class="pc"><div style="font-size:9px;color:var(--tx3)">CURRENT SANKRANTI</div><div style="font-size:14px;font-weight:700;color:var(--acc)">${sk.sign}</div></div>
-        <div class="pc"><div style="font-size:9px;color:var(--tx3)">DAY IN / DURATION</div><div style="font-size:14px;font-weight:700;color:var(--tx0)">${sk.dayIn} / ${sk.duration}d</div></div>
-        <div class="pc"><div style="font-size:9px;color:var(--tx3)">PEAK WINDOW</div><div style="font-size:14px;font-weight:700;color:${sk.peak?'var(--bull)':'var(--tx3)'}">${sk.window} 10d ${sk.peak?'★ ACTIVE':'(off-peak)'}</div></div>
-        <div class="pc"><div style="font-size:9px;color:var(--tx3)">KHADI / BAITHI / SOTI</div><div style="font-size:14px;font-weight:700;color:${kh.col}">${kh.cls}</div><div style="font-size:9px;color:var(--tx3);margin-top:2px">${kh.hint}</div></div>
-      </div>
-      <div style="font-size:10px;color:var(--tx2);margin-top:8px;line-height:1.5">
-        ${sk.peak
-          ? `<strong style="color:var(--acc)">Peak window:</strong> Sankranti effect on commodity prices is strongest in this phase. Effect-persistence per book: Mesh=1 year · Karka/Tula=6 months · others=own period.`
-          : `Off-peak phase. The sankranti is still in force but its commodity-price impact is muted. Watch for peak transition.`}
-      </div>
-    </div>
-  </div>`;
-
-  // ── Aspect grid (top 15 by absolute weight) ────────────────
-  const topAsp = D.aspects.slice(0,15);
-  const aspPanel=`
-  <div class="pnl">
-    <div class="ph"><span class="dot"></span>ACTIVE ASPECT GRID · ${D.aspects.length} yogas · book Khand 2 Ch.1</div>
-    <div class="ts"><table class="tbl">
-      <thead><tr><th>Pair</th><th>Aspect</th><th>Δ°</th><th>Orb</th><th>Strength</th><th>Polarity</th><th>Weight</th></tr></thead>
-      <tbody>${topAsp.map(a=>{
-        const col=a.weight>0?'var(--bull)':a.weight<0?'var(--bear)':'var(--neut)';
-        const trCls=a.weight>0.3?'tr-b':a.weight<-0.3?'tr-r':a.weight!==0?'tr-n':'';
-        return `<tr class="${trCls}">
-          <td style="font-family:monospace;font-weight:700">${a.abb1}–${a.abb2}</td>
-          <td>${a.sym} ${a.aspect}</td>
-          <td style="font-family:monospace;color:var(--tx2)">${dmsC(a.delta)}</td>
-          <td style="font-family:monospace;color:var(--tx3)">${a.orb}°</td>
-          <td style="font-family:monospace">${(a.strength*100).toFixed(0)}%</td>
-          <td style="color:${col};font-weight:700">${a.dir>0?'▲':a.dir<0?'▼':'→'}</td>
-          <td style="font-family:monospace;color:${col};font-weight:700">${a.weight>0?'+':''}${a.weight.toFixed(2)}</td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table></div>
-    ${D.aspects.length===0?'<div style="padding:14px;color:var(--tx3);font-size:11px">No aspects in orb — wide separations across all 9 traditional bodies.</div>':''}
-  </div>`;
-
-  // ── Sector ranking (by yoga activity) ─────────────────────
-  const sectorPanel=`
-  <div class="pnl">
-    <div class="ph"><span class="dot"></span>SECTOR RANKING · Ch.7 pp.215–249 + Khand 2 Ch.2</div>
-    <div class="ts"><table class="tbl">
-      <thead><tr><th>Sector / Commodity</th><th>Active Yogas</th><th>Bull Wt.</th><th>Bear Wt.</th><th>Net</th><th>Bias</th></tr></thead>
-      <tbody>${D.sectorRank.map(s=>{
-        const col=s.bias==='BULL'?'var(--bull)':s.bias==='BEAR'?'var(--bear)':'var(--neut)';
-        const trCls=s.bias==='BULL'?'tr-b':s.bias==='BEAR'?'tr-r':'tr-n';
-        return `<tr class="${s.score!==0?trCls:''}">
-          <td style="font-weight:700">${s.sector}</td>
-          <td style="font-family:monospace;color:var(--tx2)">${s.hits}</td>
-          <td style="font-family:monospace;color:var(--bull)">+${s.bull.toFixed(2)}</td>
-          <td style="font-family:monospace;color:var(--bear)">${s.bear.toFixed(2)}</td>
-          <td style="font-family:monospace;color:${col};font-weight:700">${s.score>0?'+':''}${s.score}</td>
-          <td><span class="pill ${s.bias==='BULL'?'pb-b':s.bias==='BEAR'?'pb-r':'pb-n'}">${s.bias}</span></td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table></div>
-  </div>`;
-
-  // ── Year-Lords (Vargesha) ────────────────────────────────
-  const lordPanel=`
-  <div class="pnl">
-    <div class="ph"><span class="dot"></span>YEAR-LORDS (VARGESHA) · Ch.3 pp.85–96</div>
-    <div class="ts"><table class="tbl">
-      <thead><tr><th>Lord</th><th>Planet</th><th>Domain</th><th>Bias</th></tr></thead>
-      <tbody>${D.vargesha.map(v=>{
-        const col=v.tag==='BULL'?'var(--bull)':v.tag==='BEAR'?'var(--bear)':'var(--neut)';
-        return `<tr>
-          <td style="font-weight:700">${v.name}</td>
-          <td style="color:${pc(v.lord)};font-weight:700">${v.lord}</td>
-          <td style="font-size:10px;color:var(--tx2)">${v.klass}</td>
-          <td><span class="pill ${v.tag==='BULL'?'pb-b':v.tag==='BEAR'?'pb-r':'pb-n'}">${v.tag}</span></td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table></div>
-    <div style="padding:8px 12px;font-size:10px;color:var(--tx3);border-top:1px solid var(--bd)">
-      Year-lord weekday derived from tropical Sun-based approximation of Chaitra Pratipada and related dates. For panchang-exact Hindu lunar dates, a panchang library would be needed.
-    </div>
-  </div>`;
-
-  // ── Module 5 panel: Sun-Mercury-Venus Trio (futures-basis predictor) ──
-  let trioPanel = '';
-  if(D.trio){
-    const T = D.trio;
-    const trioCol = T.trioBias==='BULL' ? 'var(--bull)' : T.trioBias==='BEAR' ? 'var(--bear)' : 'var(--neut)';
-    const basisCol = T.basisSign>0 ? 'var(--bull)' : T.basisSign<0 ? 'var(--bear)' : 'var(--neut)';
-    const basisLabel = T.basisRegime==='CONTANGO' ? 'CONTANGO (spot < fut)'
-                     : T.basisRegime==='BACKWARDATION' ? 'BACKWARDATION (spot > fut)'
-                     : 'NEAR-ZERO BASIS';
-
-    trioPanel = `
-    <div class="pnl" style="border-color:${trioCol}55">
-      <div class="ph"><span class="dot" style="background:${trioCol}"></span>★★ SUN-MERCURY-VENUS TRIO · FUTURES-BASIS ENGINE · pp.269-271</div>
-      <div class="pb">
-        <div style="font-size:11px;color:var(--acc);background:var(--bg3);padding:8px 10px;border-radius:3px;margin-bottom:10px;line-height:1.5;border-left:3px solid var(--acc)">
-          <strong>Book's premise:</strong> Mercury (≤28° from Sun) and Venus (≤48° from Sun) only ever form CONJUNCTION with the Sun. Their three-way geometry alone governs the futures-spot basis more precisely than any other planetary configuration. The book devotes pages 269-271 to this single rule because of its operational clarity.
-        </div>
-
-        <!-- Top: three planet readout + verdict -->
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px">
-          <div class="pc" style="border-left:3px solid #ffd54f">
-            <div style="font-size:9px;color:var(--tx3)">SUN</div>
-            <div style="font-size:13px;font-weight:700;color:#ffd54f">${T.Su.sign.slice(0,3)} ${dmsC(T.Su.lon%30)}</div>
-            <div style="font-size:9px;color:var(--tx3)">${T.Su.lon.toFixed(2)}° sidereal</div>
-          </div>
-          <div class="pc" style="border-left:3px solid #4dd0e1">
-            <div style="font-size:9px;color:var(--tx3)">MERCURY ${T.Me.retro?'<span style="color:var(--bear)">℞</span>':''}</div>
-            <div style="font-size:13px;font-weight:700;color:#4dd0e1">${T.Me.sign.slice(0,3)} ${dmsC(T.Me.lon%30)}</div>
-            <div style="font-size:9px;color:var(--tx3)">v = ${T.Me.speed>0?'+':''}${T.Me.speed.toFixed(3)}°/d</div>
-          </div>
-          <div class="pc" style="border-left:3px solid #ce93d8">
-            <div style="font-size:9px;color:var(--tx3)">VENUS ${T.Ve.retro?'<span style="color:var(--bear)">℞</span>':''}</div>
-            <div style="font-size:13px;font-weight:700;color:#ce93d8">${T.Ve.sign.slice(0,3)} ${dmsC(T.Ve.lon%30)}</div>
-            <div style="font-size:9px;color:var(--tx3)">v = ${T.Ve.speed>0?'+':''}${T.Ve.speed.toFixed(3)}°/d</div>
-          </div>
-          <div class="pc" style="border-left:3px solid ${trioCol}">
-            <div style="font-size:9px;color:var(--tx3)">TRIO VERDICT</div>
-            <div style="font-size:14px;font-weight:800;color:${trioCol};letter-spacing:.1em">${T.trioBias}</div>
-            <div style="font-size:11px;color:${trioCol};font-family:monospace;font-weight:700">${T.trioScore>0?'+':''}${T.trioScore}</div>
-          </div>
-        </div>
-
-        <!-- Separations + basis -->
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px">
-          <div class="pc">
-            <div style="font-size:9px;color:var(--tx3)">MER ↔ SUN SEPARATION</div>
-            <div style="font-size:14px;font-weight:700;color:${T.mercCombust?'var(--neut)':'var(--tx0)'}">${T.dMeSu.toFixed(2)}°</div>
-            <div style="font-size:9px;color:${T.mercCombust?'var(--neut)':'var(--tx3)'}">${T.mercCombust?'⚡ COMBUST':'free'}</div>
-          </div>
-          <div class="pc">
-            <div style="font-size:9px;color:var(--tx3)">VEN ↔ SUN SEPARATION</div>
-            <div style="font-size:14px;font-weight:700;color:${T.venusCombust?'var(--bear)':'var(--tx0)'}">${T.dVeSu.toFixed(2)}°</div>
-            <div style="font-size:9px;color:${T.venusCombust?'var(--bear)':'var(--tx3)'}">${T.venusCombust?'⚡ COMBUST':'free'}</div>
-          </div>
-          <div class="pc">
-            <div style="font-size:9px;color:var(--tx3)">MER ↔ VEN SEPARATION</div>
-            <div style="font-size:14px;font-weight:700;color:${T.merVenYuti?'var(--neut)':T.merVenWide?'var(--acc)':'var(--tx0)'}">${T.dMeVe.toFixed(2)}°</div>
-            <div style="font-size:9px;color:${T.merVenYuti?'var(--neut)':T.merVenWide?'var(--acc)':'var(--tx3)'}">${T.merVenYuti?'YUTI · paralysis':T.merVenWide?'WIDE · max basis':'mid'}</div>
-          </div>
-        </div>
-
-        <!-- Basis regime callout -->
-        <div style="background:${basisCol}22;border:1px solid ${basisCol}66;border-radius:4px;padding:10px 12px;margin-bottom:10px">
-          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-            <div>
-              <div style="font-size:10px;color:var(--tx3);letter-spacing:.07em">FUTURES-SPOT BASIS REGIME</div>
-              <div style="font-size:16px;font-weight:800;color:${basisCol};letter-spacing:.07em">${basisLabel}</div>
-            </div>
-            <div style="text-align:right">
-              <div style="font-size:9px;color:var(--tx3)">BASIS MAGNITUDE</div>
-              <div style="font-size:13px;font-weight:700;color:${basisCol};font-family:monospace">${T.basisMag}% of max (Mer-Ven ${T.dMeVe.toFixed(1)}° / 76°)</div>
-            </div>
-          </div>
-          <div style="font-size:11px;color:var(--tx1);margin-top:6px;line-height:1.5">
-            ${T.basisText}
-          </div>
-        </div>
-
-        <!-- Active book rules -->
-        <div style="font-size:11px;color:var(--acc);letter-spacing:.07em;font-weight:700;margin-bottom:6px">ACTIVE BOOK RULES (${T.signals.length})</div>
-        <table class="tbl" style="font-size:11px">
-          <thead><tr><th style="width:70px">Rule</th><th>Interpretation</th><th style="width:60px;text-align:right">Dir</th><th style="width:50px;text-align:right">Weight</th></tr></thead>
-          <tbody>
-            ${T.signals.map(s=>{
-              const col = s.dir>0?'var(--bull)':s.dir<0?'var(--bear)':'var(--neut)';
-              return `<tr>
-                <td style="font-family:monospace;color:${col};font-weight:700">${s.code}${s.special?'<br><span style="font-size:9px">'+s.special+'</span>':''}</td>
-                <td style="line-height:1.4">${s.text}</td>
-                <td style="text-align:right;color:${col};font-weight:700">${s.dir>0?'▲ +'+s.dir.toFixed(1):s.dir<0?'▼ '+s.dir.toFixed(1):'→ 0'}</td>
-                <td style="text-align:right;font-family:monospace;color:var(--tx2)">${s.weight.toFixed(1)}</td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-
-        <div style="margin-top:10px;font-size:10px;color:var(--tx3);line-height:1.5;border-top:1px dashed var(--bd);padding-top:8px">
-          <strong style="color:var(--acc)">Book quote (p.271):</strong> <em>"बुध और शुक्र के बीच की दूरी ही तैयार और वायदे के बाज़ार की चाल के रुख को बतलाती है"</em> — "The separation between Mercury and Venus alone tells you the direction of the futures-spot basis." This module operationalises that claim using sub-arcsecond Mer/Ven/Sun positions and signed daily-motion speeds. Backtest the regime calls (contango vs backwardation) against actual NIFTY futures basis to validate.
-        </div>
-      </div>
-    </div>`;
-  }
-
-  // ── Module 6 panel: Lagna-based Teji-Mandi (intraday signals) ──
-  let lagnaPanel = '';
-  if(D.lagnaTM){
-    const L = D.lagnaTM;
-    const verdictCol = L.verdict==='BUY'  ? 'var(--bull)'
-                     : L.verdict==='SELL' ? 'var(--bear)'
-                     : L.verdict==='AVOID'? 'var(--bear)'
-                     :                       'var(--neut)';
-    const verdictBg  = L.verdict==='BUY'  ? 'var(--bull3)'
-                     : L.verdict==='SELL' ? 'var(--bear3)'
-                     : L.verdict==='AVOID'? 'var(--bear3)'
-                     :                       'var(--bg3)';
-    lagnaPanel = `
-    <div class="pnl" style="border-color:${verdictCol}66">
-      <div class="ph"><span class="dot" style="background:${verdictCol}"></span>★★ LAGNA TEJI-MANDI · INTRADAY SIGNALS · pp.260-265</div>
-      <div class="pb">
-        <div style="font-size:11px;color:var(--acc);background:var(--bg3);padding:8px 10px;border-radius:3px;margin-bottom:10px;line-height:1.5;border-left:3px solid var(--acc)">
-          <strong>Book methodology (p.263):</strong> Lagnas change every ~2 hours. At each lagna change, recast the chart and analyze drishti relations between key house-lords (Lagnesh/Dhanesh/Saptamesh/Ashtamesh) and bhavas 2H/5H/7H/8H. This signal refreshes <em>every time you click Refresh</em> — the verdict below applies to <strong>this 2-hour lagna window</strong>.
-        </div>
-
-        <!-- Top verdict -->
-        <div style="background:${verdictBg};border:1px solid ${verdictCol}66;border-radius:4px;padding:12px;margin-bottom:10px">
-          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-            <div>
-              <div style="font-size:10px;color:var(--tx3);letter-spacing:.07em">CURRENT VERDICT (this 2hr lagna window)</div>
-              <div style="font-size:22px;font-weight:800;color:${verdictCol};letter-spacing:.1em">${L.verdict}</div>
-            </div>
-            <div style="text-align:right">
-              <div style="font-size:9px;color:var(--tx3)">SCORE</div>
-              <div style="font-size:20px;font-weight:700;color:${verdictCol};font-family:monospace">${L.score>0?'+':''}${L.score}</div>
-            </div>
-          </div>
-          <div style="display:flex;gap:14px;margin-top:8px;font-size:11px;flex-wrap:wrap">
-            <span style="color:var(--bull)">▲ Buy: <strong>${L.buyScore}</strong></span>
-            <span style="color:var(--bear)">▼ Sell: <strong>${L.sellScore}</strong></span>
-            <span style="color:var(--neut)">⚠ Avoid: <strong>${L.avoidScore}</strong></span>
-            <span style="color:var(--tx2);margin-left:auto">Asc: <strong style="color:var(--acc)">${L.ascSign}</strong> · Moon waxing: <strong style="color:${L.moonIsShubh?'var(--bull)':'var(--bear)'}">${L.moonIsShubh?'YES (benefic)':'NO (malefic)'}</strong></span>
-          </div>
-        </div>
-
-        <!-- House-lord readout -->
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px;margin-bottom:10px">
-          ${[
-            ['1L Lagnesh', L.lords.lagnesh, L.lords.hLagnesh, '🪪 trader/self'],
-            ['2L Dhanesh', L.lords.dhanesh, L.lords.hDhanesh, '💰 price/wealth'],
-            ['5L Panchamesh', L.lords.panchamesh, L.lords.hPanchamesh, '🎲 speculation'],
-            ['7L Saptamesh', L.lords.saptamesh, L.lords.hSaptamesh, '🤝 counterparty'],
-            ['8L Ashtamesh', L.lords.ashtamesh, L.lords.hAshtamesh, '⚡ volatility'],
-            ['10L Karmesh', L.lords.karmesh, L.lords.hKarmesh, '📄 contracts'],
-            ['11L Ayesh', L.lords.ayesh, L.lords.hAyesh, '📈 gains'],
-          ].map(([label, lord, h, hint])=>`
-            <div class="pc" style="border-left:3px solid ${PC[lord]||'var(--acc)'}">
-              <div style="font-size:9px;color:var(--tx3)">${label}</div>
-              <div style="font-size:12px;font-weight:700;color:${PC[lord]||'var(--tx0)'}">${lord}</div>
-              <div style="font-size:10px;color:var(--tx2)">H${h||'?'}</div>
-              <div style="font-size:8px;color:var(--tx3)">${hint}</div>
-            </div>
-          `).join('')}
-        </div>
-
-        <!-- Active signals -->
-        <div style="font-size:11px;color:var(--acc);letter-spacing:.07em;font-weight:700;margin-bottom:6px">ACTIVE BOOK RULES (${L.signals.length})</div>
-        ${L.signals.length===0
-          ? '<div style="padding:10px;color:var(--tx3);font-size:11px">No active buy/sell/avoid rules currently. Lagna is in a neutral configuration — wait for next lagna change.</div>'
-          : `<table class="tbl" style="font-size:11px">
-            <thead><tr><th style="width:60px">Rule</th><th>Interpretation</th><th style="width:60px;text-align:right">Dir</th><th style="width:50px;text-align:right">Weight</th></tr></thead>
-            <tbody>${L.signals.map(s=>{
-              const col = s.dir>0?'var(--bull)':s.dir<0?'var(--bear)':'var(--neut)';
-              const cls = s.code.startsWith('B') ? 'B' : s.code.startsWith('S') ? 'S' : s.code.startsWith('A') ? 'A' : s.code.startsWith('F') ? 'F' : '';
-              const tagCol = cls==='B'?'var(--bull)':cls==='S'?'var(--bear)':cls==='A'?'var(--neut)':'var(--acc)';
-              return `<tr>
-                <td style="font-family:monospace;color:${tagCol};font-weight:700">${s.code}</td>
-                <td style="line-height:1.4">${s.text}</td>
-                <td style="text-align:right;color:${col};font-weight:700">${s.dir>0?'▲':s.dir<0?'▼':'→'}</td>
-                <td style="text-align:right;font-family:monospace;color:var(--tx2)">${s.weight.toFixed(1)}</td>
-              </tr>`;
-            }).join('')}</tbody>
-          </table>`}
-
-        <div style="margin-top:10px;font-size:10px;color:var(--tx3);line-height:1.5;border-top:1px dashed var(--bd);padding-top:8px">
-          <strong style="color:var(--acc)">Book quote (p.261):</strong> <em>"जिस समय द्वितीयेश अष्टमेश के साथ शुभ-दृष्टि में हो… उस समय शेयर ख़रीदना चाहिए"</em> — "When 2L is in benefic-drishti of 8L, that is the time to buy shares." Rules use Hindu sign-to-sign drishti (Mars sees 4/7/8; Jupiter 5/7/9; Saturn 3/7/10; others 7 only) per p.264.
-        </div>
-      </div>
-    </div>`;
-  }
-
-  // ── Module 9 panel: Forward aspect-timing scan (15-day window) ──
-  let upcomingPanel = '';
-  if(D.upcomingAspects && D.upcomingAspects.length > 0){
-    upcomingPanel = `
-    <div class="pnl">
-      <div class="ph"><span class="dot"></span>★ UPCOMING ASPECTS · 15-day forward scan · p.283 lead-time rule</div>
-      <div class="pb">
-        <div style="font-size:10px;color:var(--tx2);margin-bottom:8px;line-height:1.5">
-          Book p.283: aspect effects begin BEFORE perfection — conj/opp = 1 week early, trine/quincunx = 4-5 days, semisquare = 2 days. Aspects flagged ★ are already in their lead-time window and influencing prices now.
-        </div>
-        <table class="tbl" style="font-size:11px">
-          <thead><tr><th>Pair</th><th>Aspect</th><th style="text-align:right">In Days</th><th>Status</th><th style="text-align:right">Polarity</th></tr></thead>
-          <tbody>${D.upcomingAspects.map(u=>{
-            const col = u.dir>0?'var(--bull)':u.dir<0?'var(--bear)':'var(--neut)';
-            const statusCol = u.daysFromNow<=1?'var(--bear)':u.inLeadTime?'var(--acc)':'var(--tx2)';
-            return `<tr>
-              <td style="font-family:monospace;font-weight:700">${u.p1}–${u.p2}</td>
-              <td>${u.sym} ${u.name}</td>
-              <td style="font-family:monospace;text-align:right;color:${statusCol};font-weight:${u.inLeadTime?700:400}">${u.daysFromNow}d</td>
-              <td style="font-size:10px;color:${statusCol}">${u.note}</td>
-              <td style="text-align:right;color:${col};font-weight:700">${u.dir>0?'▲ teji':u.dir<0?'▼ mandi':'→ neut'}</td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table>
-      </div>
-    </div>`;
-  }
-
-  // ── Module 7 + 8 combined panel: Shar (latitude) + Kranti-Samya ──
-  const aeAvail = D.sharNow.length > 0 && !D.sharNow[0].unavailable;
-  let sharKrantiPanel = `
-    <div class="pnl">
-      <div class="ph"><span class="dot"></span>★ SHAR (LATITUDE) & KRANTI-SAMYA · Khand 2 Ch.4 · pp.320-326</div>
-      <div class="pb">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-          <div>
-            <div style="font-size:11px;color:var(--acc);letter-spacing:.07em;font-weight:700;margin-bottom:6px">CURRENT SHAR (ecliptic latitude)</div>
-            <div style="font-size:10px;color:var(--tx2);margin-bottom:6px;line-height:1.4">
-              ${aeAvail
-                ? 'Book p.325: <strong style="color:var(--neut)">latitude crossing zero = greatest market impact</strong>, above all aspects. Planets near zero latitude are most influential.'
-                : '<strong style="color:var(--neut)">Astronomy Engine offline</strong> — latitude requires VSOP87 ephemeris. Refresh page when online for live shar data.'}
-            </div>
-            ${aeAvail ? `<table class="tbl" style="font-size:11px">
-              <thead><tr><th>Body</th><th style="text-align:right">Latitude</th><th style="text-align:right">% Max</th><th>Status</th></tr></thead>
-              <tbody>${D.sharNow.map(s=>{
-                const col = s.nearZero ? 'var(--neut)' : 'var(--tx1)';
-                return `<tr>
-                  <td style="color:${PC[s.body]||'var(--tx0)'};font-weight:700">${s.body}</td>
-                  <td style="font-family:monospace;text-align:right;color:${col}">${s.lat>0?'+':''}${s.lat}° ${s.direction}</td>
-                  <td style="font-family:monospace;text-align:right;color:var(--tx2)">${s.pctOfMax}%</td>
-                  <td style="font-size:10px;color:${col}">${s.nearZero?'⚡ NEAR ZERO':'normal'}</td>
-                </tr>`;
-              }).join('')}</tbody>
-            </table>` : ''}
-
-            ${D.sharCrossings.length > 0 ? `
-              <div style="font-size:11px;color:var(--acc);letter-spacing:.07em;font-weight:700;margin:10px 0 6px">UPCOMING NODE CROSSINGS (±30d)</div>
-              <table class="tbl" style="font-size:11px">
-                <thead><tr><th>Body</th><th>Direction</th><th>Date · Time IST</th><th style="text-align:right">Days</th><th>Note</th></tr></thead>
-                <tbody>${D.sharCrossings.slice(0,8).map(c=>{
-                  const isImminent = Math.abs(c.daysFromNow) < 3;
-                  return `<tr>
-                    <td style="color:${PC[c.body]||'var(--tx0)'};font-weight:700">${c.body}</td>
-                    <td style="font-size:10px">${c.direction}</td>
-                    <td style="font-family:monospace;font-size:10px;color:var(--acc)">${c.at?c.at.date+' '+c.at.time:'—'}</td>
-                    <td style="font-family:monospace;text-align:right;color:${isImminent?'var(--bear)':'var(--tx2)'};font-weight:${isImminent?700:400}">${c.daysFromNow>0?'+':''}${c.daysFromNow}d</td>
-                    <td style="font-size:10px;color:${isImminent?'var(--bear)':'var(--tx2)'}">${c.note}</td>
-                  </tr>`;
-                }).join('')}</tbody>
-              </table>` : ''}
-          </div>
-
-          <div>
-            <div style="font-size:11px;color:var(--acc);letter-spacing:.07em;font-weight:700;margin-bottom:6px">KRANTI-SAMYA (DECLINATION PARALLELS)</div>
-            <div style="font-size:10px;color:var(--tx2);margin-bottom:6px;line-height:1.4">
-              Book p.329: when two planets share declination, they form a hidden conjunction of <strong>75% strength</strong> (same direction) or <strong>50%</strong> (opposite). Orb 1°.
-            </div>
-            ${D.krantiSamya.length === 0
-              ? '<div style="padding:10px;color:var(--tx3);font-size:11px">No declination parallels active right now.</div>'
-              : `<table class="tbl" style="font-size:11px">
-                  <thead><tr><th>Pair</th><th>Type</th><th style="text-align:right">Δ Dec</th><th style="text-align:right">Weight</th></tr></thead>
-                  <tbody>${D.krantiSamya.slice(0,8).map(k=>{
-                    const col = k.weight>0?'var(--bull)':k.weight<0?'var(--bear)':'var(--neut)';
-                    return `<tr>
-                      <td style="font-family:monospace;font-weight:700">${k.p1}–${k.p2}</td>
-                      <td style="font-size:10px">${k.type}</td>
-                      <td style="font-family:monospace;text-align:right;color:var(--tx2)">${k.delta}°</td>
-                      <td style="font-family:monospace;text-align:right;color:${col};font-weight:700">${k.weight>0?'+':''}${k.weight}</td>
-                    </tr>`;
-                  }).join('')}</tbody>
-                </table>`}
-            ${(D.krantiSamyaEvents&&D.krantiSamyaEvents.length)?`
-              <div style="font-size:11px;color:var(--acc);letter-spacing:.07em;font-weight:700;margin:10px 0 6px">KRANTI-SAMYA EVENTS (\u00b130d)</div>
-              <table class="tbl" style="font-size:10px">
-                <thead><tr><th>Pair</th><th>Type</th><th>Date · Time IST</th><th style="text-align:right">Days</th><th style="text-align:right">Decl</th></tr></thead>
-                <tbody>${D.krantiSamyaEvents.map(e=>{const im=Math.abs(e.daysFromNow)<3;return `<tr>
-                  <td style="font-family:monospace;font-weight:700;color:${im?'var(--bear)':'var(--tx1)'}">${e.p1}\u2013${e.p2}</td>
-                  <td style="font-size:9px;color:${e.type==='Parallel'?'var(--bull)':'var(--neut)'}">${e.type}</td>
-                  <td style="font-family:monospace;font-size:9px;color:var(--acc)">${e.date} ${e.time}</td>
-                  <td style="font-family:monospace;text-align:right;color:${im?'var(--bear)':'var(--tx2)'}">${e.daysFromNow>0?'+':''}${e.daysFromNow}d</td>
-                  <td style="font-family:monospace;text-align:right;color:var(--tx2)">${e.dec}\u00b0</td></tr>`;}).join('')}</tbody>
-              </table>`:''}
-          </div>
-        </div>
-
-        <div style="margin-top:10px;font-size:10px;color:var(--tx3);line-height:1.5;border-top:1px dashed var(--bd);padding-top:8px">
-          <strong style="color:var(--acc)">Book quote (p.325):</strong> <em>"शर-परिवर्तन का बाजार पर सबसे अधिक प्रभाव होता है"</em> — "Latitude-change has the greatest impact on the market" (above all aspects). The book argues kranti-samya is a hidden aspect that conventional drishti-only analysis misses entirely.
-        </div>
-      </div>
-    </div>`;
-
-  return hdr + lagnaPanel + trioPanel + upcomingPanel + sharKrantiPanel + sankrPanel + `<div class="g2">${aspPanel}${sectorPanel}</div>` + lordPanel;
+function computeVR(D){
+  const P=vrPlanetsAt(D.J); const r=vrYogas(P);
+  const COMM=[['सोना · Gold',['Sun','Jupiter']],['चांदी · Silver',['Moon']],['रूई · Cotton',['Venus']],['सूत · Yarn',['Mercury','Venus']],['गेहूँ · Wheat',['Sun']],['चावल · Rice',['Moon']],['सरसों · Mustard',['Sun','Saturn']],['चीनी · Sugar',['Venus']],['तेल · Oil',['Saturn','Neptune']],['सीमेंट · Cement',['Saturn']],['लोहा · Iron/Steel',['Mars','Saturn']],['तांबा · Copper',['Sun','Mars']],['रेशम · Silk',['Mercury','Venus']],['हल्दी · Turmeric',['Sun','Neptune']],['सीसा · Lead',['Pluto']]];
+  const commodities=COMM.map(c=>{ const rel=r.yogas.filter(y=>c[1].includes(y.p1.name)||c[1].includes(y.p2.name));
+    return {nm:c[0],rulers:c[1],score:Math.round(rel.reduce((s,y)=>s+y.v,0)*100)/100,n:rel.length}; });
+  return {P,Pm:Object.fromEntries(P.map(p=>[p.name,p])),yogas:r.yogas,net:r.net,tejiC:r.yogas.filter(y=>y.v>0).length,mandiC:r.yogas.filter(y=>y.v<0).length,commodities};
+}
+// 15-min intraday band across market hours
+function vrIntraday(){
+  const dp=S.date.split('-').map(Number);
+  const loc=(typeof LOCATIONS!=='undefined'&&LOCATIONS[S.loc])||{open:9.25,close:15.5};
+  const slots=[]; const n=Math.round((loc.close-loc.open)/0.25);
+  for(let k=0;k<=n;k++){ const t=Math.round((loc.open+k*0.25)*100)/100; const J=JD(dp[0],dp[1],dp[2],t);
+    const r=vrYogas(vrPlanetsAt(J)); const st=vrState(r); const drv=r.yogas[0];
+    slots.push({t,net:r.net,state:st,driver:drv?`${drv.p1.dev}–${drv.p2.dev} ${drv.asp.dev}`:'—'}); }
+  // merge consecutive same-state into ranges (close = next slot start, last = market close)
+  const ranges=[]; for(let i=0;i<slots.length;i++){ const s=slots[i];
+    if(ranges.length&&ranges[ranges.length-1].state===s.state){ ranges[ranges.length-1].endT=s.t; ranges[ranges.length-1].slots.push(s); }
+    else ranges.push({state:s.state,startT:s.t,endT:s.t,slots:[s]}); }
+  ranges.forEach(rg=>{ rg.endT=Math.round((rg.endT+0.25)*100)/100; if(rg.endT>loc.close)rg.endT=loc.close;
+    rg.netAvg=Math.round(rg.slots.reduce((a,b)=>a+b.net,0)/rg.slots.length*100)/100;
+    const cnt={}; rg.slots.forEach(s=>{cnt[s.driver]=(cnt[s.driver]||0)+1;}); rg.driver=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0]; });
+  return {slots,ranges,open:loc.open,close:loc.close,abbr:loc.abbr||'IST'};
 }
 
+function tVR(){
+  const D=DATA, VR=computeVR(D);
+  const net=VR.net, netCol=net>0.5?'var(--bull)':net<-0.5?'var(--bear)':'var(--neut)';
+  const netLabel=net>0.5?'तेजी · TEJI (Bullish)':net<-0.5?'मंदी · MANDI (Bearish)':'सम · NEUTRAL';
+  const vcol=v=>v>0?'var(--bull)':v<0?'var(--bear)':'var(--neut)', vlbl=v=>v>0?'▲ तेजी':v<0?'▼ मंदी':'• सम';
 
-// ═══════ NEW TABS: Day Forecast · Shar Parivartan · Natal/Intraday Kundali · Bhav Phal ═══════
-function _dirCls(d){return d==='BULLISH'?'pb-b':d==='BEARISH'?'pb-r':'pb-n';}
-function _dirCol(d){return d==='BULLISH'?'var(--bull)':d==='BEARISH'?'var(--bear)':'var(--neut)';}
+  const hdr=`<div class="pnl" style="border-color:${netCol}55">
+    <div class="ph"><span class="dot" style="background:${netCol}"></span>व्यापार रत्न · दृष्टि-योग तेजी-मंदी · ${S.date}</div>
+    <div class="pb" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      <div><div style="font-size:22px;font-weight:800;color:${netCol};letter-spacing:.08em">${netLabel}</div>
+        <div style="font-size:10px;color:var(--tx3);margin-top:3px">${VR.yogas.length} सक्रिय दृष्टियोग · <span style="color:var(--bull)">${VR.tejiC} तेजी</span> / <span style="color:var(--bear)">${VR.mandiC} मंदी</span> · फल योग = ${net>0?'+':''}${net}</div></div>
+      <div style="text-align:right"><div style="font-size:26px;font-weight:700;color:${netCol};font-family:monospace">${net>0?'+':''}${net}</div><div style="font-size:8px;color:var(--tx3)">NET फल · ${S.date} ${mtt(parseFloat(S.time)*60)}</div></div>
+    </div></div>`;
+
+  // ── intraday 15-min band ──
+  const IN=vrIntraday(); const W=1000,H=58,padL=4,padR=4,iw=W-padL-padR;
+  const xT=t=>padL+((t-IN.open)/(IN.close-IN.open))*iw;
+  let segs=''; IN.ranges.forEach(rg=>{ const x0=xT(rg.startT),x1=xT(rg.endT);
+    segs+=`<rect x="${x0.toFixed(1)}" y="14" width="${(x1-x0).toFixed(1)}" height="26" fill="${VR_STCOL[rg.state]}" opacity="0.92"/>`; });
+  // hour ticks
+  let ticks=''; for(let h=Math.ceil(IN.open); h<=IN.close+1e-9; h+=1){ const x=xT(h); ticks+=`<line x1="${x.toFixed(1)}" y1="14" x2="${x.toFixed(1)}" y2="40" stroke="#02141c" stroke-width=".5"/><text x="${x.toFixed(1)}" y="52" fill="#3a8090" font-size="8" text-anchor="middle">${mtt(h*60)}</text>`; }
+  // selected-time marker
+  const selT=parseFloat(S.time)||IN.open; let selMark=''; if(selT>=IN.open&&selT<=IN.close){ const x=xT(selT); selMark=`<line x1="${x.toFixed(1)}" y1="10" x2="${x.toFixed(1)}" y2="42" stroke="#e8c020" stroke-width="1.4"/><text x="${x.toFixed(1)}" y="9" fill="#e8c020" font-size="8" text-anchor="middle">▼${mtt(selT*60)}</text>`; }
+  const bandSVG=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">${segs}${ticks}${selMark}</svg>`;
+  const rangeRows=IN.ranges.map(rg=>`<tr>
+    <td style="white-space:nowrap;font-weight:700">${mtt(rg.startT*60)} – ${mtt(rg.endT*60)}</td>
+    <td><span class="pill" style="background:${VR_STCOL[rg.state]}33;color:${VR_STCOL[rg.state]};border:1px solid ${VR_STCOL[rg.state]}">${VR_STLBL[rg.state]}</span></td>
+    <td style="text-align:right;color:${vcol(rg.netAvg)};font-family:monospace">${rg.netAvg>0?'+':''}${rg.netAvg}</td>
+    <td style="font-size:9px;color:var(--tx2)">${rg.driver||'—'}</td></tr>`).join('');
+  const intraPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>⏱ इंट्राडे तेजी-मंदी बैंड · 15-MIN (${mtt(IN.open*60)}–${mtt(IN.close*60)} ${IN.abbr}) · दृष्टि-योगों से</div>
+    <div class="pb">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:10px;margin-bottom:6px">
+        ${Object.keys(VR_STLBL).map(k=>`<span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:${VR_STCOL[k]};display:inline-block;border-radius:2px"></span>${VR_STLBL[k]}</span>`).join('')}
+      </div>
+      ${bandSVG}
+      <div class="ts" style="max-height:240px;overflow:auto;margin-top:8px"><table class="tbl"><thead><tr><th>समय (from – to)</th><th>स्थिति</th><th style="text-align:right">औसत फल</th><th>मुख्य दृष्टियोग</th></tr></thead><tbody>${rangeRows}</tbody></table></div>
+      <div style="font-size:9px;color:var(--tx3);margin-top:5px">चन्द्र (तीव्रगामी) के दृष्टियोग दिन-भर बदलते हैं → इसी से इंट्राडे रुख बदलता है। <b style="color:#ff9020">अस्थिर/Volatile</b> = चन्द्र किसी दृष्टि के अति-निकट (परिवर्तन-बिन्दु) या शर-परिवर्तन। समय इस location के bazaar घंटों में।</div>
+    </div></div>`;
+
+  const yrows=VR.yogas.map(y=>{ const aspTxt=y.kranti?`क्रान्ति-साम्य<div style="font-size:8px;color:var(--tx3)">Δदेक ${y.off.toFixed(2)}°</div>`:`${y.asp.dev}<div style="font-size:8px;color:var(--tx3)">${y.asp.a}° · off ${y.off.toFixed(1)}°</div>`;
+    const tag=p=>`<span style="color:${PC[p.name]};font-weight:700">${p.dev}</span> <span style="font-size:8px;color:${p.ben?'var(--bull)':'var(--bear)'}">${p.ben?'शुभ':'क्रूर'}${p.retro?'·वक्री':''}</span>`;
+    const mixed=(y.p1.ben!==y.p2.ben);
+    return `<tr class="${y.v>0?'tr-b':y.v<0?'tr-r':'tr-n'}"><td>${tag(y.p1)}</td><td>${tag(y.p2)}</td><td style="font-size:10px;color:var(--tx1)">${aspTxt}</td><td style="text-align:center;font-weight:700;color:${vcol(y.v)};white-space:nowrap">${vlbl(y.v)}<div style="font-size:8px">${y.v>0?'+':''}${y.v}</div></td><td style="font-size:9px;color:var(--tx3)">${mixed?('जय: '+VR.Pm[y.win].dev):(y.p1.ben&&y.p2.ben?'शुभ-शुभ':'क्रूर-क्रूर')}${(y.p1.retro||y.p2.retro)?' · वक्री-विपरीत':''}</td></tr>`; }).join('');
+  const yogaPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>सक्रिय दृष्टि-योग · ACTIVE ASPECT-YOGAS (सायन · ${mtt(parseFloat(S.time)*60)})</div>
+    ${VR.yogas.length?`<div class="ts" style="max-height:380px;overflow:auto"><table class="tbl"><thead><tr><th>ग्रह १</th><th>ग्रह २</th><th>दृष्टियोग (अंशान्तर)</th><th style="text-align:center">फल</th><th>निर्णय</th></tr></thead><tbody>${yrows}</tbody></table></div>`:`<div class="pb" style="color:var(--tx3);font-size:11px">कोई दृष्टियोग दीप्तांश के अन्दर सक्रिय नहीं।</div>`}</div>`;
+
+  const srows=VR.P.map(p=>{ const shar=(p.name==='Sun'||p.name==='Rahu'||p.name==='Ketu')?'<span style="color:var(--tx3)">— (क्रान्तिवृत्त पर)</span>':`${Math.abs(p.lat).toFixed(2)}° ${p.lat>=0?'<span style="color:#ff8a65">उत्तर N</span>':'<span style="color:#69f0ae">दक्षिण S</span>'}`;
+    const pari=(p.name!=='Sun'&&p.name!=='Rahu'&&p.name!=='Ketu'&&Math.abs(p.lat)<0.5)?'<span class="pill pb-n" style="font-size:8px">⚡ शर-परिवर्तन</span>':'';
+    const kr=`${Math.abs(p.dec).toFixed(2)}° ${p.dec>=0?'<span style="color:#ff8a65">उ N</span>':'<span style="color:#69f0ae">द S</span>'}`;
+    return `<tr><td style="color:${PC[p.name]};font-weight:700">${p.dev} <span style="font-size:8px;color:var(--tx3)">${p.name}</span></td><td>${shar} ${pari}</td><td>${kr}</td><td style="color:${p.ben?'var(--bull)':'var(--bear)'};font-size:10px">${p.ben?'सौम्य':'क्रूर'}</td><td>${p.retro?'<span style="color:var(--bear)">वक्री ℞</span>':'मार्गी'}</td></tr>`; }).join('');
+  const sharPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>शर · क्रान्ति · जय-पराजय</div>
+    <div style="font-size:9px;color:var(--tx3);padding:4px 12px">मिश्र-ग्रह योग में अधिक <b style="color:#ff8a65">उत्तर शर</b> वाला विजयी; फल उसी के स्वभाव का।</div>
+    <div class="ts"><table class="tbl"><thead><tr><th>ग्रह</th><th>शर</th><th>क्रान्ति</th><th>स्वभाव</th><th>गति</th></tr></thead><tbody>${srows}</tbody></table></div></div>`;
+
+  const crows=VR.commodities.map(c=>{ const sc=c.score,col=vcol(sc),lbl=sc>0.3?'▲ तेजी':sc<-0.3?'▼ मंदी':'• सम';
+    return `<tr><td style="font-weight:700">${c.nm}</td><td style="font-size:10px">${c.rulers.map(r=>`<span style="color:${PC[r]}">${VR_DEV[r]||r}</span>`).join(' · ')}</td><td style="text-align:center">${c.n}</td><td style="text-align:center;font-weight:700;color:${col}">${lbl} <span style="font-size:9px">${sc>0?'+':''}${sc}</span></td></tr>`; }).join('');
+  const commPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>ग्रह ↔ वस्तु · COMMODITY</div>
+    <div class="ts"><table class="tbl"><thead><tr><th>वस्तु</th><th>स्वामी ग्रह</th><th style="text-align:center">योग</th><th style="text-align:center">फल</th></tr></thead><tbody>${crows}</tbody></table></div></div>`;
+
+  const legend=`<div class="pnl"><div class="ph"><span class="dot"></span>नियम · RULES (Vyaapar Ratna)</div>
+    <div class="pb" style="font-size:10px;color:var(--tx2);line-height:1.7">
+      <b style="color:var(--acc)">दृष्टि-योग:</b> युति 0° · प्रतियोग 180° · त्रिकोण 120° · षष्ठांश 60° · पञ्चमांश 72° · सप्तमांश 51°26′ · अष्टमांश 45° · नवमांश 40° · दशमांश 36° · एकादशांश 32°44′ · द्वादशांश 30° · षोडशांश 22°30′ · रहित 108/135/144/147/150°.<br>
+      <b style="color:var(--bull)">शुभ→तेजी</b>, <b style="color:var(--bear)">अशुभ→मंदी</b>. त्रिकोण सर्वदा शुभ. युति/प्रतियोग: दो शुभ⇒तेजी, दो क्रूर⇒मंदी, मिश्र⇒जय-पराजय. षडष्टक-रहित प्रायः मंदी. <b style="color:var(--neut)">वक्री⇒विपरीत फल</b>. क्रान्ति-साम्य(≤1°)⇒युति-तुल्य.<br>
+      सौम्य: <span style="color:${PC.Moon}">चन्द्र</span> <span style="color:${PC.Mercury}">बुध</span> <span style="color:${PC.Jupiter}">गुरु</span> <span style="color:${PC.Venus}">शुक्र</span> · क्रूर: <span style="color:${PC.Sun}">सूर्य</span> <span style="color:${PC.Mars}">मंगल</span> <span style="color:${PC.Saturn}">शनि</span> राहु-केतु, हर्षल, प्लूटो.
+    </div></div>`;
+
+  return `<div style="display:flex;flex-direction:column;gap:10px">${hdr}${intraPanel}${yogaPanel}<div class="g2">${sharPanel}${commPanel}</div>${legend}
+    <div style="font-size:9px;color:var(--tx3)">स्रोत: Vyaapar_ratna_part_1.md & _part_2.md. सायन गणना. अध्ययन-सहायक, निवेश-सलाह नहीं।</div></div>`;
+}
 
 function tDayForecast(){
   const D=DATA, df=D.astroDF, bh=D.bhadra, sbc=D.sbc;
