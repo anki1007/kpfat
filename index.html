@@ -5979,6 +5979,42 @@ function tVR(){
       <div style="font-size:9px;color:var(--tx3);margin-top:5px">चन्द्र (तीव्रगामी) के दृष्टियोग दिन-भर बदलते हैं → इसी से इंट्राडे रुख बदलता है। <b style="color:#ff9020">अस्थिर/Volatile</b> = चन्द्र किसी दृष्टि के अति-निकट (परिवर्तन-बिन्दु) या शर-परिवर्तन। समय इस location के bazaar घंटों में।</div>
     </div></div>`;
 
+  // ── MODULE 5: SUN–MERCURY–VENUS TRIO · futures-basis engine (pp.269-271) ──
+  const TR=D.trio;
+  let trioPanel='';
+  if(TR){
+    const tcol=TR.trioBias==='BULL'?'var(--bull)':TR.trioBias==='BEAR'?'var(--bear)':'var(--neut)';
+    const reg=TR.basisSign<0?['CONTANGO · हाजिर < वायदा','var(--bear)']:TR.basisSign>0?['BACKWARDATION · हाजिर > वायदा','var(--bull)']:['FLAT · सम आधार','var(--neut)'];
+    const card=(lab,val,sub,col)=>`<div style="background:var(--bg3);border-radius:3px;padding:6px 9px;flex:1;min-width:120px"><div style="font-size:8px;color:var(--tx3);letter-spacing:.04em">${lab}</div><div style="font-size:13px;font-weight:700;color:${col||'#cde'}">${val}</div><div style="font-size:8px;color:var(--tx3)">${sub}</div></div>`;
+    const trules=TR.signals.map(s=>`<tr class="${s.dir>0?'tr-b':s.dir<0?'tr-r':'tr-n'}"><td style="color:var(--acc);font-weight:700;white-space:nowrap">${s.code}</td><td style="font-size:10px">${s.text}</td><td style="text-align:center;color:${s.dir>0?'var(--bull)':s.dir<0?'var(--bear)':'var(--neut)'};font-weight:700;white-space:nowrap">${s.dir>0?'▲':s.dir<0?'▼':'•'}<div style="font-size:8px">${(s.dir*s.weight)>0?'+':''}${(s.dir*s.weight).toFixed(1)}</div></td></tr>`).join('');
+    trioPanel=`<div class="pnl" style="border-color:${tcol}55"><div class="ph"><span class="dot" style="background:${tcol}"></span>★ सूर्य–बुध–शुक्र त्रिक · FUTURES-BASIS ENGINE · pp.269-271</div>
+      <div class="pb">
+        <div style="font-size:10px;color:var(--acc);background:var(--bg3);padding:7px 10px;border-radius:3px;border-left:3px solid var(--acc);margin-bottom:8px;line-height:1.5">बुध (सूर्य से ≤28°) व शुक्र (≤48°) केवल सूर्य से <b>युति</b> ही बनाते हैं — इनकी त्रिकोणीय ज्यामिति वायदा-हाजिर अन्तर (futures-spot basis) को किसी भी अन्य योग से अधिक नियन्त्रित करती है।</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+          ${card('सूर्य · SUN',TR.Su.sign.slice(0,3)+' '+dmsC(TR.Su.lon%30),TR.Su.lon.toFixed(2)+'° निरयन','#FFB300')}
+          ${card('बुध · MERCURY'+(TR.Me.retro?' ℞':''),TR.Me.sign.slice(0,3)+' '+dmsC(TR.Me.lon%30),'गति '+(TR.Me.speed>0?'+':'')+TR.Me.speed.toFixed(3)+'°/d','#69F0AE')}
+          ${card('शुक्र · VENUS'+(TR.Ve.retro?' ℞':''),TR.Ve.sign.slice(0,3)+' '+dmsC(TR.Ve.lon%30),'गति '+(TR.Ve.speed>0?'+':'')+TR.Ve.speed.toFixed(3)+'°/d','#F06292')}
+          ${card('त्रिक निर्णय',TR.trioBias,'स्कोर '+(TR.trioScore>0?'+':'')+TR.trioScore,tcol)}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+          ${card('बुध ↔ सूर्य',TR.dMeSu.toFixed(2)+'°',TR.mercCombust?'⚡ अस्त · combust':'मुक्त',TR.mercCombust?'var(--neut)':'#cde')}
+          ${card('शुक्र ↔ सूर्य',TR.dVeSu.toFixed(2)+'°',TR.venusCombust?'⚡ अस्त · combust':'मुक्त',TR.venusCombust?'var(--bear)':'#cde')}
+          ${card('बुध ↔ शुक्र',TR.dMeVe.toFixed(2)+'°',TR.merVenYuti?'युति · range-bound':TR.merVenWide?'चौड़ा · max basis':'मध्य',TR.merVenYuti?'var(--neut)':TR.merVenWide?'var(--acc)':'#cde')}
+          ${card('BASIS परिमाण',TR.basisMag+'%','बुध-शुक्र '+TR.dMeVe.toFixed(0)+'°/76°',reg[1])}
+        </div>
+        <div style="background:var(--bg2);border-left:3px solid ${reg[1]};padding:7px 10px;border-radius:3px;margin-bottom:8px"><div style="font-size:13px;font-weight:700;color:${reg[1]}">वायदा-हाजिर आधार: ${reg[0]}</div><div style="font-size:10px;color:var(--tx2);margin-top:2px">${TR.basisText}</div></div>
+        <div class="ts"><table class="tbl"><thead><tr><th>नियम</th><th>व्याख्या (book rule)</th><th style="text-align:center">दिशा</th></tr></thead><tbody>${trules}</tbody></table></div>
+        <div style="font-size:9px;color:var(--tx3);margin-top:6px"><b style="color:var(--acc)">पु.271:</b> "बुध और शुक्र के बीच की दूरी ही तैयार और वायदे के बाज़ार की चाल के रुख को बतलाती है।"</div>
+      </div></div>`;
+  }
+  // ── MODULE 9: 15-day UPCOMING-ASPECTS lead-time scan (p.283) ──
+  const UP=D.upcomingAspects||[];
+  const upCol=d=>d>0?'var(--bull)':d<0?'var(--bear)':'var(--neut)';
+  const upRows=UP.map(u=>`<tr class="${u.inLeadTime?(u.dir>0?'tr-b':u.dir<0?'tr-r':'tr-n'):''}"><td style="font-weight:700;white-space:nowrap"><span style="color:${PC[u.p1]||'#cde'}">${VR_DEV[u.p1]||u.p1}</span>–<span style="color:${PC[u.p2]||'#cde'}">${VR_DEV[u.p2]||u.p2}</span></td><td style="white-space:nowrap">${u.sym} ${u.name}<div style="font-size:8px;color:var(--tx3)">${u.aspect}°</div></td><td style="text-align:right;font-family:monospace;color:${u.inLeadTime?'var(--acc)':'var(--tx2)'};font-weight:${u.inLeadTime?700:400}">${u.daysFromNow}d</td><td style="font-size:9px;color:${u.inLeadTime?'var(--acc)':'var(--tx3)'}">${u.note}</td><td style="text-align:center;color:${upCol(u.dir)};font-weight:700;white-space:nowrap">${u.dir>0?'▲ तेजी':u.dir<0?'▼ मंदी':'• सम'}</td></tr>`).join('');
+  const upcomingPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>★ आगामी दृष्टि-योग · 15-दिन LEAD-TIME स्कैन · p.283</div>
+    <div class="pb"><div style="font-size:10px;color:var(--tx2);margin-bottom:6px">पु.283: दृष्टि का प्रभाव पूर्ण होने से <b>पहले</b> आरम्भ होता है — युति/प्रतियोग ≈ 7 दिन पूर्व, त्रिकोण/केन्द्र ≈ 5 दिन, षष्ठांश ≈ 4 दिन। <b style="color:var(--acc)">★</b> पंक्तियाँ अभी अपने lead-time में हैं (भाव अभी प्रभावित)।</div>
+    ${UP.length?`<div class="ts" style="max-height:320px;overflow:auto"><table class="tbl"><thead><tr><th>ग्रह-युग्म</th><th>दृष्टि</th><th style="text-align:right">कब</th><th>स्थिति</th><th style="text-align:center">फल</th></tr></thead><tbody>${upRows}</tbody></table></div>`:'<div style="color:var(--tx3);font-size:11px">अगले 15 दिनों में कोई बड़ा दृष्टि-योग पूर्ण नहीं हो रहा।</div>'}</div></div>`;
+
   const yrows=VR.yogas.map(y=>{ const aspTxt=y.kranti?`क्रान्ति-साम्य<div style="font-size:8px;color:var(--tx3)">Δदेक ${y.off.toFixed(2)}°</div>`:`${y.asp.dev}<div style="font-size:8px;color:var(--tx3)">${y.asp.a}° · off ${y.off.toFixed(1)}°</div>`;
     const tag=p=>`<span style="color:${PC[p.name]};font-weight:700">${p.dev}</span> <span style="font-size:8px;color:${p.ben?'var(--bull)':'var(--bear)'}">${p.ben?'शुभ':'क्रूर'}${p.retro?'·वक्री':''}</span>`;
     const mixed=(y.p1.ben!==y.p2.ben);
@@ -5986,14 +6022,27 @@ function tVR(){
   const yogaPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>सक्रिय दृष्टि-योग · ACTIVE ASPECT-YOGAS (सायन · ${mtt(parseFloat(S.time)*60)})</div>
     ${VR.yogas.length?`<div class="ts" style="max-height:380px;overflow:auto"><table class="tbl"><thead><tr><th>ग्रह १</th><th>ग्रह २</th><th>दृष्टियोग (अंशान्तर)</th><th style="text-align:center">फल</th><th>निर्णय</th></tr></thead><tbody>${yrows}</tbody></table></div>`:`<div class="pb" style="color:var(--tx3);font-size:11px">कोई दृष्टियोग दीप्तांश के अन्दर सक्रिय नहीं।</div>`}</div>`;
 
-  const srows=VR.P.map(p=>{ const shar=(p.name==='Sun'||p.name==='Rahu'||p.name==='Ketu')?'<span style="color:var(--tx3)">— (क्रान्तिवृत्त पर)</span>':`${Math.abs(p.lat).toFixed(2)}° ${p.lat>=0?'<span style="color:#ff8a65">उत्तर N</span>':'<span style="color:#69f0ae">दक्षिण S</span>'}`;
-    const pari=(p.name!=='Sun'&&p.name!=='Rahu'&&p.name!=='Ketu'&&Math.abs(p.lat)<0.5)?'<span class="pill pb-n" style="font-size:8px">⚡ शर-परिवर्तन</span>':'';
+  // ── MODULES 7+8: enhanced शर / क्रान्ति-साम्य / शर-परिवर्तन (pp.320-329) ──
+  const shMap=Object.fromEntries((D.sharNow||[]).map(s=>[s.body,s]));
+  const srows=VR.P.map(p=>{ const noLat=(p.name==='Sun'||p.name==='Rahu'||p.name==='Ketu'); const sm=shMap[p.name];
+    const shar=noLat?'<span style="color:var(--tx3)">— (क्रान्तिवृत्त पर)</span>':`${Math.abs(p.lat).toFixed(2)}° ${p.lat>=0?'<span style="color:#ff8a65">उ N</span>':'<span style="color:#69f0ae">द S</span>'}`;
+    const pctTxt=(!noLat&&sm)?`<span style="color:var(--tx2)">${sm.pctOfMax}%</span>`:'<span style="color:var(--tx3)">—</span>';
+    const nz=(sm&&sm.nearZero)?'<span class="pill pb-n" style="font-size:8px">⚡ NEAR-ZERO शर-परिवर्तन</span>':'';
     const kr=`${Math.abs(p.dec).toFixed(2)}° ${p.dec>=0?'<span style="color:#ff8a65">उ N</span>':'<span style="color:#69f0ae">द S</span>'}`;
-    return `<tr><td style="color:${PC[p.name]};font-weight:700">${p.dev} <span style="font-size:8px;color:var(--tx3)">${p.name}</span></td><td>${shar} ${pari}</td><td>${kr}</td><td style="color:${p.ben?'var(--bull)':'var(--bear)'};font-size:10px">${p.ben?'सौम्य':'क्रूर'}</td><td>${p.retro?'<span style="color:var(--bear)">वक्री ℞</span>':'मार्गी'}</td></tr>`; }).join('');
-  const sharPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>शर · क्रान्ति · जय-पराजय</div>
-    <div style="font-size:9px;color:var(--tx3);padding:4px 12px">मिश्र-ग्रह योग में अधिक <b style="color:#ff8a65">उत्तर शर</b> वाला विजयी; फल उसी के स्वभाव का।</div>
-    <div class="ts"><table class="tbl"><thead><tr><th>ग्रह</th><th>शर</th><th>क्रान्ति</th><th>स्वभाव</th><th>गति</th></tr></thead><tbody>${srows}</tbody></table></div></div>`;
-
+    return `<tr><td style="color:${PC[p.name]};font-weight:700">${p.dev} <span style="font-size:8px;color:var(--tx3)">${p.name}</span></td><td>${shar} ${nz}</td><td style="text-align:right">${pctTxt}</td><td>${kr}</td><td>${p.retro?'<span style="color:var(--bear)">℞</span>':'<span style="color:var(--tx3)">मार्गी</span>'}</td></tr>`; }).join('');
+  const NODES=D.sharCrossings||[];
+  const nodeRows=NODES.slice(0,8).map(nc=>{ const im=Math.abs(nc.daysFromNow)<3;
+    return `<tr><td style="color:${PC[nc.body]||'#cde'};font-weight:700">${VR_DEV[nc.body]||nc.body}</td><td style="font-size:10px">${nc.direction}</td><td style="text-align:right;font-family:monospace;color:${im?'var(--bear)':'var(--tx2)'};font-weight:${im?700:400}">${nc.daysFromNow>0?'+':''}${nc.daysFromNow}d</td><td style="font-size:9px;color:${im?'var(--bear)':'var(--tx3)'}">${nc.note}</td></tr>`; }).join('');
+  const KS=D.krantiSamya||[];
+  const ksRows=KS.slice(0,8).map(k=>{ const col=k.weight>0?'var(--bull)':k.weight<0?'var(--bear)':'var(--neut)';
+    return `<tr><td style="font-weight:700;white-space:nowrap"><span style="color:${PC[k.p1]||'#cde'}">${VR_DEV[k.p1]||k.p1}</span>–<span style="color:${PC[k.p2]||'#cde'}">${VR_DEV[k.p2]||k.p2}</span></td><td style="font-size:10px;color:${k.sameDir?'var(--bull)':'var(--neut)'}">${k.type}<div style="font-size:8px;color:var(--tx3)">${k.sameDir?'75% बल':'50% बल'}</div></td><td style="text-align:right;color:var(--tx2)">Δ${k.delta}°</td><td style="text-align:center;color:${col};font-weight:700">${k.weight>0?'+':''}${k.weight}</td></tr>`; }).join('');
+  const sharPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>★ शर (अक्षांश) · क्रान्ति-साम्य · शर-परिवर्तन · pp.320-329</div>
+    <div class="pb">
+      <div style="font-size:9px;color:var(--tx3);margin-bottom:6px">पु.325: <b style="color:#ff8a65">शर का शून्य पर पहुँचना (शर-परिवर्तन) का बाजार पर सबसे अधिक प्रभाव</b> — समस्त दृष्टियों से ऊपर। मिश्र योग में अधिक उत्तर-शर वाला विजयी; फल उसी के स्वभाव का।</div>
+      <div class="ts"><table class="tbl"><thead><tr><th>ग्रह</th><th>शर (अक्षांश)</th><th style="text-align:right">% Max</th><th>क्रान्ति</th><th>गति</th></tr></thead><tbody>${srows}</tbody></table></div>
+      ${NODES.length?`<div style="font-size:10px;color:var(--acc);font-weight:700;margin:10px 0 4px">आगामी शर-परिवर्तन · NODE CROSSINGS (±30 दिन)</div><div class="ts" style="max-height:200px;overflow:auto"><table class="tbl"><thead><tr><th>ग्रह</th><th>दिशा</th><th style="text-align:right">कब</th><th>टिप्पणी</th></tr></thead><tbody>${nodeRows}</tbody></table></div>`:''}
+      ${KS.length?`<div style="font-size:10px;color:var(--acc);font-weight:700;margin:10px 0 4px">क्रान्ति-साम्य · DECLINATION PARALLELS <span style="font-weight:400;color:var(--tx3)">(पु.329: समदिशा=75%, विपरीत=50%, orb 1°)</span></div><div class="ts"><table class="tbl"><thead><tr><th>युग्म</th><th>प्रकार</th><th style="text-align:right">Δक्रान्ति</th><th style="text-align:center">भार</th></tr></thead><tbody>${ksRows}</tbody></table></div>`:'<div style="font-size:10px;color:var(--tx3);margin-top:8px">क्रान्ति-साम्य (≤1°) अभी सक्रिय नहीं।</div>'}
+    </div></div>`;
   const crows=VR.commodities.map(c=>{ const sc=c.score,col=vcol(sc),lbl=sc>0.3?'▲ तेजी':sc<-0.3?'▼ मंदी':'• सम';
     return `<tr><td style="font-weight:700">${c.nm}</td><td style="font-size:10px">${c.rulers.map(r=>`<span style="color:${PC[r]}">${VR_DEV[r]||r}</span>`).join(' · ')}</td><td style="text-align:center">${c.n}</td><td style="text-align:center;font-weight:700;color:${col}">${lbl} <span style="font-size:9px">${sc>0?'+':''}${sc}</span></td></tr>`; }).join('');
   const commPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>ग्रह ↔ वस्तु · COMMODITY</div>
@@ -6006,7 +6055,7 @@ function tVR(){
       सौम्य: <span style="color:${PC.Moon}">चन्द्र</span> <span style="color:${PC.Mercury}">बुध</span> <span style="color:${PC.Jupiter}">गुरु</span> <span style="color:${PC.Venus}">शुक्र</span> · क्रूर: <span style="color:${PC.Sun}">सूर्य</span> <span style="color:${PC.Mars}">मंगल</span> <span style="color:${PC.Saturn}">शनि</span> राहु-केतु, हर्षल, प्लूटो.
     </div></div>`;
 
-  return `<div style="display:flex;flex-direction:column;gap:10px">${hdr}${intraPanel}${yogaPanel}<div class="g2">${sharPanel}${commPanel}</div>${legend}
+  return `<div style="display:flex;flex-direction:column;gap:10px">${hdr}${trioPanel}${intraPanel}${upcomingPanel}${yogaPanel}${sharPanel}${commPanel}${legend}
     <div style="font-size:9px;color:var(--tx3)">स्रोत: Vyaapar_ratna_part_1.md & _part_2.md. सायन गणना. अध्ययन-सहायक, निवेश-सलाह नहीं।</div></div>`;
 }
 
