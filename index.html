@@ -6107,6 +6107,9 @@ function tVR(){
     <div style="font-size:9px;color:var(--tx3)">स्रोत: Vyaapar_ratna_part_1.md & _part_2.md. सायन गणना. अध्ययन-सहायक, निवेश-सलाह नहीं।</div></div>`;
 }
 
+// direction → colour / pill-class helpers (used by Day Forecast)
+function _dirCls(d){return d==='BULLISH'?'pb-b':d==='BEARISH'?'pb-r':'pb-n';}
+function _dirCol(d){return d==='BULLISH'?'var(--bull)':d==='BEARISH'?'var(--bear)':'var(--neut)';}
 function tDayForecast(){
   const D=DATA, df=D.astroDF, bh=D.bhadra, sbc=D.sbc;
   const order=['NIFTY','BANKNIFTY','NASDAQ','DOW','SPX'];
