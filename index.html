@@ -4607,16 +4607,18 @@ function tV44(){
 
 /* ════ PLANET CHART TABS (ports of planet.py / planets.py) ════ */
 /* ════════════════════════════════════════════════════════════════════
-   PLANET CHARTS — native ports of planet.py (latitudes) & planets.py
-   (longitudes). Fixed-height full-width chart, raw-data tables,
-   conjunction events, crosshair. 3y default + 6-month forecast.
+   PLANET CHARTS — ports of planet.py (latitudes) & planets.py (longitudes)
+   Interactive: wheel-zoom, drag box-zoom, shift/pan-toggle pan, dblclick
+   reset, toolbar buttons. Data computed once & cached; only the SVG is
+   redrawn on zoom/pan (no re-fetch / re-sample).
    ════════════════════════════════════════════════════════════════════ */
-window.PLAN = window.PLAN || {ohlc:{}, status:'idle', err:'', loadedKey:null, view:null};
+window.PLAN = window.PLAN || {ohlc:{}, status:'idle', err:'', loadedKey:null, view:null, data:null, win:null, panMode:false, _rb:false};
 const PLAN_INST = {'NIFTY 50':'^NSEI','BANK NIFTY':'^NSEBANK','SENSEX':'^BSESN','NIFTY IT':'^CNXIT','NIFTY MIDCAP 100':'NIFTY_MIDCAP_100.NS'};
 const PLAN_COL = {Sun:'#ff7f0e',Moon:'#1e90ff',Mercury:'#2ca02c',Venus:'#ff69b4',Mars:'#d62728',Jupiter:'#ffd700',Saturn:'#1f3a93',Rahu:'#9aa6ad',Ketu:'#b5774f'};
 const PLAN_ORDER = ['Sun','Moon','Mercury','Venus','Mars','Jupiter','Saturn','Rahu','Ketu'];
 const PLAN_RANGES = {'6mo':'6M','1y':'1Y','2y':'2Y','3y':'3Y','5y':'5Y'};
 const PLAN_YEARS = {'6mo':0.5,'1y':1,'2y':2,'3y':3,'5y':5};
+const PLAN_DAYMS=86400000;
 
 function planInstKey(){ return S.planInst || 'NIFTY 50'; }
 function planRange(){ return S.planRange || '3y'; }
@@ -4624,6 +4626,7 @@ function planFwd(){ return (S.planFwd==null)?180:S.planFwd; }
 function planBodies(){ return (S.planBodies||'Moon,Mercury,Venus,Mars,Jupiter,Saturn').split(',').filter(Boolean); }
 function planChartType(){ return S.planChart || 'candle'; }
 function planOrb(){ return S.planOrb || 6; }
+function planKind(){ return S.tab==='planlon'?'lon':'lat'; }
 
 function planJD(y,m,d,hUTC){ let Y=y,M=m; if(M<=2){Y--;M+=12;} const A=Math.floor(Y/100),B=2-A+Math.floor(A/4); return Math.floor(365.25*(Y+4716))+Math.floor(30.6001*(M+1))+d+hUTC/24+B-1524.5; }
 function planJDfromMs(ms){ const d=new Date(ms); return planJD(d.getUTCFullYear(),d.getUTCMonth()+1,d.getUTCDate(), d.getUTCHours()+d.getUTCMinutes()/60); }
@@ -4657,187 +4660,206 @@ async function planLoad(){
   const key=planInstKey()+'|'+planRange();
   if(window.PLAN.loadedKey===key && window.PLAN.ohlc[key]) { planPaint(); return; }
   if(window.PLAN.status==='loading') return;
-  window.PLAN.status='loading'; window.PLAN.err=''; planPaint();
+  window.PLAN.status='loading'; window.PLAN.err=''; window.PLAN.data=null; window.PLAN.win=null; planPaint();
   try{ const data=await planFetchOHLC(PLAN_INST[planInstKey()], planRange());
-    window.PLAN.ohlc[key]=data; window.PLAN.loadedKey=key; window.PLAN.status='ready';
+    window.PLAN.ohlc[key]=data; window.PLAN.loadedKey=key; window.PLAN.status='ready'; window.PLAN.data=null; window.PLAN.win=null;
   }catch(e){ window.PLAN.status='error'; window.PLAN.err=(e&&e.message)||'fetch failed'; }
   planPaint();
 }
 
-function planSampleCurves(t0, t1, kind, bodies){
-  const spanDays=(t1-t0)/86400000;
-  const nS=Math.max(40, Math.min(1500, Math.round(spanDays*4)));
-  const step=(t1-t0)/nS, times=[], series={}, retro={};
-  bodies.forEach(b=>{series[b]=[];retro[b]=[];});
+function planSig(kind){ return planInstKey()+'|'+planRange()+'|'+kind+'|'+planBodies().join(',')+'|'+planFwd()+'|'+planOrb(); }
+function planComputeData(kind){
+  const key=planInstKey()+'|'+planRange(); const ohlc=window.PLAN.ohlc[key]; if(!ohlc) return;
+  const bodies=planBodies();
+  const t0=ohlc[0].ms, tLastP=ohlc[ohlc.length-1].ms, t1=tLastP+planFwd()*PLAN_DAYMS;
+  const spanDays=(t1-t0)/PLAN_DAYMS, nS=Math.max(40,Math.min(1800,Math.round(spanDays*4))), step=(t1-t0)/nS;
+  const times=[], series={}, retro={}; bodies.forEach(b=>{series[b]=[];retro[b]=[];});
   for(let k=0;k<=nS;k++){ const ms=t0+k*step; times.push(ms); const J=planJDfromMs(ms);
     for(const b of bodies){ if(kind==='lat') series[b].push(geoLat(b,J));
       else { series[b].push(n360(geoLon(b,J))); const sp=(b==='Rahu'||b==='Ketu')?-0.05:planetSpeed(b,J); retro[b].push(sp<0); } } }
-  return {times, series, retro, nS};
-}
-function planFindConjunctions(times, series, bodies, orb){
-  const out=[];
-  for(let a=0;a<bodies.length;a++)for(let b=a+1;b<bodies.length;b++){
-    const A=series[bodies[a]],B=series[bodies[b]]; let inC=false,bi=-1,best=999;
-    for(let i=0;i<times.length;i++){ const d=Math.abs(((A[i]-B[i]+180)%360+360)%360-180);
-      if(d<=orb){ if(!inC){inC=true;bi=i;best=d;} else if(d<best){best=d;bi=i;} }
-      else if(inC){ out.push({ms:times[bi],p1:bodies[a],p2:bodies[b],sep:best}); inC=false;best=999; } }
-    if(inC) out.push({ms:times[bi],p1:bodies[a],p2:bodies[b],sep:best}); }
-  out.sort((x,y)=>x.ms-y.ms); return out;
+  let conj=[];
+  if(kind==='lon'){ const orb=planOrb();
+    for(let a=0;a<bodies.length;a++)for(let b=a+1;b<bodies.length;b++){ const A=series[bodies[a]],B=series[bodies[b]]; let inC=false,bi=-1,best=999;
+      for(let i=0;i<times.length;i++){ const d=Math.abs(((A[i]-B[i]+180)%360+360)%360-180);
+        if(d<=orb){ if(!inC){inC=true;bi=i;best=d;} else if(d<best){best=d;bi=i;} } else if(inC){ conj.push({ms:times[bi],p1:bodies[a],p2:bodies[b],sep:best}); inC=false;best=999; } }
+      if(inC) conj.push({ms:times[bi],p1:bodies[a],p2:bodies[b],sep:best}); }
+    conj.sort((x,y)=>x.ms-y.ms); }
+  window.PLAN.data={sig:planSig(kind), kind, bodies, t0, t1, tLastP, ohlc, times, series, retro, conj, nS};
 }
 
-function planChart(kind){
-  const key=planInstKey()+'|'+planRange();
-  const st=window.PLAN.status, ohlc=window.PLAN.ohlc[key];
-  if(st==='loading' || (!ohlc && st!=='error'))
-    return `<div style="padding:30px;text-align:center;color:var(--acc)"><div class="spin-anim" style="font-size:18px">⟳</div><div style="font-size:12px;margin-top:6px">Fetching ${planInstKey()} candles &amp; computing planet ${kind==='lat'?'latitudes':'longitudes'}…</div></div>`;
-  if(st==='error')
-    return `<div style="padding:18px;border:1px solid var(--bear2);border-radius:4px;background:#1a0008">
-      <div style="color:var(--bear);font-weight:700;font-size:12px">⚠ Price data unavailable (${window.PLAN.err})</div>
-      <div style="font-size:10px;color:#c9a;margin-top:6px">Yahoo CORS proxies are unreachable. Retry when online.</div>
-      <button onclick="window.PLAN.loadedKey=null;window.PLAN.status='idle';planLoad()" style="margin-top:8px;background:var(--bg3);color:var(--acc);border:1px solid var(--bd2);padding:5px 12px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px">↻ Retry</button></div>`;
-  if(!ohlc) return '';
-
-  const bodies=planBodies();
-  const t0=ohlc[0].ms, tLastP=ohlc[ohlc.length-1].ms, t1=tLastP+planFwd()*86400000;
-  const cur=planSampleCurves(t0,t1,kind,bodies);
-  const conj = kind==='lon' ? planFindConjunctions(cur.times,cur.series,bodies,planOrb()) : [];
-
-  // measured pixel width -> fixed pixel height (whole chart always visible)
-  const cont=document.getElementById('plan-chart');
-  const W = (cont && cont.clientWidth>320) ? Math.round(cont.clientWidth) : 1120;
-  const PADL=52, PADR=120, PADT=16, HP=200, GAP=24, HB=200, AX=28;
-  const topB=PADT+HP+GAP, H=topB+HB+AX, IW=W-PADL-PADR;
-  const X=ms=>PADL+((ms-t0)/(t1-t0))*IW;
-
-  let pmin=Infinity,pmax=-Infinity; ohlc.forEach(r=>{pmin=Math.min(pmin,r.l);pmax=Math.max(pmax,r.h);});
-  const ppad=(pmax-pmin)*0.06||1; pmin-=ppad; pmax+=ppad;
-  const yP=v=>PADT+(1-(v-pmin)/(pmax-pmin))*HP;
+function planDrawSVG(kind){
+  const D=window.PLAN.data; if(!D) return '';
+  const w=window.PLAN.win||{t0:D.t0,t1:D.t1}; const vt0=w.t0, vt1=w.t1;
+  const cont=document.getElementById('plan-svg-wrap')||document.getElementById('plan-chart');
+  const W=(cont&&cont.clientWidth>320)?Math.round(cont.clientWidth):1120;
+  const PADL=52,PADR=120,PADT=16,HP=200,GAP=24,HB=200,AX=28; const topB=PADT+HP+GAP,H=topB+HB+AX,IW=W-PADL-PADR;
+  const X=ms=>PADL+((ms-vt0)/(vt1-vt0))*IW;
+  const inWin=ms=>ms>=vt0&&ms<=vt1;
+  // visible price scale
+  let pmin=Infinity,pmax=-Infinity; D.ohlc.forEach(r=>{ if(inWin(r.ms)){pmin=Math.min(pmin,r.l);pmax=Math.max(pmax,r.h);} });
+  if(!isFinite(pmin)){ D.ohlc.forEach(r=>{pmin=Math.min(pmin,r.l);pmax=Math.max(pmax,r.h);}); }
+  const ppad=(pmax-pmin)*0.06||1; pmin-=ppad; pmax+=ppad; const yP=v=>PADT+(1-(v-pmin)/(pmax-pmin))*HP;
+  // planet scale
   let lmin,lmax;
   if(kind==='lon'){ lmin=0;lmax=360; }
-  else { lmin=Infinity;lmax=-Infinity; bodies.forEach(b=>cur.series[b].forEach(v=>{lmin=Math.min(lmin,v);lmax=Math.max(lmax,v);})); const lp=(lmax-lmin)*0.08||1; lmin-=lp;lmax+=lp; }
+  else { lmin=Infinity;lmax=-Infinity; D.bodies.forEach(b=>D.times.forEach((ms,i)=>{ if(inWin(ms)){lmin=Math.min(lmin,D.series[b][i]);lmax=Math.max(lmax,D.series[b][i]);} })); if(!isFinite(lmin)){lmin=-6;lmax=6;} const lp=(lmax-lmin)*0.08||1; lmin-=lp;lmax+=lp; }
   const yB=v=>topB+(1-(v-lmin)/(lmax-lmin))*HB;
 
-  const fcX=X(tLastP);
-  let deco = tLastP<t1 ? `<rect x="${fcX.toFixed(1)}" y="${PADT}" width="${(W-PADR-fcX).toFixed(1)}" height="${HP}" fill="#1a1605" opacity=".5"/><rect x="${fcX.toFixed(1)}" y="${topB}" width="${(W-PADR-fcX).toFixed(1)}" height="${HB}" fill="#1a1605" opacity=".5"/>`:'';
-  const todayMs=planMs((typeof todayStr==='function')?todayStr():ohlc[ohlc.length-1].date);
-  if(todayMs>=t0&&todayMs<=t1){ const tx=X(todayMs); deco+=`<line x1="${tx.toFixed(1)}" y1="${PADT}" x2="${tx.toFixed(1)}" y2="${(topB+HB).toFixed(1)}" stroke="#e8c020" stroke-width="0.8" stroke-dasharray="3 3"/><text x="${(tx-2).toFixed(1)}" y="${(PADT+9)}" fill="#e8c020" font-size="9" text-anchor="end">◄Today</text>`; }
+  const fcX=X(D.tLastP);
+  let deco='';
+  if(D.tLastP<vt1 && D.tLastP>vt0){ const xx=Math.max(PADL,Math.min(W-PADR,fcX)); deco+=`<rect x="${xx.toFixed(1)}" y="${PADT}" width="${(W-PADR-xx).toFixed(1)}" height="${HP}" fill="#1a1605" opacity=".5"/><rect x="${xx.toFixed(1)}" y="${topB}" width="${(W-PADR-xx).toFixed(1)}" height="${HB}" fill="#1a1605" opacity=".5"/>`; }
+  const todayMs=planMs((typeof todayStr==='function')?todayStr():D.ohlc[D.ohlc.length-1].date);
+  if(todayMs>=vt0&&todayMs<=vt1){ const tx=X(todayMs); deco+=`<line x1="${tx.toFixed(1)}" y1="${PADT}" x2="${tx.toFixed(1)}" y2="${(topB+HB).toFixed(1)}" stroke="#e8c020" stroke-width="0.8" stroke-dasharray="3 3"/><text x="${(tx-2).toFixed(1)}" y="${(PADT+9)}" fill="#e8c020" font-size="9" text-anchor="end">◄Today</text>`; }
 
   let pGrid=''; for(let k=0;k<=4;k++){const v=pmin+(pmax-pmin)*k/4;const y=yP(v);pGrid+=`<line x1="${PADL}" y1="${y.toFixed(1)}" x2="${(W-PADR).toFixed(1)}" y2="${y.toFixed(1)}" stroke="#0d2a34"/><text x="${PADL-4}" y="${(y+3).toFixed(1)}" fill="#3a8090" font-size="8" text-anchor="end">${Math.round(v).toLocaleString('en-IN')}</text>`;}
+  let bGrid='';
+  if(kind==='lon'){ [0,90,180,270,360].forEach(g=>{const y=yB(g);bGrid+=`<line x1="${PADL}" y1="${y.toFixed(1)}" x2="${(W-PADR).toFixed(1)}" y2="${y.toFixed(1)}" stroke="#0d2a34"/><text x="${PADL-4}" y="${(y+3).toFixed(1)}" fill="#3a8090" font-size="8" text-anchor="end">${g}°</text>`;}); }
+  else { for(let k=0;k<=4;k++){const v=lmin+(lmax-lmin)*k/4;const y=yB(v);const z=Math.abs(v)<(lmax-lmin)*0.02;bGrid+=`<line x1="${PADL}" y1="${y.toFixed(1)}" x2="${(W-PADR).toFixed(1)}" y2="${y.toFixed(1)}" stroke="${z?'#2a5566':'#0d2a34'}" ${z?'stroke-dasharray="4 3"':''}/><text x="${PADL-4}" y="${(y+3).toFixed(1)}" fill="#3a8090" font-size="8" text-anchor="end">${v.toFixed(1)}°</text>`;} }
+
+  // candles / line (only visible bars)
   let priceSVG='';
-  if(planChartType()==='line'){ let dp=''; ohlc.forEach(r=>{dp+=(dp?'L':'M')+X(r.ms).toFixed(1)+' '+yP(r.c).toFixed(1);}); priceSVG=`<path d="${dp}" fill="none" stroke="#00e8ff" stroke-width="1.2"/>`; }
-  else { const bw=Math.max(0.8,Math.min(6,(IW/ohlc.length)*0.6));
-    for(const r of ohlc){ const x=X(r.ms), up=r.c>=r.o, col=up?'#00f07a':'#ff3355';
+  const visBars=D.ohlc.filter(r=>inWin(r.ms));
+  if(planChartType()==='line'){ let dp=''; visBars.forEach(r=>{dp+=(dp?'L':'M')+X(r.ms).toFixed(1)+' '+yP(r.c).toFixed(1);}); priceSVG=`<path d="${dp}" fill="none" stroke="#00e8ff" stroke-width="1.2"/>`; }
+  else { const bw=Math.max(0.8,Math.min(7,(IW/Math.max(1,visBars.length))*0.6));
+    for(const r of visBars){ const x=X(r.ms), up=r.c>=r.o, col=up?'#00f07a':'#ff3355';
       priceSVG+=`<line x1="${x.toFixed(1)}" y1="${yP(r.h).toFixed(1)}" x2="${x.toFixed(1)}" y2="${yP(r.l).toFixed(1)}" stroke="${col}" stroke-width="0.6"/>`;
       const y1=yP(r.o),y2=yP(r.c); priceSVG+=`<rect x="${(x-bw/2).toFixed(1)}" y="${Math.min(y1,y2).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0.6,Math.abs(y1-y2)).toFixed(1)}" fill="${col}"/>`; } }
 
-  let bGrid='';
-  if(kind==='lon'){ [0,90,180,270,360].forEach(g=>{const y=yB(g);bGrid+=`<line x1="${PADL}" y1="${y.toFixed(1)}" x2="${(W-PADR).toFixed(1)}" y2="${y.toFixed(1)}" stroke="#0d2a34"/><text x="${PADL-4}" y="${(y+3).toFixed(1)}" fill="#3a8090" font-size="8" text-anchor="end">${g}°</text>`;}); }
-  else { for(let k=0;k<=4;k++){const v=lmin+(lmax-lmin)*k/4;const y=yB(v);const zero=Math.abs(v)<(lmax-lmin)*0.02;bGrid+=`<line x1="${PADL}" y1="${y.toFixed(1)}" x2="${(W-PADR).toFixed(1)}" y2="${y.toFixed(1)}" stroke="${zero?'#2a5566':'#0d2a34'}" ${zero?'stroke-dasharray="4 3"':''}/><text x="${PADL-4}" y="${(y+3).toFixed(1)}" fill="#3a8090" font-size="8" text-anchor="end">${v.toFixed(1)}°</text>`;}
-    if(lmin<0&&lmax>0){const y=yB(0);bGrid+=`<line x1="${PADL}" y1="${y.toFixed(1)}" x2="${(W-PADR).toFixed(1)}" y2="${y.toFixed(1)}" stroke="#3a6070" stroke-dasharray="4 3"/>`;} }
-
+  // curves clipped to plot
   let curves='', markers='', conjLines='';
-  for(const b of bodies){ const col=PLAN_COL[b]||'#8df7ff', ys=cur.series[b];
-    if(kind==='lon'){ let seg=[],sr=cur.retro[b][0];
+  for(const b of D.bodies){ const col=PLAN_COL[b]||'#8df7ff', ys=D.series[b];
+    if(kind==='lon'){ let seg=[],sr=D.retro[b][0];
       const flush=()=>{ if(seg.length>1){let dp='';seg.forEach((p,k)=>dp+=(k?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1));curves+=`<path d="${dp}" fill="none" stroke="${col}" stroke-width="1.2" ${sr?'stroke-dasharray="2 3" opacity="0.9"':''}/>`;} seg=[]; };
-      for(let i=0;i<ys.length;i++){ const wrap=i>0&&Math.abs(ys[i]-ys[i-1])>180; if(wrap||cur.retro[b][i]!==sr){flush();sr=cur.retro[b][i];} seg.push([X(cur.times[i]),yB(ys[i])]); }
-      flush();
-      for(let i=1;i<ys.length;i++){ if(cur.retro[b][i]!==cur.retro[b][i-1]){ const x=X(cur.times[i]),y=yB(ys[i]),lbl=cur.retro[b][i]?'R':'D'; markers+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.2" fill="${col}"/><text x="${(x+3).toFixed(1)}" y="${(y-3).toFixed(1)}" fill="${col}" font-size="7" font-weight="700">${lbl}</text>`; } }
-    } else { let dp=''; ys.forEach((v,i)=>dp+=(i?'L':'M')+X(cur.times[i]).toFixed(1)+' '+yB(v).toFixed(1)); curves+=`<path d="${dp}" fill="none" stroke="${col}" stroke-width="1.2"/>`; }
+      for(let i=0;i<ys.length;i++){ const wrap=i>0&&Math.abs(ys[i]-ys[i-1])>180; if(wrap||D.retro[b][i]!==sr){flush();sr=D.retro[b][i];} seg.push([X(D.times[i]),yB(ys[i])]); } flush();
+      for(let i=1;i<ys.length;i++){ if(D.retro[b][i]!==D.retro[b][i-1] && inWin(D.times[i])){ const x=X(D.times[i]),y=yB(ys[i]),lbl=D.retro[b][i]?'R':'D'; markers+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.2" fill="${col}"/><text x="${(x+3).toFixed(1)}" y="${(y-3).toFixed(1)}" fill="${col}" font-size="7" font-weight="700">${lbl}</text>`; } }
+    } else { let dp=''; ys.forEach((v,i)=>dp+=(i?'L':'M')+X(D.times[i]).toFixed(1)+' '+yB(v).toFixed(1)); curves+=`<path d="${dp}" fill="none" stroke="${col}" stroke-width="1.2"/>`; }
   }
-  if(kind==='lon' && S.planConj!==false){ conj.forEach(cj=>{const x=X(cj.ms);conjLines+=`<line x1="${x.toFixed(1)}" y1="${PADT}" x2="${x.toFixed(1)}" y2="${(topB+HB).toFixed(1)}" stroke="#5ad0e8" stroke-width="0.5" stroke-dasharray="2 4" opacity="0.4"/>`;}); }
+  if(kind==='lon' && S.planConj!==false){ D.conj.forEach(cj=>{ if(inWin(cj.ms)){const x=X(cj.ms);conjLines+=`<line x1="${x.toFixed(1)}" y1="${PADT}" x2="${x.toFixed(1)}" y2="${(topB+HB).toFixed(1)}" stroke="#5ad0e8" stroke-width="0.5" stroke-dasharray="2 4" opacity="0.4"/>`;} }); }
 
-  let xAxis=''; let my=new Date(t0).getUTCFullYear(), mm=new Date(t0).getUTCMonth(); const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const monthStep = (t1-t0)/86400000 > 760 ? 3 : (t1-t0)/86400000>380?2:1;
-  let mc=0;
-  for(let g=0; g<80; g++){ const tickMs=Date.UTC(my,mm,1); if(tickMs>t1)break; if(tickMs>=t0 && (mc%monthStep===0)){ const x=X(tickMs); xAxis+=`<line x1="${x.toFixed(1)}" y1="${PADT}" x2="${x.toFixed(1)}" y2="${(topB+HB).toFixed(1)}" stroke="#08202a"/><text x="${x.toFixed(1)}" y="${(H-9)}" fill="#3a8090" font-size="8" text-anchor="middle">${MON[mm]} ${String(my).slice(2)}</text>`; } mc++; mm++; if(mm>11){mm=0;my++;} }
+  // x-axis ticks adaptive to visible span
+  const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const spanD=(vt1-vt0)/PLAN_DAYMS; let xAxis='';
+  if(spanD<70){ // day ticks
+    let dms=Math.ceil(vt0/PLAN_DAYMS)*PLAN_DAYMS; const stepD=spanD<18?1:Math.ceil(spanD/14);
+    let cnt=0; for(let ms=dms; ms<=vt1; ms+=stepD*PLAN_DAYMS){ const x=X(ms); xAxis+=`<line x1="${x.toFixed(1)}" y1="${PADT}" x2="${x.toFixed(1)}" y2="${(topB+HB).toFixed(1)}" stroke="#08202a"/><text x="${x.toFixed(1)}" y="${(H-9)}" fill="#3a8090" font-size="8" text-anchor="middle">${planISO(ms).slice(5)}</text>`; if(++cnt>40)break; }
+  } else { let my=new Date(vt0).getUTCFullYear(),mm=new Date(vt0).getUTCMonth(); const mstep=spanD>760?3:spanD>380?2:1; let mc=0,cnt=0;
+    for(let g=0;g<120;g++){ const tickMs=Date.UTC(my,mm,1); if(tickMs>vt1)break; if(tickMs>=vt0&&(mc%mstep===0)){ const x=X(tickMs); xAxis+=`<line x1="${x.toFixed(1)}" y1="${PADT}" x2="${x.toFixed(1)}" y2="${(topB+HB).toFixed(1)}" stroke="#08202a"/><text x="${x.toFixed(1)}" y="${(H-9)}" fill="#3a8090" font-size="8" text-anchor="middle">${MON[mm]} ${String(my).slice(2)}</text>`; if(++cnt>40)break; } mc++; mm++; if(mm>11){mm=0;my++;} } }
 
-  let legend=''; bodies.forEach((b,i)=>{const ly=PADT+10+i*13;legend+=`<line x1="${(W-PADR+8)}" y1="${ly}" x2="${(W-PADR+26)}" y2="${ly}" stroke="${PLAN_COL[b]}" stroke-width="2"/><text x="${(W-PADR+30)}" y="${ly+3}" fill="#cde" font-size="9">${b}</text>`;});
-
-  window.PLAN.view={W,H,PADL,PADR,PADT,HP,GAP,HB,topB,IW,t0,t1,kind,bodies,times:cur.times,series:cur.series,retro:cur.retro,ohlc,pmin,pmax,lmin,lmax};
-
+  let legend=''; D.bodies.forEach((b,i)=>{const ly=PADT+10+i*13;legend+=`<line x1="${(W-PADR+8)}" y1="${ly}" x2="${(W-PADR+26)}" y2="${ly}" stroke="${PLAN_COL[b]}" stroke-width="2"/><text x="${(W-PADR+30)}" y="${ly+3}" fill="#cde" font-size="9">${b}</text>`;});
   const titles=`<text x="${(PADL+IW/2).toFixed(1)}" y="${(PADT+11)}" fill="#9cc" font-size="11" text-anchor="middle" font-weight="700">${planInstKey()} — ${PLAN_INST[planInstKey()]}</text>
-    <text x="${(PADL+IW/2).toFixed(1)}" y="${(topB-7).toFixed(1)}" fill="#9cc" font-size="11" text-anchor="middle" font-weight="700">Planet ecliptic ${kind==='lat'?'latitude (°)':'longitude (°)'}</text>
-    <text x="${PADL}" y="${(H-1).toFixed(1)}" fill="#3a8090" font-size="8">Date →</text>`;
-  const svg=`<svg id="plan-svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;background:#02141c;border:1px solid #0d3848;border-radius:4px;cursor:crosshair">
-    ${deco}${pGrid}${bGrid}${xAxis}${conjLines}${priceSVG}${curves}${markers}${legend}${titles}<g id="plan-cross"></g></svg>`;
+    <text x="${(PADL+IW/2).toFixed(1)}" y="${(topB-7).toFixed(1)}" fill="#9cc" font-size="11" text-anchor="middle" font-weight="700">Planet ecliptic ${kind==='lat'?'latitude (°)':'longitude (°)'}</text>`;
 
-  // conjunction events table (lon)
-  let conjTable='';
-  if(kind==='lon' && conj.length){
-    const rows=conj.slice(0,60).map(c=>`<tr><td style="white-space:nowrap">${planFmtIST(c.ms)}</td><td style="color:${PLAN_COL[c.p1]}">${c.p1}</td><td style="color:${PLAN_COL[c.p2]}">${c.p2}</td><td style="text-align:right">${c.sep.toFixed(2)}°</td></tr>`).join('');
-    conjTable=`<div class="pnl" style="margin-top:10px"><div class="ph"><span class="dot"></span>CONJUNCTION EVENTS — ${conj.length} found (orb ≤ ${planOrb()}°)</div>
-      <div class="ts" style="max-height:240px;overflow:auto"><table class="tbl"><thead><tr><th>Date / Time (IST)</th><th>Planet 1</th><th>Planet 2</th><th style="text-align:right">Separation</th></tr></thead><tbody>${rows}</tbody></table></div>
-      ${conj.length>60?`<div style="font-size:9px;color:#3a8090;padding:4px 12px">Showing first 60 of ${conj.length}.</div>`:''}</div>`;
-  }
+  window.PLAN.view={W,H,PADL,PADR,PADT,HP,GAP,HB,topB,IW,vt0,vt1,kind,pmin,pmax,lmin,lmax};
 
-  // raw data (collapsible) — Prices + Planet positions tables
-  let raw='';
-  const rawOpen=!!S.planRaw;
-  let rawBody='';
-  if(rawOpen){
-    const prRows=ohlc.slice().reverse().map(r=>`<tr><td>${r.date}</td><td style="text-align:right">${r.o.toFixed(2)}</td><td style="text-align:right">${r.h.toFixed(2)}</td><td style="text-align:right">${r.l.toFixed(2)}</td><td style="text-align:right;color:#cde">${r.c.toFixed(2)}</td></tr>`).join('');
-    // daily planet positions
-    let plRows=''; for(let ms=t1; ms>=t0; ms-=86400000){ const J=planJDfromMs(ms); let tds='';
-      for(const b of bodies){ const v= kind==='lat'?geoLat(b,J):n360(geoLon(b,J)); const rr=(kind==='lon'&&b!=='Sun'&&b!=='Moon'&&((b==='Rahu'||b==='Ketu')||planetSpeed(b,J)<0))?'<span style="color:var(--bear)">℞</span>':''; tds+=`<td style="text-align:right;color:${PLAN_COL[b]}">${v.toFixed(2)}°${rr}</td>`; }
-      plRows+=`<tr><td>${planISO(ms)}</td>${tds}</tr>`; }
-    const plHead=bodies.map(b=>`<th style="text-align:right;color:${PLAN_COL[b]}">${b}</th>`).join('');
-    rawBody=`<div class="pb"><div class="g2">
-      <div><div style="font-size:9px;color:#5ad0e8;font-weight:700;margin-bottom:3px">PRICES (${ohlc.length} bars)</div>
-        <div class="ts" style="max-height:260px;overflow:auto"><table class="tbl"><thead><tr><th>Date</th><th style="text-align:right">Open</th><th style="text-align:right">High</th><th style="text-align:right">Low</th><th style="text-align:right">Close</th></tr></thead><tbody>${prRows}</tbody></table></div></div>
-      <div><div style="font-size:9px;color:#5ad0e8;font-weight:700;margin-bottom:3px">PLANET ${kind==='lat'?'LATITUDES':'LONGITUDES'} (daily${kind==='lon'?', ℞=retro':''})</div>
-        <div class="ts" style="max-height:260px;overflow:auto"><table class="tbl"><thead><tr><th>Date</th>${plHead}</tr></thead><tbody>${plRows}</tbody></table></div></div>
-    </div></div>`;
-  }
-  raw=`<div class="pnl" style="margin-top:10px"><div class="ph" style="cursor:pointer" onclick="gs({planRaw:${!rawOpen}})"><span class="dot"></span>${rawOpen?'▾':'▸'} RAW DATA — prices &amp; planet positions ${rawOpen?'(click to hide)':'(click to show)'}</div>${rawBody}</div>`;
+  const clip=`<clipPath id="plan-clip"><rect x="${PADL}" y="${PADT}" width="${IW}" height="${(topB+HB-PADT).toFixed(1)}"/></clipPath>`;
+  return `<svg id="plan-svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;background:#02141c;border:1px solid #0d3848;border-radius:4px;cursor:crosshair;touch-action:none">
+    <defs>${clip}</defs>${deco}${pGrid}${bGrid}${xAxis}
+    <g clip-path="url(#plan-clip)">${conjLines}${priceSVG}${curves}${markers}</g>
+    ${legend}${titles}<g id="plan-cross"></g></svg>`;
+}
 
-  return `<div style="position:relative">${svg}
-    <div id="plan-tip" style="position:absolute;display:none;pointer-events:none;background:#02232e;border:1px solid var(--bd2);border-radius:4px;padding:5px 7px;font-size:10px;color:#cde;z-index:5;white-space:nowrap"></div></div>${conjTable}${raw}`;
+// zoom / pan helpers
+function planClampWin(a,b){ const D=window.PLAN.data; if(!D)return; let span=b-a; const full=D.t1-D.t0; span=Math.max(2*PLAN_DAYMS,Math.min(full,span)); if(a<D.t0){a=D.t0;b=a+span;} if(b>D.t1){b=D.t1;a=b-span;} window.PLAN.win={t0:Math.max(D.t0,a),t1:Math.min(D.t1,b)}; }
+function planZoom(factor){ const v=window.PLAN.view,D=window.PLAN.data; if(!v||!D)return; const c=(v.vt0+v.vt1)/2,span=(v.vt1-v.vt0)*factor; planClampWin(c-span/2,c+span/2); planRedraw(); }
+function planResetZoom(){ const D=window.PLAN.data; if(D){window.PLAN.win={t0:D.t0,t1:D.t1}; planRedraw();} }
+function planTogglePan(){ window.PLAN.panMode=!window.PLAN.panMode; planRedraw(); }
+
+function planRedraw(){ const wrap=document.getElementById('plan-svg-wrap'); if(!wrap||!window.PLAN.data)return; wrap.innerHTML=planDrawSVG(window.PLAN.data.kind); planAttachInteract(); }
+
+let _planDrag=null, _planRAF=null;
+function planAttachInteract(){
+  const svg=document.getElementById('plan-svg'), tip=document.getElementById('plan-tip'), cg=document.getElementById('plan-cross');
+  if(!svg||!cg||!window.PLAN.view||!window.PLAN.data) return; const D=window.PLAN.data;
+  const vpos=ev=>{ const r=svg.getBoundingClientRect(); const fx=(ev.clientX-r.left)/r.width; return {fx, vbX:fx*window.PLAN.view.W, cw:r.width}; };
+  const timeAt=vbX=>{ const v=window.PLAN.view; return v.vt0+((vbX-v.PADL)/v.IW)*(v.vt1-v.vt0); };
+
+  svg.onwheel=function(ev){ ev.preventDefault(); const v=window.PLAN.view; const {vbX}=vpos(ev); const ct=timeAt(vbX); const f=ev.deltaY<0?0.8:1/0.8; const rel=(ct-v.vt0)/(v.vt1-v.vt0); let span=(v.vt1-v.vt0)*f; planClampWin(ct-rel*span, ct+(1-rel)*span); planRedraw(); };
+
+  svg.onmousedown=function(ev){ const {vbX}=vpos(ev); _planDrag={x0:vbX, t0w:window.PLAN.win.t0, t1w:window.PLAN.win.t1, pan:(window.PLAN.panMode||ev.shiftKey), moved:false}; };
+  svg.ondblclick=function(){ planResetZoom(); };
+
+  svg.onmousemove=function(ev){ const v=window.PLAN.view; const {vbX,fx,cw}=vpos(ev);
+    if(_planDrag){ _planDrag.moved=true;
+      if(_planDrag.pan){ const dt=((vbX-_planDrag.x0)/v.IW)*(_planDrag.t1w-_planDrag.t0w); let a=_planDrag.t0w-dt,b=_planDrag.t1w-dt; if(!_planRAF){ _planRAF=requestAnimationFrame(()=>{ planClampWin(a,b); planRedraw(); _planRAF=null; }); } return; }
+      else { const x1=Math.min(_planDrag.x0,vbX), x2=Math.max(_planDrag.x0,vbX); cg.innerHTML=`<rect x="${x1.toFixed(1)}" y="${v.PADT}" width="${(x2-x1).toFixed(1)}" height="${(v.topB+v.HB-v.PADT).toFixed(1)}" fill="#5ad0e8" opacity="0.12" stroke="#5ad0e8" stroke-dasharray="3 3"/>`; return; }
+    }
+    // crosshair
+    if(vbX<v.PADL||vbX>v.W-v.PADR){cg.innerHTML='';tip.style.display='none';return;}
+    let si=Math.round((timeAt(vbX)-D.t0)/(D.t1-D.t0)*(D.times.length-1)); si=Math.max(0,Math.min(D.times.length-1,si));
+    const xx=v.PADL+((D.times[si]-v.vt0)/(v.vt1-v.vt0))*v.IW; if(xx<v.PADL-2||xx>v.W-v.PADR+2){cg.innerHTML='';tip.style.display='none';return;}
+    const yB=val=>v.topB+(1-(val-v.lmin)/(v.lmax-v.lmin))*v.HB;
+    let dots=''; for(const b of D.bodies){ const val=D.series[b][si]; if(val==null)continue; dots+=`<circle cx="${xx.toFixed(1)}" cy="${yB(val).toFixed(1)}" r="2.6" fill="${PLAN_COL[b]}" stroke="#02141c" stroke-width="0.6"/>`; }
+    cg.innerHTML=`<line x1="${xx.toFixed(1)}" y1="${v.PADT}" x2="${xx.toFixed(1)}" y2="${(v.topB+v.HB).toFixed(1)}" stroke="#5ad0e8" stroke-width="0.7" opacity="0.7"/>${dots}`;
+    let pr=null,bd=1e15; for(const r of D.ohlc){const dd=Math.abs(r.ms-D.times[si]); if(dd<bd){bd=dd;pr=r;}} if(bd>2*PLAN_DAYMS)pr=null;
+    let rows=`<div style="color:#8df7ff;font-weight:700">${planFmtIST(D.times[si])}</div>`;
+    if(pr) rows+=`<div style="color:#cde">O ${Math.round(pr.o)} H ${Math.round(pr.h)} L ${Math.round(pr.l)} <b>C ${Math.round(pr.c)}</b></div>`;
+    for(const b of D.bodies){ const val=D.series[b][si]; if(val==null)continue; const rr=(D.kind==='lon'&&D.retro[b]&&D.retro[b][si])?' ℞':''; rows+=`<div><span style="color:${PLAN_COL[b]}">${b}</span> ${val.toFixed(2)}°${rr}</div>`; }
+    tip.innerHTML=rows; tip.style.display='block'; tip.style.left=Math.min(fx*cw+12,cw-160)+'px'; tip.style.top='8px';
+  };
+  svg.onmouseup=function(ev){ if(!_planDrag){return;} const v=window.PLAN.view; const {vbX}=vpos(ev);
+    if(!_planDrag.pan && _planDrag.moved && Math.abs(vbX-_planDrag.x0)>6){ const a=timeAt(Math.min(_planDrag.x0,vbX)), b=timeAt(Math.max(_planDrag.x0,vbX)); planClampWin(a,b); planRedraw(); }
+    _planDrag=null; };
+  svg.onmouseleave=function(){ if(_planDrag&&!_planDrag.pan){cg.innerHTML='';} _planDrag=null; tip.style.display='none'; cg.innerHTML=cg.innerHTML; };
 }
 
 function planMetrics(){
-  const key=planInstKey()+'|'+planRange(); const ohlc=window.PLAN.ohlc[key];
-  if(!ohlc) return '';
+  const key=planInstKey()+'|'+planRange(); const ohlc=window.PLAN.ohlc[key]; if(!ohlc) return '';
   const last=ohlc[ohlc.length-1].c, first=ohlc[0].c, chg=(last-first)/first*100;
-  const t1=ohlc[ohlc.length-1].ms+planFwd()*86400000; const fdate=planFmtIST(t1).split('  ')[0];
-  const nS=Math.max(40,Math.min(1500,Math.round((t1-ohlc[0].ms)/86400000*4)))+1;
+  const t1=ohlc[ohlc.length-1].ms+planFwd()*PLAN_DAYMS; const fdate=planFmtIST(t1).split('  ')[0];
+  const nS=Math.max(40,Math.min(1800,Math.round((t1-ohlc[0].ms)/PLAN_DAYMS*4)))+1;
   const card=(l,v,sub,c)=>`<div class="pnl" style="padding:7px 10px;flex:1;min-width:120px"><div style="font-size:8px;color:#5ad0e8;letter-spacing:.07em">${l}</div><div style="font-size:17px;font-weight:800;color:${c||'#e8f6fc'}">${v}</div><div style="font-size:8px;color:#3a8090">${sub}</div></div>`;
   return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
     ${card(planInstKey(), last.toLocaleString('en-IN',{maximumFractionDigits:2}), (chg>=0?'▲ +':'▼ ')+chg.toFixed(2)+'% in range', chg>=0?'var(--bull)':'var(--bear)')}
     ${card('BARS', ohlc.length, 'trading days', '#8df7ff')}
     ${card('PLANET SAMPLES', nS, '~6h cadence', '#8df7ff')}
-    ${card('FORECAST TO', fdate, planFwd()+' days ahead', '#e8c020')}
+    ${card('FORECAST TO', fdate, planFwd()+' days ahead', '#e8c020')}</div>`;
+}
+
+function planChart(kind){
+  const key=planInstKey()+'|'+planRange(); const st=window.PLAN.status, ohlc=window.PLAN.ohlc[key];
+  if(st==='loading' || (!ohlc && st!=='error'))
+    return `<div style="padding:30px;text-align:center;color:var(--acc)"><div class="spin-anim" style="font-size:18px">⟳</div><div style="font-size:12px;margin-top:6px">Fetching ${planInstKey()} candles &amp; computing planet ${kind==='lat'?'latitudes':'longitudes'}…</div></div>`;
+  if(st==='error')
+    return `<div style="padding:18px;border:1px solid var(--bear2);border-radius:4px;background:#1a0008"><div style="color:var(--bear);font-weight:700;font-size:12px">⚠ Price data unavailable (${window.PLAN.err})</div>
+      <div style="font-size:10px;color:#c9a;margin-top:6px">Yahoo CORS proxies are unreachable. Retry when online.</div>
+      <button onclick="window.PLAN.loadedKey=null;window.PLAN.status='idle';planLoad()" style="margin-top:8px;background:var(--bg3);color:var(--acc);border:1px solid var(--bd2);padding:5px 12px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px">↻ Retry</button></div>`;
+  if(!ohlc) return '';
+  if(!window.PLAN.data || window.PLAN.data.sig!==planSig(kind)){ planComputeData(kind); window.PLAN.win=null; }
+  if(!window.PLAN.win && window.PLAN.data) window.PLAN.win={t0:window.PLAN.data.t0,t1:window.PLAN.data.t1};
+  const D=window.PLAN.data;
+  const tbBtn=(onc,lab,title)=>`<button onclick="${onc}" title="${title||''}" style="background:#031a22;color:#8df7ff;border:1px solid #104858;border-radius:3px;padding:2px 8px;font-family:inherit;font-size:11px;cursor:pointer">${lab}</button>`;
+  const toolbar=`<div style="display:flex;gap:5px;align-items:center;margin-bottom:5px;flex-wrap:wrap">
+    ${tbBtn('planZoom(0.6)','＋','Zoom in')} ${tbBtn('planZoom(1.6)','－','Zoom out')}
+    <button onclick="planTogglePan()" title="Toggle pan/box-zoom drag" style="background:${window.PLAN.panMode?'#06303f':'#031a22'};color:${window.PLAN.panMode?'var(--acc)':'#8df7ff'};border:1px solid ${window.PLAN.panMode?'var(--acc)':'#104858'};border-radius:3px;padding:2px 8px;font-family:inherit;font-size:11px;cursor:pointer">✥ Pan ${window.PLAN.panMode?'ON':'OFF'}</button>
+    ${tbBtn('planResetZoom()','⟲ Reset','Reset zoom')}
+    <span style="font-size:9px;color:#3a8090;margin-left:6px">drag = ${window.PLAN.panMode?'pan':'box-zoom'} · shift+drag = ${window.PLAN.panMode?'box-zoom':'pan'} · wheel = zoom · dbl-click = reset</span>
   </div>`;
+  // conjunction + raw tables (full data, independent of zoom)
+  let conjTable='';
+  if(kind==='lon' && D && D.conj.length){ const rows=D.conj.slice(0,60).map(c=>`<tr><td style="white-space:nowrap">${planFmtIST(c.ms)}</td><td style="color:${PLAN_COL[c.p1]}">${c.p1}</td><td style="color:${PLAN_COL[c.p2]}">${c.p2}</td><td style="text-align:right">${c.sep.toFixed(2)}°</td></tr>`).join('');
+    conjTable=`<div class="pnl" style="margin-top:10px"><div class="ph"><span class="dot"></span>CONJUNCTION EVENTS — ${D.conj.length} found (orb ≤ ${planOrb()}°)</div>
+      <div class="ts" style="max-height:240px;overflow:auto"><table class="tbl"><thead><tr><th>Date / Time (IST)</th><th>Planet 1</th><th>Planet 2</th><th style="text-align:right">Separation</th></tr></thead><tbody>${rows}</tbody></table></div>${D.conj.length>60?`<div style="font-size:9px;color:#3a8090;padding:4px 12px">Showing first 60 of ${D.conj.length}.</div>`:''}</div>`; }
+  let raw=''; const rawOpen=!!S.planRaw; let rawBody='';
+  if(rawOpen && D){ const prRows=D.ohlc.slice().reverse().map(r=>`<tr><td>${r.date}</td><td style="text-align:right">${r.o.toFixed(2)}</td><td style="text-align:right">${r.h.toFixed(2)}</td><td style="text-align:right">${r.l.toFixed(2)}</td><td style="text-align:right;color:#cde">${r.c.toFixed(2)}</td></tr>`).join('');
+    let plRows=''; for(let ms=D.t1; ms>=D.t0; ms-=PLAN_DAYMS){ const J=planJDfromMs(ms); let tds=''; for(const b of D.bodies){ const v=kind==='lat'?geoLat(b,J):n360(geoLon(b,J)); const rr=(kind==='lon'&&((b==='Rahu'||b==='Ketu')||(b!=='Sun'&&b!=='Moon'&&planetSpeed(b,J)<0)))?'<span style="color:var(--bear)">℞</span>':''; tds+=`<td style="text-align:right;color:${PLAN_COL[b]}">${v.toFixed(2)}°${rr}</td>`; } plRows+=`<tr><td>${planISO(ms)}</td>${tds}</tr>`; }
+    const plHead=D.bodies.map(b=>`<th style="text-align:right;color:${PLAN_COL[b]}">${b}</th>`).join('');
+    rawBody=`<div class="pb"><div class="g2">
+      <div><div style="font-size:9px;color:#5ad0e8;font-weight:700;margin-bottom:3px">PRICES (${D.ohlc.length} bars)</div><div class="ts" style="max-height:260px;overflow:auto"><table class="tbl"><thead><tr><th>Date</th><th style="text-align:right">Open</th><th style="text-align:right">High</th><th style="text-align:right">Low</th><th style="text-align:right">Close</th></tr></thead><tbody>${prRows}</tbody></table></div></div>
+      <div><div style="font-size:9px;color:#5ad0e8;font-weight:700;margin-bottom:3px">PLANET ${kind==='lat'?'LATITUDES':'LONGITUDES'} (daily${kind==='lon'?', ℞=retro':''})</div><div class="ts" style="max-height:260px;overflow:auto"><table class="tbl"><thead><tr><th>Date</th>${plHead}</tr></thead><tbody>${plRows}</tbody></table></div></div></div></div>`; }
+  raw=`<div class="pnl" style="margin-top:10px"><div class="ph" style="cursor:pointer" onclick="gs({planRaw:${!rawOpen}})"><span class="dot"></span>${rawOpen?'▾':'▸'} RAW DATA — prices &amp; planet positions ${rawOpen?'(click to hide)':'(click to show)'}</div>${rawBody}</div>`;
+
+  return `${toolbar}<div style="position:relative"><div id="plan-svg-wrap">${planDrawSVG(kind)}</div>
+    <div id="plan-tip" style="position:absolute;display:none;pointer-events:none;background:#02232e;border:1px solid var(--bd2);border-radius:4px;padding:5px 7px;font-size:10px;color:#cde;z-index:5;white-space:nowrap"></div></div>${conjTable}${raw}`;
 }
 
 function planPaint(){
   if(typeof S==='undefined') return; if(S.tab!=='planlat' && S.tab!=='planlon') return;
-  const kind=S.tab==='planlat'?'lat':'lon';
+  const kind=planKind();
   const mt=document.getElementById('plan-metrics'); if(mt) mt.innerHTML=planMetrics();
   const el=document.getElementById('plan-chart'); if(el) el.innerHTML=planChart(kind);
-  planAttachCross();
+  planAttachInteract();
 }
-function planAttachCross(){
-  const svg=document.getElementById('plan-svg'), tip=document.getElementById('plan-tip'), cg=document.getElementById('plan-cross');
-  if(!svg||!cg||!window.PLAN.view) return; const v=window.PLAN.view;
-  const X=ms=>v.PADL+((ms-v.t0)/(v.t1-v.t0))*v.IW;
-  const yB=val=>v.topB+(1-(val-v.lmin)/(v.lmax-v.lmin))*v.HB;
-  svg.onmousemove=function(ev){
-    const rect=svg.getBoundingClientRect(); const fx=(ev.clientX-rect.left)/rect.width; const vbX=fx*v.W;
-    const ms=v.t0+((vbX-v.PADL)/v.IW)*(v.t1-v.t0); if(ms<v.t0||ms>v.t1){cg.innerHTML='';tip.style.display='none';return;}
-    let si=Math.round((ms-v.t0)/(v.t1-v.t0)*(v.times.length-1)); si=Math.max(0,Math.min(v.times.length-1,si));
-    const x=X(v.times[si]);
-    let dots=''; for(const b of v.bodies){ const val=v.series[b][si]; if(val==null)continue; dots+=`<circle cx="${x.toFixed(1)}" cy="${yB(val).toFixed(1)}" r="2.6" fill="${PLAN_COL[b]}" stroke="#02141c" stroke-width="0.6"/>`; }
-    cg.innerHTML=`<line x1="${x.toFixed(1)}" y1="${v.PADT}" x2="${x.toFixed(1)}" y2="${(v.topB+v.HB).toFixed(1)}" stroke="#5ad0e8" stroke-width="0.7" opacity="0.7"/>${dots}`;
-    let pr=null,bd=1e15; for(const r of v.ohlc){const dd=Math.abs(r.ms-v.times[si]); if(dd<bd){bd=dd;pr=r;}} if(bd>2*86400000) pr=null;
-    let rows=`<div style="color:#8df7ff;font-weight:700">${planFmtIST(v.times[si])}</div>`;
-    if(pr) rows+=`<div style="color:#cde">O ${Math.round(pr.o)} H ${Math.round(pr.h)} L ${Math.round(pr.l)} <b>C ${Math.round(pr.c)}</b></div>`;
-    for(const b of v.bodies){ const val=v.series[b][si]; if(val==null)continue; const rr=(v.kind==='lon'&&v.retro[b]&&v.retro[b][si])?' ℞':''; rows+=`<div><span style="color:${PLAN_COL[b]}">${b}</span> ${val.toFixed(2)}°${rr}</div>`; }
-    tip.innerHTML=rows; tip.style.display='block'; const cw=svg.clientWidth, px=fx*cw; tip.style.left=Math.min(px+12,cw-160)+'px'; tip.style.top='8px';
-  };
-  svg.onmouseleave=function(){ cg.innerHTML=''; tip.style.display='none'; };
-}
-// re-render on resize so the fixed-height chart re-fits the new width
-if(!window.PLAN._rb){ window.PLAN._rb=true; let _rt; window.addEventListener('resize',function(){ clearTimeout(_rt); _rt=setTimeout(function(){ if(typeof S!=='undefined'&&(S.tab==='planlat'||S.tab==='planlon')) planPaint(); },250); }); }
+if(!window.PLAN._rb){ window.PLAN._rb=true; let _rt; window.addEventListener('resize',function(){ clearTimeout(_rt); _rt=setTimeout(function(){ if(typeof S!=='undefined'&&(S.tab==='planlat'||S.tab==='planlon')) planRedraw(); },200); }); }
 
 function planBtn(active,onclick,label,col){ return `<button onclick="${onclick}" style="display:inline-block;padding:3px 9px;margin:0;font-family:inherit;font-size:10px;cursor:pointer;border-radius:3px;background:${active?'#06303f':'#031a22'};color:${active?(col||'#8df7ff'):'#7ea'};border:1px solid ${active?(col||'var(--acc)'):'#104858'};font-weight:${active?'800':'400'}">${label}</button>`; }
 function planControls(kind){
@@ -4846,8 +4868,7 @@ function planControls(kind){
   const ranges=Object.keys(PLAN_RANGES).map(k=>planBtn(planRange()===k,`gs({planRange:'${k}'})`,PLAN_RANGES[k])).join('');
   const fwds=[0,30,90,180,365].map(n=>planBtn(planFwd()===n,`gs({planFwd:${n}})`,n+'d')).join('');
   const ptype=planBtn(planChartType()==='candle',"gs({planChart:'candle'})",'Candle')+planBtn(planChartType()==='line',"gs({planChart:'line'})",'Line');
-  const sel=planBodies();
-  const chips=PLAN_ORDER.map(b=>planBtn(sel.includes(b),`planToggle('${b}')`,b,PLAN_COL[b])).join('');
+  const sel=planBodies(); const chips=PLAN_ORDER.map(b=>planBtn(sel.includes(b),`planToggle('${b}')`,b,PLAN_COL[b])).join('');
   let conjCtrl='';
   if(kind==='lon'){ const orbSel=`<select onchange="gs({planOrb:+this.value})" class="ci" style="font-size:10px;padding:2px 4px">${[3,4,6,8,10,15].map(o=>`<option value="${o}" ${planOrb()===o?'selected':''}>${o}°</option>`).join('')}</select>`;
     conjCtrl=grp('CONJ', planBtn(S.planConj!==false,`gs({planConj:${S.planConj===false}})`,S.planConj!==false?'ON':'OFF')+orbSel); }
@@ -4863,12 +4884,12 @@ function planToggle(b){ let sel=planBodies(); if(sel.includes(b)) sel=sel.filter
 function tPlanetLat(){ setTimeout(planLoad,30);
   return `<div class="pnl"><div class="ph"><span class="dot"></span>PLANET LATITUDE — ${planInstKey()} candles vs planet ecliptic latitude (Shar)</div>
     <div class="pb">${planControls('lat')}<div id="plan-metrics">${planMetrics()}</div><div id="plan-chart">${planChart('lat')}</div>
-      <div style="font-size:9px;color:#3a8090;margin-top:6px">Top: ${planInstKey()} OHLC (Yahoo). Bottom: each planet's ecliptic latitude (N+ / S−), ~6-hourly. Gold = Today, shaded = forecast. Rahu/Ketu sit on the ecliptic (lat 0). Port of planet.py — hover for a synced read-out.</div>
+      <div style="font-size:9px;color:#3a8090;margin-top:6px">Top: ${planInstKey()} OHLC. Bottom: planet ecliptic latitude (N+ / S−). Zoom: wheel / drag / ＋－ buttons · Pan: shift-drag or Pan toggle · Reset: dbl-click. Port of planet.py.</div>
     </div></div>`; }
 function tPlanetLon(){ setTimeout(planLoad,30);
   return `<div class="pnl"><div class="ph"><span class="dot"></span>PLANET LONGITUDE — ${planInstKey()} candles vs planet ecliptic longitude</div>
     <div class="pb">${planControls('lon')}<div id="plan-metrics">${planMetrics()}</div><div id="plan-chart">${planChart('lon')}</div>
-      <div style="font-size:9px;color:#3a8090;margin-top:6px">Top: ${planInstKey()} OHLC. Bottom: tropical longitude 0–360°. Solid = direct · dotted = retrograde · R/D = station · cyan verticals = conjunctions (≤ ${planOrb()}°). Port of planets.py — hover for values.</div>
+      <div style="font-size:9px;color:#3a8090;margin-top:6px">Tropical longitude 0–360°. Solid=direct · dotted=retro · R/D=station · cyan verticals=conjunctions. Zoom: wheel/drag/＋－ · Pan: shift-drag or toggle · Reset: dbl-click. Port of planets.py.</div>
     </div></div>`; }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -5266,68 +5287,130 @@ function tSBC(){
     nakPol.set(ni, Math.sign(s));
   }
 
-  const SBC_POS=[[0,1,0],[0,2,1],[0,3,2],[0,4,3],[0,5,4],[0,6,5],[0,7,6],[1,8,7],[2,8,8],[3,8,9],[4,8,10],[5,8,11],[6,8,12],[7,8,13],[8,7,14],[8,6,15],[8,5,16],[8,4,17],[8,3,18],[8,2,19],[8,1,20],[7,0,21],[6,0,22],[5,0,23],[4,0,24],[3,0,25],[2,0,26],[1,0,-1]];
-  const INNER=[[2,3,'Cancer'],[2,4,'Gemini'],[2,5,'Taurus'],[3,2,'Leo'],[3,6,'Aries'],[4,2,'Virgo'],[4,6,'Pisces'],[5,2,'Libra'],[5,6,'Aquarius'],[6,3,'Scorpio'],[6,4,'Sagittarius'],[6,5,'Capricorn']];
-  const CS=85,SZ=9*CS;
+  // ── Sarvatobhadra Chakra — classical Jagannatha-Hora layout ──
+  //    EAST=top, SOUTH=right, WEST=bottom, NORTH=left. Inner 7x7 = aksharas + rashis + tithi/vaara.
+  const EAST =[2,3,4,5,6,7,8];           // Krittika -> Ashlesha
+  const SOUTH=[9,10,11,12,13,14,15];     // Magha -> Vishakha
+  const WEST =[21,'AB',20,19,18,17,16];  // Shravana, Abhijit, U.Ashadha -> Anuradha
+  const NORTH=[1,0,26,25,24,23,22];      // Bharani, Ashwini, Revati -> Dhanishtha
+  const ABHIJIT={n:'Abhijit', l:'Brahma'};
+  const ringPos={};
+  EAST.forEach((k,i)=>ringPos[k]={r:0,c:1+i});
+  SOUTH.forEach((k,i)=>ringPos[k]={r:1+i,c:8});
+  WEST.forEach((k,i)=>ringPos[k]={r:8,c:1+i});
+  NORTH.forEach((k,i)=>ringPos[k]={r:1+i,c:0});
+  // inner aksharas  'r,c':[latin, devanagari]
+  const AK={
+   '1,1':['00','उ'],'1,2':['A','अ'],'1,3':['VA','व'],'1,4':['KA','क'],'1,5':['HA','ह'],'1,6':['DA','ड'],'1,7':['00','ऊ'],
+   '2,1':['LA','ल'],'2,2':['LRI','लृ'],'2,6':['LREE','लॣ'],'2,7':['MA','म'],
+   '3,1':['CHA','च'],'3,3':['O','ओ'],'3,5':['OU','औ'],'3,7':['TA','ट'],
+   '4,1':['DHA','ध'],'4,7':['PA','प'],
+   '5,1':['SA','स'],'5,3':['AHA','अः'],'5,5':['AM','अं'],'5,7':['RA','र'],
+   '6,1':['GA','ग'],'6,2':['AEI','ऐ'],'6,6':['AE','ए'],'6,7':['THA','त'],
+   '7,1':['REE','ॠ'],'7,2':['KHA','ख'],'7,3':['JA','ज'],'7,4':['BHA','भ'],'7,5':['YA','य'],'7,6':['NA','न'],'7,7':['RE','ऋ']
+  };
+  // rashi ring [r,c,signIdx]
+  const RASHI=[[2,3,2],[2,4,3],[2,5,4],[3,6,5],[4,6,6],[5,6,7],[6,5,8],[6,4,9],[6,3,10],[5,2,11],[4,2,12],[3,2,1]];
+  const RNAME=['Aries','Taurus','Gemini','Cancer','Leo','Virgo','Libra','Scorpio','Sagittarius','Capricorn','Aquarius','Pisces'];
+  const RDEV =['मेष','वृष','मिथुन','कर्क','सिंह','कन्या','तुला','वृश्चिक','धनु','मकर','कुंभ','मीन'];
+  const SAB  =['Ar','Ta','Ge','Cn','Le','Vi','Li','Sc','Sg','Cp','Aq','Pi'];
+  const TVA=[[3,4,'NANDA','Sun · Tue','1·6·11','#00f07a'],[4,3,'RIKTA','Fri','4·9·14','#ff3355'],[4,4,'PURNA','Sat','5·10·15·30','#ffc107'],[4,5,'BHADRA','Mon · Wed','2·7·12','#69F0AE'],[5,4,'JAYA','Thu','3·8·13','#00e8ff']];
+  const DEITY={'0,0':['ईशान','Ishana'],'0,8':['आग्नेय','Agni'],'8,8':['नैऋत्य','Nirriti'],'8,0':['वायव्य','Vayu']};
 
-  let svg=`<svg width="${SZ}" height="${SZ}" xmlns="http://www.w3.org/2000/svg">`;
-  svg+=`<rect width="${SZ}" height="${SZ}" fill="#010b0f" rx="4" stroke="#1c6080" stroke-width="2"/>`;
-  for(let r=0;r<9;r++)for(let c=0;c<9;c++){
-    const corner=(r===0||r===8)&&(c===0||c===8);
-    svg+=`<rect x="${c*CS}" y="${r*CS}" width="${CS}" height="${CS}" fill="${corner?'#01080c':'#011a26'}" stroke="#1c5070" stroke-width=".8"/>`;
-  }
-  for(const[r,c,sn] of INNER){
-    svg+=`<rect x="${c*CS+.5}" y="${r*CS+.5}" width="${CS-1}" height="${CS-1}" fill="#02202e" stroke="#1c5070" stroke-width="1"/>`;
-    svg+=`<text x="${c*CS+CS/2}" y="${r*CS+CS/2+5}" text-anchor="middle" fill="#ffc107" font-size="15" font-weight="bold" font-family="Courier New">${sn.slice(0,3)}</text>`;
-  }
-  svg+=`<rect x="${3*CS}" y="${3*CS}" width="${3*CS}" height="${3*CS}" fill="#010a10" stroke="#1c5070" stroke-width="1"/>`;
-  svg+=`<text x="${4.5*CS}" y="${4.3*CS}" text-anchor="middle" fill="#00e8ff" font-size="20" font-weight="bold" font-family="Courier New">SARVATOBHADRA</text>`;
-  svg+=`<text x="${4.5*CS}" y="${4.65*CS}" text-anchor="middle" fill="#00e8ff" font-size="20" font-weight="bold" font-family="Courier New">CHAKRA</text>`;
-  svg+=`<text x="${4.5*CS}" y="${4.92*CS}" text-anchor="middle" fill="#5ad0e8" font-size="14" font-family="Courier New">${S.date}</text>`;
+  const NG=9, CS=82, PADAB=15, NAVB=15, SIGNB=20, BND=PADAB+NAVB+SIGNB, DM=26, O=DM+BND, SZ=O+NG*CS+BND+DM, SUB=CS/4;
+  const gX=c=>O+c*CS, gY=r=>O+r*CS, cX=c=>O+c*CS+CS/2, cY=r=>O+r*CS+CS/2;
+  const navOf=(ni,p)=>((ni*4+p)%12)+1;
+  const signOf=(ni,p)=>Math.floor((ni*13.33333+p*3.33333)/30)%12+1;
+  const signFill=['#3a1a1a','#2a2a14','#143a2a','#142a3a','#3a2a14','#1a3a1a','#2a1a3a','#3a1428','#2a1a14','#14283a','#1a2a3a','#1a1428'];
 
-  for(const[r,c,ni] of SBC_POS){
-    const nak=ni>=0?NAKS[ni]:null;
-    const isAct=ni>=0&&activeNaks.has(ni);
-    const isVedha=ni>=0&&nakVedha.has(ni);
-    const pol = nakPol.get(ni) || 0;
-    const ps=ni>=0?D.planets.filter(p=>getNak(p.lon).idx===ni):[];
+  let svg=`<svg width="${SZ}" height="${SZ}" viewBox="0 0 ${SZ} ${SZ}" xmlns="http://www.w3.org/2000/svg" font-family="Courier New">`;
+  svg+=`<defs>
+    <marker id="vbull" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#00f07a"/></marker>
+    <marker id="vbear" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#ff3355"/></marker>
+    <marker id="vneut" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#ffc107"/></marker></defs>`;
+  svg+=`<rect width="${SZ}" height="${SZ}" fill="#010b0f"/>`;
+  // core grid cells
+  for(let r=0;r<NG;r++)for(let c=0;c<NG;c++){ const corner=(r===0||r===8)&&(c===0||c===8);
+    svg+=`<rect x="${gX(c)}" y="${gY(r)}" width="${CS}" height="${CS}" fill="${corner?'#02141c':'#011a26'}" stroke="#103848" stroke-width=".8"/>`; }
 
-    // Grid cell color now reflects polarity instead of always-red vedha
-    let fillCol = '#011a28', strokeCol = '#1c5070', strokeW = 0.8;
-    if(isAct && !isVedha){          // active but no vedha — neutral cyan-green
-      fillCol = '#003020'; strokeCol = '#00b84a'; strokeW = 1.5;
-    } else if(isVedha && pol > 0){  // +ve vedha (paap-paap)
-      fillCol = '#002a14'; strokeCol = '#00b84a'; strokeW = 2;
-    } else if(isVedha && pol < 0){  // -ve vedha (shubh-shubh)
-      fillCol = '#280008'; strokeCol = '#cc1030'; strokeW = 2;
-    } else if(isVedha){             // mixed
-      fillCol = '#2a2000'; strokeCol = '#cc8800'; strokeW = 1.5;
-    }
-    svg+=`<rect x="${c*CS+.5}" y="${r*CS+.5}" width="${CS-1}" height="${CS-1}" fill="${fillCol}" stroke="${strokeCol}" stroke-width="${strokeW}"/>`;
-
-    if(nak){
-      const txtCol = isVedha && pol>0 ? '#00f07a'
-                   : isVedha && pol<0 ? '#ff3355'
-                   : isVedha          ? '#ffc107'
-                   : isAct            ? '#00f07a'
-                   : '#6ac8e0';
-      svg+=`<text x="${c*CS+CS/2}" y="${r*CS+18}" text-anchor="middle" fill="${txtCol}" font-size="12" font-weight="bold" font-family="Courier New">${nak.n.slice(0,10)}</text>`;
-      svg+=`<text x="${c*CS+CS/2}" y="${r*CS+33}" text-anchor="middle" fill="${PC[nak.l]||'#7ecad8'}" font-size="12" font-weight="bold" font-family="Courier New">${nak.l.slice(0,3)}</text>`;
-      // Tiny +/- badge in corner if vedha
-      if(isVedha){
-        const badge = pol>0 ? '+VE' : pol<0 ? '-VE' : '±';
-        const badgeCol = pol>0 ? '#00f07a' : pol<0 ? '#ff3355' : '#ffc107';
-        svg+=`<text x="${c*CS+CS-6}" y="${r*CS+10}" text-anchor="end" fill="${badgeCol}" font-size="9" font-weight="bold" font-family="Courier New">${badge}</text>`;
+  // ── edge bands: SIGN / NAVAMSA / PADA (7 naks x 4 padas) ──
+  function band(naks, edge){
+    for(let i=0;i<7;i++){ const key=naks[i]; const ni=(key==='AB')?-1:key;
+      for(let p=0;p<4;p++){
+        let pr,nr,sr; const naxX=gX(1+i), naxY=gY(1+i);
+        if(edge==='top'){ const x=naxX+p*SUB; pr=[x,O-PADAB,SUB,PADAB]; nr=[x,O-PADAB-NAVB,SUB,NAVB]; sr=[x,O-BND,SUB,SIGNB]; }
+        else if(edge==='bottom'){ const x=naxX+p*SUB,yb=O+NG*CS; pr=[x,yb,SUB,PADAB]; nr=[x,yb+PADAB,SUB,NAVB]; sr=[x,yb+PADAB+NAVB,SUB,SIGNB]; }
+        else if(edge==='right'){ const y=naxY+p*SUB,xr=O+NG*CS; pr=[xr,y,PADAB,SUB]; nr=[xr+PADAB,y,NAVB,SUB]; sr=[xr+PADAB+NAVB,y,SIGNB,SUB]; }
+        else { const y=naxY+p*SUB; pr=[O-PADAB,y,PADAB,SUB]; nr=[O-PADAB-NAVB,y,NAVB,SUB]; sr=[O-BND,y,SIGNB,SUB]; }
+        const si=(ni>=0)?signOf(ni,p):0;
+        svg+=`<rect x="${sr[0]}" y="${sr[1]}" width="${sr[2]}" height="${sr[3]}" fill="${si?signFill[si-1]:'#06141c'}" stroke="#0d2a34" stroke-width=".5"/>`;
+        if(si) svg+=`<text x="${sr[0]+sr[2]/2}" y="${sr[1]+sr[3]/2+3}" text-anchor="middle" fill="#e0b050" font-size="8">${SAB[si-1]}</text>`;
+        svg+=`<rect x="${nr[0]}" y="${nr[1]}" width="${nr[2]}" height="${nr[3]}" fill="#04121a" stroke="#0d2a34" stroke-width=".5"/>`;
+        if(ni>=0) svg+=`<text x="${nr[0]+nr[2]/2}" y="${nr[1]+nr[3]/2+3}" text-anchor="middle" fill="#5a90a0" font-size="8">${navOf(ni,p)}</text>`;
+        svg+=`<rect x="${pr[0]}" y="${pr[1]}" width="${pr[2]}" height="${pr[3]}" fill="#02181f" stroke="#0d2a34" stroke-width=".5"/>`;
+        svg+=`<text x="${pr[0]+pr[2]/2}" y="${pr[1]+pr[3]/2+3}" text-anchor="middle" fill="#3a8090" font-size="8">${p+1}</text>`;
       }
-    }else{
-      svg+=`<text x="${c*CS+CS/2}" y="${r*CS+CS/2}" text-anchor="middle" fill="#5ad0e8" font-size="11" font-family="Courier New">Abhijit</text>`;
     }
-    ps.forEach((p,i)=>{
-      // Color the planet's marker by Shubh/Paap class (subtle hint)
-      const planetCol = PC[p.name];
-      svg+=`<text x="${c*CS+CS/2}" y="${r*CS+54+i*15}" text-anchor="middle" fill="${planetCol}" font-size="15" font-weight="bold" font-family="Courier New">${p.abbr}</text>`;
-    });
   }
+  band(EAST,'top'); band(SOUTH,'right'); band(WEST,'bottom'); band(NORTH,'left');
+  // band group labels
+  svg+=`<text x="${O-PADAB-NAVB/2}" y="${O-2}" text-anchor="middle" fill="#3a8090" font-size="7" transform="rotate(-90 ${O-PADAB-NAVB/2} ${O-2})">NAVAMSA</text>`;
+  svg+=`<text x="${gX(0)+CS/2}" y="${O-BND-3}" text-anchor="middle" fill="#5a90a0" font-size="8">SIGNS</text>`;
+
+  // direction labels
+  svg+=`<text x="${SZ/2}" y="${DM-8}" text-anchor="middle" fill="#00e8ff" font-size="16" font-weight="bold">EAST · पूर्व</text>`;
+  svg+=`<text x="${SZ/2}" y="${SZ-6}" text-anchor="middle" fill="#00e8ff" font-size="16" font-weight="bold">WEST · पश्चिम</text>`;
+  svg+=`<text x="${DM-8}" y="${SZ/2}" text-anchor="middle" fill="#00e8ff" font-size="16" font-weight="bold" transform="rotate(-90 ${DM-8} ${SZ/2})">NORTH · उत्तर</text>`;
+  svg+=`<text x="${SZ-DM+10}" y="${SZ/2}" text-anchor="middle" fill="#00e8ff" font-size="16" font-weight="bold" transform="rotate(90 ${SZ-DM+10} ${SZ/2})">SOUTH · दक्षिण</text>`;
+  svg+=`<text x="${gX(1)+4}" y="${DM-8}" fill="#cc1030" font-size="9">◄ Right-Side Vedha</text>`;
+  svg+=`<text x="${gX(8)-4}" y="${DM-8}" text-anchor="end" fill="#00b84a" font-size="9">Left-Side Vedha ►</text>`;
+
+  // corner deities
+  for(const key in DEITY){ const rc=key.split(',').map(Number), d=DEITY[key];
+    svg+=`<text x="${cX(rc[1])}" y="${cY(rc[0])-5}" text-anchor="middle" fill="#b89cff" font-size="14" font-weight="bold">${d[0]}</text>`;
+    svg+=`<text x="${cX(rc[1])}" y="${cY(rc[0])+13}" text-anchor="middle" fill="#8a78c8" font-size="10">${d[1]}</text>`; }
+
+  // inner aksharas
+  for(const key in AK){ const rc=key.split(',').map(Number), a=AK[key];
+    svg+=`<text x="${cX(rc[1])}" y="${cY(rc[0])-5}" text-anchor="middle" fill="#9fe8ff" font-size="15" font-weight="bold">${a[0]}</text>`;
+    svg+=`<text x="${cX(rc[1])}" y="${cY(rc[0])+15}" text-anchor="middle" fill="#5a90a0" font-size="14">${a[1]}</text>`; }
+
+  // rashi ring
+  for(const rc of RASHI){ const r=rc[0],c=rc[1],si=rc[2];
+    svg+=`<rect x="${gX(c)+1}" y="${gY(r)+1}" width="${CS-2}" height="${CS-2}" fill="#02202e" stroke="#145060" stroke-width="1"/>`;
+    svg+=`<text x="${cX(c)}" y="${cY(r)-3}" text-anchor="middle" fill="#ffc107" font-size="11" font-weight="bold">${RNAME[si-1]}</text>`;
+    svg+=`<text x="${cX(c)}" y="${cY(r)+13}" text-anchor="middle" fill="#cc8800" font-size="11">${si} · ${RDEV[si-1]}</text>`; }
+  // tithi/vaara center
+  svg+=`<rect x="${gX(3)}" y="${gY(3)}" width="${3*CS}" height="${3*CS}" fill="none" stroke="#145060" stroke-width="1"/>`;
+  for(const t of TVA){ const r=t[0],c=t[1];
+    svg+=`<rect x="${gX(c)+1}" y="${gY(r)+1}" width="${CS-2}" height="${CS-2}" fill="#02141c" stroke="${t[5]}66" stroke-width="1.5"/>`;
+    svg+=`<text x="${cX(c)}" y="${cY(r)-12}" text-anchor="middle" fill="${t[5]}" font-size="12" font-weight="bold">${t[2]}</text>`;
+    svg+=`<text x="${cX(c)}" y="${cY(r)+3}" text-anchor="middle" fill="#cde" font-size="9">${t[3]}</text>`;
+    svg+=`<text x="${cX(c)}" y="${cY(r)+17}" text-anchor="middle" fill="#89a" font-size="9">${t[4]}</text>`; }
+
+  // vedha arrows across the chakra
+  for(const ent of nakVedha){ const ni=ent[0], ents=ent[1]; if(!ringPos[ni])continue;
+    for(const e of ents){ if(!ringPos[e.with])continue; const a=ringPos[ni], b=ringPos[e.with];
+      const col=e.dir>0?'#00f07a':e.dir<0?'#ff3355':'#ffc107', mk=e.dir>0?'vbull':e.dir<0?'vbear':'vneut';
+      svg+=`<line x1="${cX(a.c)}" y1="${cY(a.r)}" x2="${cX(b.c)}" y2="${cY(b.r)}" stroke="${col}" stroke-width="1.7" opacity="0.6" marker-end="url(#${mk})"/>`; } }
+
+  // nakshatra ring cells (lord + transiting planets + polarity)
+  function drawNak(key){ const pos=ringPos[key]; if(!pos)return; const r=pos.r,c=pos.c;
+    const ni=(key==='AB')?-1:key; const nak=(key==='AB')?ABHIJIT:NAKS[ni];
+    const isAct=ni>=0&&activeNaks.has(ni), isVedha=ni>=0&&nakVedha.has(ni), pol=nakPol.get(ni)||0;
+    let fill='#011a26',stroke='#145060',sw=0.9;
+    if(isAct&&!isVedha){fill='#003020';stroke='#00b84a';sw=1.6;}
+    else if(isVedha&&pol>0){fill='#002a14';stroke='#00b84a';sw=2;}
+    else if(isVedha&&pol<0){fill='#280008';stroke='#cc1030';sw=2;}
+    else if(isVedha){fill='#2a2000';stroke='#cc8800';sw=1.6;}
+    svg+=`<rect x="${gX(c)+1}" y="${gY(r)+1}" width="${CS-2}" height="${CS-2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+    const tc=isVedha&&pol>0?'#00f07a':isVedha&&pol<0?'#ff3355':isVedha?'#ffc107':isAct?'#00f07a':'#6ac8e0';
+    svg+=`<text x="${cX(c)}" y="${gY(r)+15}" text-anchor="middle" fill="${tc}" font-size="10" font-weight="bold">${nak.n.slice(0,10)}</text>`;
+    svg+=`<text x="${cX(c)}" y="${gY(r)+28}" text-anchor="middle" fill="${PC[nak.l]||'#7ecad8'}" font-size="10" font-weight="bold">${nak.l.slice(0,3)}</text>`;
+    if(isVedha){const badge=pol>0?'+VE':pol<0?'-VE':'±',bc=pol>0?'#00f07a':pol<0?'#ff3355':'#ffc107';svg+=`<text x="${gX(c)+CS-4}" y="${gY(r)+11}" text-anchor="end" fill="${bc}" font-size="8" font-weight="bold">${badge}</text>`;}
+    if(ni>=0){const ps=D.planets.filter(p=>getNak(p.lon).idx===ni); ps.forEach((p,i)=>{svg+=`<text x="${cX(c)}" y="${gY(r)+44+i*14}" text-anchor="middle" fill="${PC[p.name]}" font-size="13" font-weight="bold">${p.abbr}${p.retro?'°':''}</text>`;});}
+  }
+  [].concat(EAST,SOUTH,WEST,NORTH).forEach(drawNak);
   svg+=`</svg>`;
 
   // Build pair-level vedha list with explicit polarity per pair
