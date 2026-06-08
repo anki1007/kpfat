@@ -338,6 +338,40 @@ html,body{width:100%;min-height:100vh;background:var(--bg0);color:var(--tx0);fon
 .tr-hl td{outline:none !important;border-top:1px solid #00e8ff !important;border-bottom:1px solid #00e8ff !important}
 .gbase td{background:#042030 !important;border-top:1px solid #1a5060 !important;border-bottom:1px solid #1a5060 !important;color:#00e8ff !important}
 @media(max-width:768px){.g2,.g-kp{grid-template-columns:1fr}.fg{grid-template-columns:1fr}}
+/* ── sidebar toggle + responsive (web + mobile) ── */
+.navtoggle{background:#031a22;color:var(--acc);border:1px solid #104858;border-radius:4px;font-family:inherit;font-size:16px;line-height:1;padding:4px 11px;cursor:pointer;flex-shrink:0;transition:all .15s}
+.navtoggle:hover{background:#06303f;border-color:var(--acc)}
+.navtoggle:active{transform:scale(.94)}
+.nav{transition:width .18s ease,transform .2s ease}
+.nav-backdrop{display:none}
+@media(min-width:821px){body.nav-collapsed .nav{width:0;border-right:none;overflow:hidden}}
+@media(max-width:820px){
+  .terminal{height:100vh;height:100dvh}
+  .nav{position:fixed;top:0;left:0;height:100vh;height:100dvh;z-index:300;width:78vw;max-width:288px;transform:translateX(-104%);box-shadow:2px 0 22px rgba(0,0,0,.65)}
+  body.nav-open .nav{transform:translateX(0)}
+  .nav-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:290;opacity:0;pointer-events:none;transition:opacity .2s}
+  body.nav-open .nav-backdrop{opacity:1;pointer-events:auto}
+  .hdr{padding:6px 10px}
+  .hdr-r1{gap:6px}
+  .brand{font-size:12.5px;letter-spacing:.06em}
+  .brand-sub{font-size:7.5px;line-height:1.35}
+  .ctrl-row{gap:5px}
+  .ci{font-size:11px;padding:5px 6px}
+  .w80{width:74px}.w110{width:96px}.w130{width:112px}
+  .main{padding:8px 9px;gap:8px}
+  .ph{font-size:8px;padding:5px 9px}
+  .pb{padding:8px 9px}
+  .tbl th{font-size:8px;padding:5px 5px}
+  .tbl td{font-size:10px;padding:4px 5px}
+  .g3,.g4{grid-template-columns:1fr}
+}
+@media(max-width:480px){
+  .brand{font-size:11px}
+  .ctrl-row{width:100%}
+  .cg{flex:1 1 96px}
+  .ci{width:100%}
+  .w80,.w110,.w130{width:100%}
+}
 @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 .spin-anim{display:inline-block;animation:spin 1s linear infinite}
 .live-dot{width:7px;height:7px;border-radius:50%;background:var(--bull);display:inline-block;animation:pulse 1.5s ease-in-out infinite}
@@ -351,6 +385,7 @@ html,body{width:100%;min-height:100vh;background:var(--bg0);color:var(--tx0);fon
     <nav class="nav" id="NAV"></nav>
     <div class="main" id="MAIN"></div>
   </div>
+  <div class="nav-backdrop" id="NAVBD" onclick="closeNav()"></div>
 </div>
 <script>
 // ═══════════════════════════════════════════════════════════════════
@@ -3894,6 +3929,16 @@ let PS={state:'idle',src:'',ts:'',
         usState:'idle',usSrc:'',usTs:''};
 let autoTimer=null;
 window.gs=u=>{S={...S,...u};render();};
+// ── sidebar show/hide (one-click) + mobile drawer ──
+function isNarrow(){return window.matchMedia('(max-width:820px)').matches;}
+function toggleNav(){
+  if(isNarrow()){ document.body.classList.toggle('nav-open'); }
+  else{ document.body.classList.toggle('nav-collapsed');
+    try{localStorage.setItem('fatNavCollapsed',document.body.classList.contains('nav-collapsed')?'1':'0');}catch(e){} }
+}
+function closeNav(){ document.body.classList.remove('nav-open'); }
+function navPick(){ if(isNarrow()) document.body.classList.remove('nav-open'); }
+window.toggleNav=toggleNav; window.closeNav=closeNav; window.navPick=navPick;
 
 function render(){
   try{DATA=computeAll(S.date,parseFloat(S.time)||9.25,S.ayMode);}
@@ -3929,9 +3974,12 @@ function rHdr(){
   document.getElementById('HDR').innerHTML=`
 <header class="hdr">
   <div class="hdr-r1">
-    <div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="navtoggle" onclick="toggleNav()" title="Show / hide sidebar (Ctrl+B)" aria-label="Toggle sidebar">☰</button>
+      <div>
       <div class="brand">⬡ FINANCIAL ASTROLOGY TERMINAL</div>
       <div class="brand-sub">${(S.loc||'Mumbai').toUpperCase()} ${Math.abs(LAT).toFixed(4)}°${LAT>=0?'N':'S'} ${Math.abs(LON).toFixed(4)}°${LON>=0?'E':'W'} · ${_loc.mkt} · ${ayLabel.toUpperCase()} ${dms(D.ay,2)} · ${days[dateObj.getDay()]} ${mons[dateObj.getMonth()]} ${dateObj.getDate()} ${dateObj.getFullYear()} · ${_loc.abbr} ${mtt(parseFloat(S.time)*60)} → UTC ${mtt(((((parseFloat(S.time)-_loc.tz)%24)+24)%24)*60)} · EPH ${D.ephSrc}</div>
+    </div>
     </div>
     <div class="ctrl-row">
       <div class="cg"><span class="cl">DATE</span><input type="date" id="iD" value="${S.date}" class="ci w130"></div>
@@ -3965,7 +4013,7 @@ function rHdr(){
 // ═══════════════════════════════════════════════════════════════════
 function rNav(){
   const tabs=[['overview','▦ Overview'],['v44','✦ FATS Forecast'],['dayfc','☉ Day Forecast'],['shar','⟐ Shar'],['kranti','◓ Kranti'],['transit','⊞ Transit Cal'],['kundali','◇ Natal·Intraday'],['bhav','⌂ Bhav Phal'],['rulebook','⚜ Rule Book'],['ashtaka','⊡ Ashtakavarga'],['vr','★ Vyapaar Ratna'],['rules','⚖ Astro Rules'],['kp','⊕ KP Planets'],['charts','◈ D1·D9'],['sbc','⬡ SBC Grid'],['planlat','🪐 Planet Lat'],['planlon','🛰 Planet Lon'],['timing','⏱ 15-min Timing'],['gann','⌇ Gann SQ9']];
-  document.getElementById('NAV').innerHTML=tabs.map(([k,v])=>`<button class="nb${S.tab===k?' on':''}" onclick="gs({tab:'${k}'})">${v}</button>`).join('');
+  document.getElementById('NAV').innerHTML=tabs.map(([k,v])=>`<button class="nb${S.tab===k?' on':''}" onclick="gs({tab:'${k}'});navPick()">${v}</button>`).join('');
 }
 
 function rMain(){
@@ -7067,6 +7115,12 @@ document.addEventListener('input', e=>{
 // ═══════════════════════════════════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════════════════════════════════
+// restore sidebar collapsed preference (desktop) + keyboard shortcut (Ctrl/Cmd+B, Esc)
+try{ if(localStorage.getItem('fatNavCollapsed')==='1' && !window.matchMedia('(max-width:820px)').matches) document.body.classList.add('nav-collapsed'); }catch(e){}
+document.addEventListener('keydown', e=>{
+  if((e.ctrlKey||e.metaKey) && (e.key==='b'||e.key==='B')){ e.preventDefault(); toggleNav(); }
+  else if(e.key==='Escape') closeNav();
+});
 render();
 fetchPrices();
 scheduleAutoRefresh();
