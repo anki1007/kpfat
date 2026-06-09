@@ -376,6 +376,17 @@ html,body{width:100%;min-height:100vh;background:var(--bg0);color:var(--tx0);fon
 .spin-anim{display:inline-block;animation:spin 1s linear infinite}
 .live-dot{width:7px;height:7px;border-radius:50%;background:var(--bull);display:inline-block;animation:pulse 1.5s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+/* ── enlarged Day Forecast + FATS Forecast + collapsible tables ── */
+.dayfc-tab{zoom:1.18}
+.fats-tab{display:flex;flex-direction:column;gap:10px;zoom:1.12}
+details.coll{border:1px solid var(--bd);border-radius:3px;background:#021520;margin-top:2px}
+details.coll>summary{cursor:pointer;list-style:none;padding:7px 11px;background:#041e28;color:#5ad0e8;font-size:11px;font-weight:700;letter-spacing:.05em;display:flex;align-items:center;gap:8px;user-select:none;border-radius:3px}
+details.coll>summary::-webkit-details-marker{display:none}
+details.coll>summary::before{content:'\25be';color:var(--acc);font-size:11px;transition:transform .15s}
+details.coll:not([open])>summary::before{transform:rotate(-90deg)}
+details.coll[open]>summary{border-bottom:1px solid var(--bd)}
+details.coll>summary:hover{background:#06303f;color:#8df7ff}
+@media(max-width:820px){.dayfc-tab,.fats-tab{zoom:1}}
 </style>
 </head>
 <body>
@@ -4536,21 +4547,21 @@ function tV44(){
     const dirTxt = sig.dir>0?'BULLISH':sig.dir<0?'BEARISH':'NEUTRAL';
     const cats={}; sig.factors.forEach(f=>{cats[f.cat]=(cats[f.cat]||0)+f.pts;});
     const ledger = sig.factors.slice().sort((a,b)=>Math.abs(b.pts)-Math.abs(a.pts)).slice(0,14);
-    let lrows=ledger.map(f=>`<tr><td>${f.label}</td><td style="color:#5a8;font-size:9px">${f.cat}</td><td style="text-align:right;color:${f.pts>=0?'var(--bull)':'var(--bear)'}">${f.pts>=0?'+':''}${f.pts}</td></tr>`).join('');
+    let lrows=ledger.map(f=>`<tr><td>${f.label}</td><td style="color:#5a8;font-size:10px">${f.cat}</td><td style="text-align:right;color:${f.pts>=0?'var(--bull)':'var(--bear)'}">${f.pts>=0?'+':''}${f.pts}</td></tr>`).join('');
     let ov = sig.overrides.length? sig.overrides.map(o=>`<div style="font-size:10px;color:var(--neut)">⚑ ${o}</div>`).join('') : '<div style="font-size:10px;color:#3a8090">No override flags active</div>';
     const bigCol = sig.color;
     todayCard=`<div class="g2">
       <div>
         <div style="display:flex;align-items:center;gap:14px;padding:10px;background:#021a22;border:1px solid var(--bd2);border-radius:4px">
           <div style="text-align:center;min-width:120px">
-            <div style="font-size:9px;color:#3a8090;letter-spacing:.1em">NET POINTS</div>
+            <div style="font-size:10px;color:#3a8090;letter-spacing:.1em">NET POINTS</div>
             <div style="font-size:38px;font-weight:800;line-height:1;color:${bigCol}">${sig.net>=0?'+':''}${sig.net}</div>
             <div style="font-size:12px;font-weight:700;color:${bigCol}">${dirTxt}</div>
           </div>
           <div style="flex:1">
             <div style="font-size:13px;font-weight:700;color:${bigCol}">${sig.bandLabel}</div>
             <div style="font-size:11px;color:#cde;margin:3px 0 6px">${sig.action}</div>
-            <div style="display:flex;gap:5px;flex-wrap:wrap;font-size:9px">
+            <div style="display:flex;gap:5px;flex-wrap:wrap;font-size:10px">
               <span class="pill" style="background:#031820;color:#6ac8e0">Pos +${sig.pos}</span>
               <span class="pill" style="background:#031820;color:#ff7090">Neg −${sig.neg}</span>
               <span class="pill" style="background:#031820;color:#cde">Moon ${sig.moon.nak} p${sig.moon.pada} · ${(sig.moon.wr*100).toFixed(0)}% wr</span>
@@ -4558,7 +4569,7 @@ function tV44(){
           </div>
         </div>
         <div style="margin-top:8px;padding:8px 10px;background:#021520;border:1px solid #0d3848;border-radius:4px">
-          <div style="font-size:9px;color:#5ad0e8;letter-spacing:.1em;margin-bottom:4px">PANCHANGA · ${S.date}</div>
+          <div style="font-size:10px;color:#5ad0e8;letter-spacing:.1em;margin-bottom:4px">PANCHANGA · ${S.date}</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;font-size:11px;color:#cde">
             <div>Tithi: <b>${sig.panchanga.paksha} ${sig.panchanga.tithi}</b></div>
             <div>Yoga: <b>${sig.panchanga.yoga}</b></div>
@@ -4584,12 +4595,12 @@ function tV44(){
     const dCol = f.dir>0?'var(--bull)':f.dir<0?'var(--bear)':'#778';
     const flags=[]; if(f.gc)flags.push('<span style="color:var(--bear)">GC</span>'); if(f.pa)flags.push('<span style="color:var(--neut)">P/A</span>'); if(f.v8)flags.push('<span style="color:var(--neut)">V8</span>');
     frows+=`<tr>
-      <td style="white-space:nowrap">${f.date}<div style="font-size:8px;color:#3a8090">${f.wd}</div></td>
+      <td style="white-space:nowrap">${f.date}<div style="font-size:10px;color:#3a8090">${f.wd}</div></td>
       <td style="color:${dCol};font-weight:700">${f.dir>0?'▲':f.dir<0?'▼':'•'} ${f.net>=0?'+':''}${f.net}</td>
-      <td style="font-size:9px"><span style="color:${f.color}">${f.band}</span></td>
-      <td style="font-size:9px;color:#6ac8e0">${f.moonNak} p${f.moonPada}<div style="color:#3a8090">${f.wr}% wr</div></td>
-      <td style="font-size:9px;color:#9cc">${f.tithi}<div style="color:#3a8090">${f.yoga} · ${f.karana}</div></td>
-      <td style="font-size:9px;color:#789">${(f.drivers||[]).slice(0,2).join('; ')} ${flags.join(' ')}</td>
+      <td style="font-size:10px"><span style="color:${f.color}">${f.band}</span></td>
+      <td style="font-size:10px;color:#6ac8e0">${f.moonNak} p${f.moonPada}<div style="color:#3a8090">${f.wr}% wr</div></td>
+      <td style="font-size:10px;color:#9cc">${f.tithi}<div style="color:#3a8090">${f.yoga} · ${f.karana}</div></td>
+      <td style="font-size:10px;color:#789">${(f.drivers||[]).slice(0,2).join('; ')} ${flags.join(' ')}</td>
     </tr>`;
   }
   const fwdBull=fwd.filter(f=>f.dir>0).length, fwdBear=fwd.filter(f=>f.dir<0).length;
@@ -4622,34 +4633,35 @@ function tV44(){
   const rangeBtn=(k,lab)=>`<button onclick="gs({v44Range:'${k}'})" class="nb${range===k?' on':''}" style="padding:3px 9px;font-size:10px;border:1px solid ${range===k?'var(--acc)':'#104858'};border-radius:3px">${lab}</button>`;
 
   return `
+  <div class="fats-tab">
   <div class="pnl"><div class="ph"><span class="dot"></span>① TODAY'S SIGNAL — Net Points model (Financial Astrology)</div>
     <div class="pb">${todayCard}</div></div>
 
   <div class="pnl"><div class="ph"><span class="dot"></span>② FORWARD FORECAST — next 90 trading days (signal dates in advance)</div>
     <div class="pb">
       <div style="font-size:10px;color:#3a8090;margin-bottom:6px">Pure-ephemeris projection from ${today}. Bullish days: <b style="color:var(--bull)">${fwdBull}</b> · Bearish: <b style="color:var(--bear)">${fwdBear}</b>. Flags: GC=Guru Chandal, P/A=Purnima/Amavasya, V8=Venus 8H.</div>
-      <div class="ts" style="max-height:340px;overflow:auto"><table class="tbl"><thead><tr><th>Date</th><th>Net / Dir</th><th>Band</th><th>Moon Nak</th><th>Panchanga</th><th>Key drivers</th></tr></thead><tbody>${frows}</tbody></table></div>
+      <details class="coll" open><summary>Forward forecast · next ${fwd.length} trading days — click to collapse</summary><div class="ts" style="max-height:600px;overflow:auto"><table class="tbl"><thead><tr><th>Date</th><th>Net / Dir</th><th>Band</th><th>Moon Nak</th><th>Panchanga</th><th>Key drivers</th></tr></thead><tbody>${frows}</tbody></table></div></details>
     </div></div>
 
   <div class="pnl"><div class="ph"><span class="dot"></span>③ DAILY VALIDATION — real Nifty &amp; Bank Nifty vs the signal · marked correct / wrong each day</div>
     <div class="pb">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-        <span style="font-size:9px;color:#3a8090">WINDOW</span> ${rangeBtn('1y','1Y')} ${rangeBtn('2y','2Y')} ${rangeBtn('3y','3Y')}
-        <span style="font-size:9px;color:#3a8090">live Yahoo daily data — reopen to re-validate with the latest close</span>
+        <span style="font-size:10px;color:#3a8090">WINDOW</span> ${rangeBtn('1y','1Y')} ${rangeBtn('2y','2Y')} ${rangeBtn('3y','3Y')}
+        <span style="font-size:10px;color:#3a8090">live Yahoo daily data — reopen to re-validate with the latest close</span>
         <button onclick="window.V44.loadedKey=null;window.V44.status='idle';v44LoadBoth('${range}')" style="margin-left:auto;background:var(--bg3);color:var(--acc);border:1px solid var(--bd2);padding:4px 10px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px">↻ Reload data</button>
       </div>
-      <div style="font-size:9px;color:#5ad0e8;letter-spacing:.06em;font-weight:700;margin-bottom:4px">WIN / LOSS SCOREBOARD</div>
+      <div style="font-size:10px;color:#5ad0e8;letter-spacing:.06em;font-weight:700;margin-bottom:4px">WIN / LOSS SCOREBOARD</div>
       <div id="v44-score" style="margin-bottom:12px">${v44ScoreboardBoth()}</div>
-      <div style="font-size:9px;color:#5ad0e8;letter-spacing:.06em;font-weight:700;margin-bottom:4px">ACCURACY TIME-SERIES (cumulative win %)</div>
+      <div style="font-size:10px;color:#5ad0e8;letter-spacing:.06em;font-weight:700;margin-bottom:4px">ACCURACY TIME-SERIES (cumulative win %)</div>
       <div id="v44-acc" style="margin-bottom:12px">${v44AccuracyChart()}</div>
-      <div style="font-size:9px;color:#5ad0e8;letter-spacing:.06em;font-weight:700;margin-bottom:4px">DAY-BY-DAY — CORRECT / WRONG (both indices)</div>
-      <div id="v44-bt">${v44RenderBacktestBoth()}</div>
+      <div style="font-size:10px;color:#5ad0e8;letter-spacing:.06em;font-weight:700;margin-bottom:4px">DAY-BY-DAY — CORRECT / WRONG (both indices)</div>
+      <details class="coll"><summary>Day-by-day — correct / wrong, full history (click to expand)</summary><div id="v44-bt">${v44RenderBacktestBoth()}</div></details>
     </div></div>
 
   <div class="pnl"><div class="ph"><span class="dot"></span>④ REPORT BENCHMARK — the report's own published backtest</div>
     <div class="pb">${pub}
-      <div style="font-size:9px;color:#3a8090;margin-top:8px">Live backtest above is a transparent re-implementation on this terminal's JPL-grade ephemeris; the report's numbers cover 2012–2025. Astrology-based timing is a study aid, not investment advice.</div>
-    </div></div>`;
+      <div style="font-size:10px;color:#3a8090;margin-top:8px">Live backtest above is a transparent re-implementation on this terminal's JPL-grade ephemeris; the report's numbers cover 2012–2025. Astrology-based timing is a study aid, not investment advice.</div>
+    </div></div></div>`;
 }
 
 
@@ -6119,7 +6131,7 @@ function tDayForecast(){
     const revs=(f.reversals||[]).slice(0,5).map(r=>`<div style="font-size:10px;color:var(--tx2);white-space:nowrap"><span style="color:var(--acc);font-weight:700">${r.time}</span> ${r.reason}</div>`).join('')||'<div style="font-size:10px;color:var(--tx3)">none flagged</div>';
     return`<div class="pnl" style="border-color:${col}55">
       <div class="ph" style="justify-content:space-between"><span><span class="dot" style="background:${col}"></span>${f.name}</span>
-        <span style="color:var(--tx3);font-size:9px">ruler ${f.ruler}</span></div>
+        <span style="color:var(--tx3);font-size:10px">ruler ${f.ruler}</span></div>
       <div class="pb">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
           <span class="pill ${_dirCls(f.dir)}" style="font-size:13px;padding:3px 12px">${f.dir} ${f.score>0?'+':''}${f.score}</span>
@@ -6150,7 +6162,7 @@ function tDayForecast(){
       <td style="font-weight:700;white-space:nowrap;color:${s.active?'var(--bear)':'var(--tx2)'}">${s.key}</td>
       <td style="text-align:center"><span class="pill ${s.active?'pb-r':'pb-n'}">${s.active?'ACTIVE ▼':'—'}</span></td>
       <td style="font-size:10px;color:var(--tx1)">${s.detail}</td>
-      <td style="font-size:9px;color:var(--tx3)">${s.text}</td></tr>`).join('');
+      <td style="font-size:10px;color:var(--tx3)">${s.text}</td></tr>`).join('');
 
   // Declination shifts (CHAPTER 21)
   const shifts=(D.declShifts||[]).slice(0,8).map(s=>`<tr class="${Math.abs(s.daysFromNow)<=1?'tr-hl':''}">
@@ -6160,13 +6172,13 @@ function tDayForecast(){
       <td style="font-weight:700;color:${s.change.includes('NORTH')?'var(--bear)':'var(--bull)'}">${s.change}</td>
       <td>${s.baseBias}${s.reverse?` <span style="color:var(--neut)">⇄ reversed (${[s.retro?'R':'',s.combust?'combust':'',s.debil?'debil':''].filter(Boolean).join('/')})</span>`:''}</td>
       <td style="font-weight:700;color:${s.dir>0?'var(--bull)':'var(--bear)'}">${s.dir>0?'BULLISH +':'BEARISH −'}</td>
-      <td style="font-size:9px;color:var(--tx3)">${s.note}</td></tr>`).join('');
+      <td style="font-size:10px;color:var(--tx3)">${s.note}</td></tr>`).join('');
 
   return`
-<div style="display:flex;flex-direction:column;gap:10px">
+<div class="dayfc-tab" style="display:flex;flex-direction:column;gap:10px">
   <div class="pnl"><div class="ph"><span class="dot"></span>ASTRO DAY FORECAST · ALL INDICES · ${S.date} · aligned by Shar-Parivartan + Bhadra + SBC + Bhav-Phal + Natal-transit</div>
     <div class="pb"><div class="g3">${cards}</div>
-      <div style="font-size:9px;color:var(--tx3);margin-top:8px">Score = blend of KP/aspect engine + new rule-pack (astroPack ${df.astroPack}, baseDay ${df.baseDay}). ⚡ Strong-move when |score|≥50, a declination turn is active, a Shar(latitude) crossing is ≤2d away, Purnima/Amavasya, or an EXTREME yoga. Nifty=Sun, BankNifty=Moon (rulers); US indices follow the overnight session.</div>
+      <div style="font-size:10px;color:var(--tx3);margin-top:8px">Score = blend of KP/aspect engine + new rule-pack (astroPack ${df.astroPack}, baseDay ${df.baseDay}). ⚡ Strong-move when |score|≥50, a declination turn is active, a Shar(latitude) crossing is ≤2d away, Purnima/Amavasya, or an EXTREME yoga. Nifty=Sun, BankNifty=Moon (rulers); US indices follow the overnight session.</div>
     </div>
   </div>
   <div class="g2">
