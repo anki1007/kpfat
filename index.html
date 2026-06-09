@@ -3061,7 +3061,7 @@ function computeBhavphal(planets, ascSid){
 
 function computeSBC(planets, aspects, rules, dateStr){
   const sig=[];
-  const dow=new Date(dateStr).getDay();
+  const dow=new Date(dateStr+"T00:00:00").getDay();
   const vedhaSum=rules.vedha.reduce((s,v)=>s+v.dir,0);
   sig.push({ n:1, key:'−VE VEDHA', active:vedhaSum<0, dir:-1, w:18,
     text:'जब ग्रहों की वेध नकारात्मक बनती है तब buying support कमजोर होता है और अचानक profit booking देखने मिलती है।',
@@ -3405,7 +3405,7 @@ function eclipseCheck(planets, rules){
 
 function computeRuleX(D){
   const {planets, aspects, rules, J, dayLord, ascSid}=D;
-  const weekday=new Date(D.dateStr).getDay();
+  const weekday=new Date(D.dateStr+"T00:00:00").getDay();
   const paksha=rules.tithi.paksha;
   const sep=(a,b)=>Math.abs(((a.lon-b.lon+180)%360)-180);
   const byName=n=>planets.find(p=>p.name===n);
@@ -3758,7 +3758,7 @@ function computeAll(dateStr,timeIST,ayMode){
       abbr:PA[name]||name.slice(0,2)};
   });
 
-  const dayOfWeek=new Date(dateStr).getDay();
+  const dayOfWeek=new Date(dateStr+"T00:00:00").getDay();
   const dayLord=DAY_LORDS[dayOfWeek];
   const moon=planets.find(p=>p.name==='Moon');
   const rp=[dayLord,moon?.nakL,moon?.sub,ascSub.nakL,ascSub.sub].filter(Boolean);
@@ -3976,7 +3976,7 @@ function render(){
 function rHdr(){
   const D=DATA,b=D.bias;
   const bCls=b.bias==='BULLISH'?'pb-b':b.bias==='BEARISH'?'pb-r':'pb-n';
-  const dateObj=new Date(S.date);
+  const dateObj=new Date(S.date+"T00:00:00");
   const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const mons=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const _loc = LOCATIONS[S.loc] || LOCATIONS['Mumbai'];
@@ -4986,7 +4986,7 @@ function tOverview(){
   return`
 <div class="pnl" style="padding:6px 12px;display:flex;gap:20px;align-items:center;flex-wrap:wrap">
   <div style="font-size:9px;color:#5ad0e8;letter-spacing:.1em;font-weight:700">▦ ${S.date}</div>
-  <div><span style="font-size:9px;color:#3a8090">WEEKDAY</span> <b style="color:var(--tx0);font-size:13px">${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date(S.date).getDay()]}</b></div>
+  <div><span style="font-size:9px;color:#3a8090">WEEKDAY</span> <b style="color:var(--tx0);font-size:13px">${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date(S.date+"T00:00:00").getDay()]}</b></div>
   <div><span style="font-size:9px;color:#3a8090">DAY LORD</span> <b style="color:${pc(D.dayLord)};font-size:13px">${D.dayLord}</b></div>
   <div><span style="font-size:9px;color:#3a8090">LAGNA</span> <b style="color:var(--acc)">${D.ascSign.sign} ${dmsC(D.ascSign.deg)}</b></div>
   <div><span style="font-size:9px;color:#3a8090">SUNRISE</span> <b style="color:var(--tx1)">${mtt(D.rMin)}</b> &middot; <span style="font-size:9px;color:#3a8090">SUNSET</span> <b style="color:var(--tx1)">${mtt(D.sMin)}</b></div>
@@ -5632,7 +5632,7 @@ function tSBC(){
 // ═══════════════════════════════════════════════════════════════════
 function tTiming(){
   const D=DATA;
-  const _hw=new Date(S.date).getDay(), _hp=D.ruleX?D.ruleX.horaNow.paksha:(D.rules?D.rules.tithi.paksha:'Shukla');
+  const _hw=new Date(S.date+"T00:00:00").getDay(), _hp=D.ruleX?D.ruleX.horaNow.paksha:(D.rules?D.rules.tithi.paksha:'Shukla');
   const curMin=parseFloat(S.time)*60;
   return`
 <div style="display:flex;flex-direction:column;gap:10px">
@@ -6491,7 +6491,7 @@ function tTransit(){
 }
 function tGann(){
   const D=DATA;
-  const dateObj=new Date(S.date);
+  const dateObj=new Date(S.date+"T00:00:00");
   const jan1=new Date(dateObj.getFullYear(),0,0);
   const doy=Math.round((dateObj-jan1)/86400000);
 
