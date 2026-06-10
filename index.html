@@ -3325,8 +3325,8 @@ const YOG_BEAR_SHAD = new Set(['0-5','1-8','2-7','3-10','4-9','6-11']);
 const YOG_BULL_DWID = new Set(['1-2','3-4','5-6','7-8','9-10','0-11']);
 const YOG_BEAR_DWID = new Set(['0-1','2-3','4-5','6-7','8-9','10-11']);
 function _pairKey(a,b){ const lo=Math.min(a,b),hi=Math.max(a,b); return lo+'-'+hi; }
-const GROUP_A = new Set(['Moon','Sun','Mars','Jupiter']);
-const GROUP_B = new Set(['Mercury','Venus','Saturn']);
+const GROUP_A = new Set(['Moon','Sun','Mars','Jupiter','Neptune','Pluto']);   // rules/1.jpeg
+const GROUP_B = new Set(['Mercury','Venus','Saturn','Rahu','Ketu','Uranus']); // rules/1.jpeg
 const DEG_DIV = [
   {d:0,pol:+1,name:'Purnansh (Conjunction)'},{d:180,pol:-1,name:'Dwitiyash (Opposition)'},
   {d:120,pol:-1,name:'Tritiyans (Trekon 5/9)'},{d:90,pol:-1,name:'Chaturtayans (Kendra)'},
@@ -3446,11 +3446,141 @@ function computeRuleX(D){
     }
   }
 
-  // 3. Degree-division aspect polarity
-  const degAspects=aspects.map(a=>{
-    const m=DEG_DIV.find(x=>Math.abs(x.d-a.deg)<0.6)||DEG_DIV.find(x=>Math.abs((360-x.d)-a.deg)<0.6);
-    return m? {p1:a.p1,p2:a.p2,abb1:a.abb1,abb2:a.abb2,deg:a.deg,sym:a.sym,pol:m.pol,name:m.name,strength:a.strength}:null;
-  }).filter(Boolean);
+  // 3. DEGREE-DIVISION ASPECTS — Table 2 (rules/3.jpeg p.35) with deeptans orbs,
+  //    rashi-lord gate (30/45), kendra exceptions (90), 5/9-vs-6/8 duals (135/150),
+  //    plus the combust/retro INVERSION rule (rules/1.jpeg p.36).
+  const _comb=n=>rules.combust.some(c=>c.name===n);
+  const _ayR=getAyanamsa(J,(typeof S!=='undefined'&&S.ayMode)||'lahiri');
+  // dynamic benefic set (rules/1.jpeg): Moon within 72° of Sun = malefic;
+  // Mercury in malefic association (≤8°) = malefic
+  const _benR={};
+  {
+    const sunP=byName('Sun');
+    for(const p of core){
+      let b=['Jupiter','Venus','Moon','Mercury'].includes(p.name);
+      if(p.name==='Moon'&&sunP&&sep(p,sunP)<72) b=false;
+      if(p.name==='Mercury') b=!core.some(q=>q!==p&&NATURAL_MALEFIC.has(q.name)&&sep(p,q)<8);
+      _benR[p.name]=b;
+    }
+  }
+  // declination helpers (used by Jay/Prajay and Drasy/Drashta)
+  const decTrendCache={};
+  const declAny=(name,Jx)=>{
+    if(name==='Rahu'||name==='Ketu'){ const lon=((name==='Rahu'?rahuLon(Jx):n360(rahuLon(Jx)+180)))*Math.PI/180;
+      const T=(Jx-2451545)/36525, eps=(23.4392911-0.0130042*T)*Math.PI/180; return Math.asin(Math.sin(eps)*Math.sin(lon))*180/Math.PI; }
+    try{ return declination(name,Jx); }catch(e){ return 0; } };
+  const decOf=n=>{ if(decTrendCache[n]) return decTrendCache[n]; const d0=declAny(n,J), dm=declAny(n,J-1); const r={dec:d0, rising:d0>dm}; decTrendCache[n]=r; return r; };
+  const RULE2=[
+    {d:30, orb:1.17, kind:'lords', nm:'Dwadasans 30°'},
+    {d:45, orb:1.75, kind:'lords', nm:'Ashtamans 45°'},
+    {d:60, orb:2.33, kind:'fix', pol:+1, nm:'Shastans 60°'},
+    {d:72, orb:2.50, kind:'fix', pol:+1, nm:'Panchamans 72°'},
+    {d:90, orb:3.50, kind:'kendra', nm:'Kendra 90°'},
+    {d:120,orb:4.67, kind:'fix', pol:+1, nm:'Trikon 120°'},
+    {d:135,orb:5.25, kind:'rel', nm:'135°'},
+    {d:150,orb:4.83, kind:'rel', nm:'150°'},
+    {d:180,orb:7.00, kind:'fix', pol:-1, nm:'Dwitiyash 180°'}
+  ];
+  const degAspects=[];
+  for(let i=0;i<core.length;i++)for(let j=i+1;j<core.length;j++){
+    const a=core[i], b=core[j]; const dd=sep(a,b);
+    for(const R of RULE2){
+      const orb=R.orb+((a.name==='Moon'||b.name==='Moon')?1:0);   // Moon ±1° (Table 2)
+      if(Math.abs(dd-R.d)>orb) continue;
+      let pol=0, why=R.nm;
+      const relH=Math.min(((a.s-b.s)%12+12)%12,((b.s-a.s)%12+12)%12);
+      if(R.kind==='fix') pol=R.pol;
+      else if(R.kind==='lords'){
+        const la=SLRD[a.s], lb=SLRD[b.s];
+        const fr=(la===lb)||(NAT_FRIEND[la]||[]).includes(lb)||(NAT_FRIEND[lb]||[]).includes(la);
+        pol=fr?+1:-1; why+=fr?' (rashi-naths friends +)':' (rashi-naths not friends −)';
+      }
+      else if(R.kind==='kendra'){
+        const pr=[a.name,b.name];
+        if(pr.includes('Sun')&&pr.includes('Jupiter')){ pol=+1; why+=' (Sun-Jupiter exception +)'; }
+        else if(pr.includes('Mars')&&pr.includes('Saturn')){
+          const ma=a.name==='Mars'?a:b, sa=a.name==='Mars'?b:a;
+          const hMaToSa=((sa.s-ma.s+12)%12)+1;
+          if(hMaToSa===4){ pol=+1; why+=' (Ma→Sa 4th aspect +)'; }
+          else { pol=-1; why+=' (Sa→Ma 4th aspect −)'; }
+        } else pol=-1;
+      }
+      else if(R.kind==='rel'){
+        if(relH===4){ pol=+1; why+=' (5/9 trikon +)'; }
+        else if(relH===5){ const k=_pairKey(a.s,b.s);
+          pol=YOG_BULL_SHAD.has(k)?+1:-1; why+=' (6/8 '+(pol>0?'bullish':'bearish')+')'; }
+        else pol=0;
+      }
+      if(!pol) continue;
+      // INVERSION (rules/1.jpeg): either combust/retro ⇒ opposite result;
+      // exception both mutual friends ⇒ bullish; bearish between enemies ⇒ stays bearish.
+      const rc=(a.retro||b.retro||_comb(a.name)||_comb(b.name));
+      const mutualFriends=(NAT_FRIEND[a.name]||[]).includes(b.name)&&(NAT_FRIEND[b.name]||[]).includes(a.name);
+      const enemies=(NAT_ENEMY[a.name]||[]).includes(b.name)||(NAT_ENEMY[b.name]||[]).includes(a.name);
+      let eff=pol, inv='';
+      if(rc){
+        if(mutualFriends){ eff=Math.abs(pol); inv='combust/retro but friends ⇒ bullish'; }
+        else if(enemies&&pol<0){ eff=pol; inv='enemies + combust/retro ⇒ stays bearish'; }
+        else { eff=-pol; inv='combust/retro ⇒ result inverted'; }
+      }
+      const strength=Math.round((1-Math.abs(dd-R.d)/orb)*100)/100;
+      degAspects.push({p1:a.name,p2:b.name,abb1:a.abbr,abb2:b.abbr,deg:R.d,sym:'∠',
+        actual:Math.round(dd*100)/100,pol:eff,base:pol,inv,name:why,strength});
+      break;
+    }
+  }
+
+  // 3b. ELEMENTS & NATURE (rules/1.jpeg): Fire(1,5,9)+ Air(3,7,11)+ Water(4,8,12)− Earth stable;
+  //     Movable fast / Fixed stable / Dual mixed (informational)
+  const elemCnt={F:0,E:0,A:0,W:0}, natCnt={Movable:0,Fixed:0,Dual:0};
+  core.forEach(p=>{ elemCnt[['F','E','A','W'][p.s%4]]++; natCnt[['Movable','Fixed','Dual'][p.s%3]]++; });
+  const elemNet=Math.max(-4,Math.min(4,Math.round((elemCnt.F+elemCnt.A-elemCnt.W)/2)));
+  const elements={counts:elemCnt, natCnt, net:elemNet,
+    note:`Fire ${elemCnt.F} + Air ${elemCnt.A} (bullish) vs Water ${elemCnt.W} (bearish), Earth ${elemCnt.E} stable · nature: ${natCnt.Movable} movable / ${natCnt.Fixed} fixed / ${natCnt.Dual} dual`};
+
+  // 3c. JAY / PRAJAY (rules/1.jpeg): 0° yukti or Kranti-Samya (±1° declination) —
+  //     victor = north (or less-south) SHAR; benefic victor ⇒ teji, malefic ⇒ mandi;
+  //     timing: victor decl N&increasing ⇒ AFTER, S&decreasing ⇒ BEFORE (till ardh-bhag);
+  //     zone (rules/2.jpeg): 7°Ge→6°Sg = Before-Yoga, 7°Sg→6°Ge = After-Yoga (sayana)
+  const jay=[];
+  for(let i=0;i<core.length;i++)for(let j=i+1;j<core.length;j++){
+    const a=core[i], b=core[j]; const dd=sep(a,b);
+    const da=decOf(a.name).dec, db=decOf(b.name).dec;
+    const isConj=dd<=(7+((a.name==='Moon'||b.name==='Moon')?1:0));
+    const isKS=Math.abs(da-db)<=1;
+    if(!isConj&&!isKS) continue;
+    let la=0, lb=0; try{la=geoLat(a.name,J);}catch(e){} try{lb=geoLat(b.name,J);}catch(e){}
+    const victor=la>=lb?a:b, loser=victor===a?b:a;
+    const bA=_benR[a.name], bB=_benR[b.name];
+    let dir, note;
+    if(bA&&bB){ dir=+1; note='both benefic ⇒ teji (jay/prajay rule not needed)'; }
+    else if(!bA&&!bB){ dir=-1; note='both malefic ⇒ mandi (jay/prajay rule not needed)'; }
+    else { dir=_benR[victor.name]?+1:-1;
+      note=`victor ${victor.name} (${(victor===a?la:lb)>= (victor===a?lb:la)?'north/less-south':'north'} shar) — ${_benR[victor.name]?'benefic ⇒ teji':'malefic ⇒ mandi'}`; }
+    const vd=decOf(victor.name);
+    const timing=vd.dec>=0?(vd.rising?'AFTER aspect · till ardh-bhag':'—'):(!vd.rising?'BEFORE aspect · till ardh-bhag':'—');
+    const tropLon=n360(victor.lon+_ayR);
+    const zone=(tropLon>=67&&tropLon<246)?'Before-Yoga zone':'After-Yoga zone';
+    jay.push({pair:`${a.abbr}–${b.abbr}`,type:isConj?'Yukti 0°':'Kranti-Samya',victor:victor.name,loser:loser.name,
+      lat:`${la.toFixed(2)}° / ${lb.toFixed(2)}°`,dir,note,timing,zone});
+  }
+  const jayNet=Math.max(-3,Math.min(3,jay.reduce((s,x)=>s+x.dir,0)));
+
+  // 3d. SHAR PARIVARTAN polarity (rules/6.jpeg): latitude S→N = bearish, N→S = bullish;
+  //     debilitated/combust/retro ⇒ result OPPOSITE. Active window ±2 days.
+  const sharRows=[];
+  for(const c of (D.sharCrossings||[])){
+    if(Math.abs(c.daysFromNow)>2) continue;
+    const p=byName(c.body); if(!p) continue;
+    const toN=c.direction.indexOf('S→N')===0;
+    let dir=toN?-1:+1;
+    const debil=(NEECHA[c.body]!==undefined)&&(p.s===NEECHA[c.body]);
+    const rev=p.retro||_comb(c.body)||debil;
+    if(rev) dir=-dir;
+    sharRows.push({body:c.body,when:c.daysFromNow,direction:c.direction,dir,
+      note:(toN?'entering North ⇒ bearish':'entering South ⇒ bullish')+(rev?` ⇄ REVERSED (${[p.retro?'retro':'',_comb(c.body)?'combust':'',debil?'debilitated':''].filter(Boolean).join('/')})`:'')});
+  }
+  const sharNet=Math.max(-3,Math.min(3,sharRows.reduce((s,x)=>s+x.dir,0)));
 
   // 4. P K Vasudev per-planet effect
   const vasu=[];
@@ -3472,26 +3602,22 @@ function computeRuleX(D){
   let horaFav=0, horaUnfav=0;
   for(const s of (D.slots||[])){ const c=horaClass(s.planet, weekday, paksha); if(c>0)horaFav++; else if(c<0)horaUnfav++; }
 
-  // 6. Drasy / Drashta BEFORE-AFTER
+  // 6. Drasy / Drashta BEFORE-AFTER (dynamic benefics per rules/1.jpeg)
   const drasy=[];
-  const decTrendCache={};
-  const declAny=(name,Jx)=>{
-    if(name==='Rahu'||name==='Ketu'){ const lon=((name==='Rahu'?rahuLon(Jx):n360(rahuLon(Jx)+180)))*Math.PI/180;
-      const T=(Jx-2451545)/36525, eps=(23.4392911-0.0130042*T)*Math.PI/180; return Math.asin(Math.sin(eps)*Math.sin(lon))*180/Math.PI; }
-    try{ return declination(name,Jx); }catch(e){ return 0; } };
-  const decOf=n=>{ if(decTrendCache[n]) return decTrendCache[n]; const d0=declAny(n,J), dm=declAny(n,J-1); const r={dec:d0, rising:d0>dm}; decTrendCache[n]=r; return r; };
   for(const a of aspects.slice(0,8)){
     const p1=byName(a.p1), p2=byName(a.p2); if(!p1||!p2) continue;
     let decisive=null, looser=null;
     if(p1.h>=7 && p2.h<=6){decisive=p1;looser=p2;} else if(p2.h>=7 && p1.h<=6){decisive=p2;looser=p1;}
     else { decisive = p1.h>=p2.h?p1:p2; looser = decisive===p1?p2:p1; }
-    const benefic=SHUBH_SET.has(decisive.name);
+    const benefic=(_benR[decisive.name]!==undefined)?_benR[decisive.name]:SHUBH_SET.has(decisive.name);
     const dd=decOf(decisive.name);
     let timing;
     if(dd.dec>=0) timing = dd.rising ? 'AFTER' : 'BEFORE';
     else timing = dd.rising===false ? 'AFTER' : 'BEFORE';
+    const tropD=n360(decisive.lon+_ayR);
     drasy.push({pair:`${a.abb1}${a.sym}${a.abb2}`, decisive:decisive.name, looser:looser.name,
       effect:benefic?'Teji (bullish)':'Mandi (bearish)', dir:benefic?+1:-1, timing,
+      zone:(tropD>=67&&tropD<246)?'Before-Yoga':'After-Yoga',
       decl:dd.dec.toFixed(1)+(dd.dec>=0?'N':'S')});
   }
 
@@ -3524,7 +3650,7 @@ function computeRuleX(D){
   const lunarDist=apogeePerigee(J);
   const eclipse=eclipseCheck(planets, rules);
 
-  // NET SCORE
+  // NET SCORE — every rule family from rules/1-6.jpeg contributes
   const yogNet   = yogs.reduce((s,y)=>s+y.eff,0);
   const grpNet   = groupRules.reduce((s,g)=>s+g.pol,0);
   const degNet   = degAspects.reduce((s,a)=>s+a.pol*a.strength,0);
@@ -3534,11 +3660,12 @@ function computeRuleX(D){
   const horaNet  = horaNow.cls*2 + Math.sign(horaFav-horaUnfav);
   const eclNet   = eclipse.active? -1 : 0;
   const netScore = Math.max(-100,Math.min(100, Math.round(
-      yogNet*6 + grpNet*1.5 + degNet*4 + vasuNet*4 + tithiNet*5 + moonNet*4 + horaNet*3 + eclNet*4 )));
+      yogNet*6 + grpNet*1.5 + degNet*4 + vasuNet*4 + tithiNet*5 + moonNet*4 + horaNet*3 + eclNet*4
+      + elemNet*2 + jayNet*4 + sharNet*5 )));
 
   return { yogs, groupRules, degAspects, vasu, horaNow, horaFav, horaUnfav, drasy,
-           moonRules, tithiRules, lunarDist, eclipse,
-           sub:{yogNet,grpNet,degNet,vasuNet,tithiNet,moonNet,horaNet,eclNet}, netScore };
+           moonRules, tithiRules, lunarDist, eclipse, elements, jay, sharRows, benefics:_benR,
+           sub:{yogNet,grpNet,degNet,vasuNet,tithiNet,moonNet,horaNet,eclNet,elemNet,jayNet,sharNet}, netScore };
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3681,14 +3808,21 @@ function buildIndexForecast(D){
              reversals: forecast? forecast.reversals : [],
              move: strong?(dir==='BULLISH'?'STRONG UP likely':dir==='BEARISH'?'STRONG DOWN likely':'BIG MOVE either side'):'normal range' };
   }
+  // SBC vedha engine contribution (Vyaapar Ratna): net vishva × 6, capped ±30
+  const sv=D.sbcVedha;
+  const svPts=v=>v?Math.max(-30,Math.min(30,Math.round(v.net*6*10)/10)):0;
+  const svDrv=(v,pts)=>v?`SBC वेध ${v.net>0?'तेजी':v.net<0?'मंदी':'सम'} ${v.net>0?'+':''}${v.net} विश्वा → ${pts>0?'+':''}${pts}`:'';
+  const nfSBC=svPts(sv&&sv.nifty), bnSBC=svPts(sv&&sv.bn);
   const sunC=planetCondition('Sun',planets,aspects);
-  const nfScore = baseDay + sunC.score*4 + (natalTransit?natalTransit.score*3:0) + Math.max(-15,Math.min(15,bhavNatal.marketScore*1.5));
+  const nfScore = baseDay + sunC.score*4 + nfSBC + (natalTransit?natalTransit.score*3:0) + Math.max(-15,Math.min(15,bhavNatal.marketScore*1.5));
   const nfDrivers=[`base ${baseDay}`,`Sun(ruler) ${sunC.score} [${sunC.notes.join(', ')}]`,
+                   svDrv(sv&&sv.nifty,nfSBC),
                    natalTransit?`natal-transit ${natalTransit.score}`:'', `natal-bhav ${bhavNatal.marketScore}`].filter(Boolean);
   const moonC=planetCondition('Moon',planets,aspects);
   const mercCombust=rules.combust.some(c=>c.name==='Mercury');
-  const bnScore = baseDay + moonC.score*4 + (mercCombust?-15:0) + (rules.moonDecl.movingToward==='NORTH'?-8:+6) + (rules.moonOpp>4?-10:0);
+  const bnScore = baseDay + moonC.score*4 + bnSBC + (mercCombust?-15:0) + (rules.moonDecl.movingToward==='NORTH'?-8:+6) + (rules.moonOpp>4?-10:0);
   const bnDrivers=[`base ${baseDay}`,`Moon(ruler) ${moonC.score} [${moonC.notes.join(', ')}]`,
+                   svDrv(sv&&sv.bn,bnSBC),
                    mercCombust?'Mercury combust −15 (confusion/false-breakout)':'', `Moon decl ${rules.moonDecl.movingToward}`].filter(Boolean);
   const usBase = clamp(baseDay*0.65);
   const usShock=(forecast&&forecast.usFlag);
@@ -3849,8 +3983,13 @@ function computeAll(dateStr,timeIST,ayMode){
     + forecastDirScore    * 0.12
   );
   const combinedLabel = combinedScore>15?'BULLISH':combinedScore<-15?'BEARISH':'NEUTRAL';
-  const ruleX = computeRuleX({planets, aspects, rules, J, dayLord, ascSid, dateStr, timeIST, slots});
-  const astroDF = buildIndexForecast({planets, aspects, rules, forecast, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, combinedScore, sharCrossings, ruleX});
+  const ruleX = computeRuleX({planets, aspects, rules, J, dayLord, ascSid, dateStr, timeIST, slots, sharCrossings});
+  // SBC vedha engine (Vyaapar Ratna) — instrument-level तेजी/मंदी in vishvas, folded into the day forecast
+  let sbcVedha=null;
+  try{ const _ss=sbcSnapshot(J,ayMode);
+    sbcVedha={ nifty:sbcVerdict(_ss,SBC_INSTR[0]), bn:sbcVerdict(_ss,SBC_INSTR[1]), sensex:sbcVerdict(_ss,SBC_INSTR[2]) };
+  }catch(e){ sbcVedha=null; }
+  const astroDF = buildIndexForecast({planets, aspects, rules, forecast, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, combinedScore, sharCrossings, ruleX, sbcVedha});
 
   return{J,ay,ayMode,ascSid,ascSign,ascSub,ascNak,mcSid,planets,dayLord,moon,rp,
     rMin,sMin,hlMin,phpHours,slots,bias,dateStr,timeIST,
@@ -3864,7 +4003,7 @@ function computeAll(dateStr,timeIST,ayMode){
     // forecast engine
     forecast, forecastDirScore,
     combinedScore, combinedLabel,
-    natal, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, slots5, astroDF, ruleX};
+    natal, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, slots5, astroDF, ruleX, sbcVedha};
 }
 
 function mtt(m){let h=Math.floor(m/60),mn=Math.floor(m%60);return`${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}`;}
@@ -5511,16 +5650,17 @@ function sbcVerdict(snap,instr){
   return {instr,lord,rows,mandi,teji,net,dir,moonFlip,paksha:snap.tith.paksha,tithiWorth};
 }
 // 15-min intraday matrix: every slot × every instrument
-function sbcIntraday(ayMode){
+function sbcIntraday(ayMode,keys){
   const dp=S.date.split('-').map(Number);
   const loc=(typeof LOCATIONS!=='undefined'&&LOCATIONS[S.loc])||{open:9.25,close:15.5,abbr:'IST'};
   const Jmid=JD(dp[0],dp[1],dp[2],12);
   const gatiCache={}; ['Mars','Mercury','Jupiter','Venus','Saturn'].forEach(n=>{gatiCache[n]=planetSpeed(n,Jmid);});
+  const instrList=keys?SBC_INSTR.filter(i=>keys.includes(i.key)):SBC_INSTR;
   const slots=[]; const nSlots=Math.round((loc.close-loc.open)/0.25);
   for(let k=0;k<=nSlots;k++){
     const t=Math.round((loc.open+k*0.25)*100)/100;
     const snap=sbcSnapshot(JD(dp[0],dp[1],dp[2],t),ayMode,gatiCache);
-    const verdicts={}; SBC_INSTR.forEach(ins=>{verdicts[ins.key]=sbcVerdict(snap,ins);});
+    const verdicts={}; instrList.forEach(ins=>{verdicts[ins.key]=sbcVerdict(snap,ins);});
     const moon=snap.planets.find(p=>p.name==='Moon');
     slots.push({t,verdicts,moonNak:moon.nak.n,moonPada:moon.nak.pada,paksha:snap.tith.paksha});
   }
@@ -6278,7 +6418,7 @@ function tDayForecast(){
   const cards=order.map(k=>{
     const f=df.indices[k];
     const col=_dirCol(f.dir);
-    const revs=(f.reversals||[]).slice(0,5).map(r=>`<div style="font-size:10px;color:var(--tx2);white-space:nowrap"><span style="color:var(--acc);font-weight:700">${r.time}</span> ${r.reason}</div>`).join('')||'<div style="font-size:10px;color:var(--tx3)">none flagged</div>';
+    const revs=(f.reversals||[]).slice(0,5).map(r=>`<div style="font-size:10px;color:var(--tx2);margin-bottom:2px;line-height:1.45"><span style="color:var(--acc);font-weight:700">${r.time}</span> ${r.reason}</div>`).join('')||'<div style="font-size:10px;color:var(--tx3)">none flagged</div>';
     return`<div class="pnl" style="border-color:${col}55">
       <div class="ph" style="justify-content:space-between"><span><span class="dot" style="background:${col}"></span>${f.name}</span>
         <span style="color:var(--tx3);font-size:10px">ruler ${f.ruler}</span></div>
@@ -6324,13 +6464,77 @@ function tDayForecast(){
       <td style="font-weight:700;color:${s.dir>0?'var(--bull)':'var(--bear)'}">${s.dir>0?'BULLISH +':'BEARISH −'}</td>
       <td style="font-size:10px;color:var(--tx3)">${s.note}</td></tr>`).join('');
 
+  // SBC vedha engine panel (Vyaapar Ratna) + 15-min mini strips for NIFTY & BANKNIFTY
+  const SV=D.sbcVedha;
+  let sbcVedhaPanel='';
+  if(SV){
+    const SID=sbcIntraday(S.ayMode,['nifty','bn']);
+    const strip=(key)=>{ const W=1000,H=26;
+      const n=SID.slots.length, cw=W/n;
+      let r2='';
+      SID.slots.forEach((s,i)=>{ const v=s.verdicts[key]; if(!v)return; const net=v.net;
+        const a=Math.min(0.9,0.12+Math.abs(net)/6);
+        const fill=net>0.05?`rgba(0,200,90,${a})`:net<-0.05?`rgba(255,40,70,${a})`:'rgba(120,140,150,0.12)';
+        r2+=`<rect x="${(i*cw).toFixed(1)}" y="0" width="${cw.toFixed(1)}" height="${H}" fill="${fill}"><title>${mtt(s.t*60)} · ${net>0?'+':''}${net} विश्वा</title></rect>`; });
+      let ticks=''; for(let h=Math.ceil(SID.open);h<=SID.close;h+=1){ const x=((h-SID.open)/(SID.close-SID.open))*W;
+        ticks+=`<line x1="${x.toFixed(1)}" y1="0" x2="${x.toFixed(1)}" y2="${H}" stroke="#02141c" stroke-width=".6"/>`; }
+      return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:16px;display:block;border-radius:2px">${r2}${ticks}</svg>`; };
+    const svRow=(label,v,stripKey)=>{ if(!v)return''; const c=v.dir==='TEJI'?'var(--bull)':v.dir==='MANDI'?'var(--bear)':'var(--neut)';
+      const lbl=v.dir==='TEJI'?'तेजी ▲':v.dir==='MANDI'?'मंदी ▼':'सम •';
+      const top=v.rows.filter(r=>r.vishva>0).sort((a,b)=>b.vishva-a.vishva).slice(0,2).map(r=>`${r.planet} ${r.side==='teji'?'▲':'▼'}${r.vishva}`).join(' · ')||'no vedha';
+      return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:5px">
+        <span style="min-width:86px;font-size:11px;font-weight:700;color:var(--tx0)">${label}</span>
+        <span style="font-weight:800;color:${c};font-size:12px;min-width:84px">${lbl} ${v.net>0?'+':''}${v.net}</span>
+        <span style="font-size:9px;color:var(--tx2);flex:1">${top} · स्वामी ${v.lord} · ${v.paksha} पक्ष${v.moonFlip?' · चन्द्र+पाप→तेजी':''}</span>
+        ${stripKey?`<div style="flex-basis:100%">${strip(stripKey)}</div>`:''}
+      </div>`; };
+    sbcVedhaPanel=`
+  <div class="pnl"><div class="ph"><span class="dot"></span>★ SBC वेध ENGINE (व्यापार रत्न) — scored into NIFTY & BANKNIFTY above · 15-min bias strips</div>
+    <div class="pb">
+      ${svRow('NIFTY (न)',SV.nifty,'nifty')}
+      ${svRow('BANKNIFTY (ब→व)',SV.bn,'bn')}
+      ${svRow('SENSEX (स)',SV.sensex,null)}
+      <div style="font-size:9px;color:var(--tx3);margin-top:4px">Net विश्वा × 6 (capped ±30) feeds each index score. Book rule: शेष विश्वे सौम्य ⇒ मंदी · क्रूर ⇒ तेजी (p.47). Full limb-by-limb workings, chakra lines & all-instrument heatmap in the <b style="color:var(--acc)">SBC Grid</b> tab.</div>
+    </div>
+  </div>`;
+  }
+  // RULE-PACK breakdown panel (rules/1-6.jpeg) — every component visible
+  const RX=D.ruleX||{}, RSB=RX.sub||{};
+  const rpChip=(l,v)=>{v=Math.round((v??0)*10)/10;
+    return `<span style="display:inline-block;margin:2px 3px;padding:2px 8px;border-radius:3px;font-size:10px;font-family:monospace;background:${v>0?'rgba(0,200,90,.13)':v<0?'rgba(255,40,70,.13)':'var(--bg2)'};color:${v>0?'var(--bull)':v<0?'var(--bear)':'var(--tx2)'};border:1px solid ${v>0?'var(--bull2)':v<0?'var(--bear2)':'var(--bd)'}">${l} ${v>0?'+':''}${v}</span>`;};
+  const rpDegRows=(RX.degAspects||[]).slice(0,6).map(a=>`<div style="font-size:10px;color:var(--tx1);line-height:1.5">• <b style="color:${PC[a.p1]||'var(--tx0)'}">${a.p1}</b>–<b style="color:${PC[a.p2]||'var(--tx0)'}">${a.p2}</b> ${a.actual}° → ${a.name} <b style="color:${a.pol>0?'var(--bull)':'var(--bear)'}">${a.pol>0?'+':''}${a.pol}</b>${a.inv?` <span style="color:var(--neut)">⇄ ${a.inv}</span>`:''}</div>`).join('')||'<div style="font-size:10px;color:var(--tx3)">no Table-2 degree aspect in deeptans orb</div>';
+  const rpJayRows=(RX.jay||[]).slice(0,5).map(x=>`<div style="font-size:10px;color:var(--tx1);line-height:1.5">• ${x.pair} <span style="color:var(--tx3)">(${x.type})</span> — victor <b style="color:${PC[x.victor]||'var(--tx0)'}">${x.victor}</b> (shar ${x.lat}) → <b style="color:${x.dir>0?'var(--bull)':'var(--bear)'}">${x.dir>0?'तेजी':'मंदी'}</b> · ${x.timing} · ${x.zone}</div>`).join('');
+  const rpSharRows=(RX.sharRows||[]).map(x=>`<div style="font-size:10px;color:var(--tx1);line-height:1.5">• <b style="color:${PC[x.body]||'var(--tx0)'}">${x.body}</b> ${x.direction} (${x.when>0?'+':''}${x.when}d) → <b style="color:${x.dir>0?'var(--bull)':'var(--bear)'}">${x.dir>0?'BULLISH +':'BEARISH −'}</b> · ${x.note}</div>`).join('');
+  const rulePackPanel=`
+  <div class="pnl"><div class="ph"><span class="dot"></span>⚖ RULE-PACK (rules/1-6.jpeg) — all components → astroPack ${df.astroPack} (×0.5 in base)</div>
+    <div class="pb">
+      <div style="margin-bottom:6px">
+        ${rpChip('Shadastak/Dwidwadash',RSB.yogNet)}${rpChip('2/12·3/11·6/8',RSB.grpNet)}${rpChip('Degree Table-2',RSB.degNet)}${rpChip('Vasudev',RSB.vasuNet)}${rpChip('Tithi',RSB.tithiNet)}${rpChip('Moon',RSB.moonNet)}${rpChip('Hora',RSB.horaNet)}${rpChip('Eclipse',RSB.eclNet)}${rpChip('Elements',RSB.elemNet)}${rpChip('Jay/Prajay',RSB.jayNet)}${rpChip('Shar ±2d',RSB.sharNet)}
+        <span style="display:inline-block;margin:2px 6px;font-size:11px;font-weight:800;color:${(RX.netScore||0)>0?'var(--bull)':(RX.netScore||0)<0?'var(--bear)':'var(--tx2)'}">Σ net ${RX.netScore>0?'+':''}${RX.netScore||0}</span>
+      </div>
+      <div class="g2" style="gap:8px">
+        <div>
+          <div style="font-size:9px;color:var(--tx3);margin-bottom:2px">DEGREE ASPECTS (Table-2 orbs · Moon +1° · inversion rule applied)</div>
+          ${rpDegRows}
+        </div>
+        <div>
+          <div style="font-size:9px;color:var(--tx3);margin-bottom:2px">JAY/PRAJAY (यु​ति/क्रान्ति-साम्य · victor by north shar) & SHAR ±2d</div>
+          ${rpJayRows||'<div style="font-size:10px;color:var(--tx3)">no yukti / kranti-samya pair active</div>'}
+          ${rpSharRows||'<div style="font-size:10px;color:var(--tx3)">no shar (latitude) crossing within ±2 days</div>'}
+        </div>
+      </div>
+      <div style="font-size:9px;color:var(--tx3);margin-top:6px">${RX.elements?RX.elements.note:''} · Benefics today (dynamic, 1.jpeg): ${RX.benefics?Object.keys(RX.benefics).filter(k=>RX.benefics[k]).join(', '):'—'} <span style="color:var(--bd2)">(Moon &lt;72° of Sun ⇒ malefic · Mercury with malefic ⇒ malefic)</span></div>
+    </div>
+  </div>`;
   return`
 <div class="dayfc-tab" style="display:flex;flex-direction:column;gap:10px">
-  <div class="pnl"><div class="ph"><span class="dot"></span>ASTRO DAY FORECAST · ALL INDICES · ${S.date} · aligned by Shar-Parivartan + Bhadra + SBC + Bhav-Phal + Natal-transit</div>
+  <div class="pnl"><div class="ph"><span class="dot"></span>ASTRO DAY FORECAST · ALL INDICES · ${S.date} · aligned by Shar-Parivartan + Bhadra + SBC वेध + Bhav-Phal + Natal-transit</div>
     <div class="pb"><div class="g3">${cards}</div>
-      <div style="font-size:10px;color:var(--tx3);margin-top:8px">Score = blend of KP/aspect engine + new rule-pack (astroPack ${df.astroPack}, baseDay ${df.baseDay}). ⚡ Strong-move when |score|≥50, a declination turn is active, a Shar(latitude) crossing is ≤2d away, Purnima/Amavasya, or an EXTREME yoga. Nifty=Sun, BankNifty=Moon (rulers); US indices follow the overnight session.</div>
+      <div style="font-size:10px;color:var(--tx3);margin-top:8px">Score = blend of KP/aspect engine + rule-pack (astroPack ${df.astroPack}, baseDay ${df.baseDay}) + SBC वेध engine (net विश्वा × 6, Vyaapar Ratna). ⚡ Strong-move when |score|≥50, a declination turn is active, a Shar(latitude) crossing is ≤2d away, Purnima/Amavasya, or an EXTREME yoga. Nifty=Sun, BankNifty=Moon (rulers, ch.20); US indices follow the overnight session.</div>
     </div>
   </div>
+  ${sbcVedhaPanel}
+  ${rulePackPanel}
   <div class="g2">
     <div class="pnl"><div class="ph"><span class="dot"></span>◐ BHADRA (Vishti Karana) — bhadra.md</div><div class="pb">${bhBody}</div></div>
     <div class="pnl"><div class="ph"><span class="dot"></span>⟐ DECLINATION CHANGE — Shar Parivartan / CHAPTER 21</div>
@@ -7291,4 +7495,5 @@ fetchPrices();
 scheduleAutoRefresh();
 
 </script>
-</body
+</body>
+</html>
