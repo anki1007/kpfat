@@ -4405,7 +4405,7 @@ function v44RenderBacktest(inst){
     return `<div style="padding:18px;border:1px solid var(--bear2);border-radius:4px;background:#1a0008">
       <div style="color:var(--bear);font-weight:700;font-size:12px">⚠ Live market data unavailable (${window.V44.err})</div>
       <div style="font-size:10px;color:#c9a;margin-top:6px">The CORS proxies that fetch Yahoo daily candles are unreachable right now. The forecast and today's signal above still work (pure ephemeris). Use the button to retry, or open the file when online.</div>
-      <button onclick="window.V44.loadedKey=null;v44LoadBacktest('${inst}', S.v44Range||'2y')" style="margin-top:8px;background:var(--bg3);color:var(--acc);border:1px solid var(--bd2);padding:5px 12px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px">↻ Retry data fetch</button></div>`;
+      <button onclick="window.V44.loadedKey=null;window.V44.status='idle';v44LoadBoth(S.v44Range||'2y')" style="margin-top:8px;background:var(--bg3);color:var(--acc);border:1px solid var(--bd2);padding:5px 12px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px">↻ Retry data fetch</button></div>`;
   }
   const bt=window.V44.bt[inst];
   if(!bt) return `<div style="padding:18px;color:#3a8090">Select an instrument to run the backtest.</div>`;
@@ -5308,325 +5308,475 @@ function tCharts(){
 // ═══════════════════════════════════════════════════════════════════
 // TAB: SBC
 // ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+// SARVATOBHADRA CHAKRA — व्यापार रत्न VEDHA ENGINE
+// Faithful implementation of Vyaapar_ratna_part_1.md, second chapter:
+// "सर्वतोभद्र की वेध-पद्धति द्वारा व्यापारिक भविष्य-ज्ञान" (pp. 29-52)
+// ───────────────────────────────────────────────────────────────────
+// THE BOOK'S RULES (encoded below, nothing invented):
+//  1. वेध दिशा by गति — among Mars/Mercury/Jupiter/Venus/Saturn a planet
+//     वक्री pierces to its RIGHT, शीघ्री to its LEFT, मध्यचारी to the FRONT.
+//     Sun & Moon (सदा मार्गी) and Rahu & Ketu (सदा वक्री) pierce ALL THREE
+//     directions at all times.
+//  2. कोण वेध — a planet in pada-4 of Bharani/Ashlesha/Vishakha/Shravana or
+//     pada-1 of Krittika/Magha/Anuradha/Dhanishtha pierces the corner svara
+//     diagonal (gati-independent).
+//  3. वर्णादि पञ्चक — every tradable derives 5 limbs from its first letter:
+//     वर्ण, स्वर, तिथि-संज्ञा, नक्षत्र, राशि (tables on pp. 34-36).
+//  4. सौम्य/क्रूर — Moon Mercury Jupiter Venus are सौम्य; Sun Mars Saturn
+//     Rahu Ketu क्रूर. Mercury TURNS क्रूर in a krura planet's navamsha;
+//     Moon TURNS क्रूर when क्षीण (Krishna-11 → Shukla-5).
+//  5. दृष्टि gate — vedha bears fruit ONLY with drishti on the pierced
+//     varna's rashi: full on 7th; ¾ on 4/8; ½ on 5/9; ¼ on 3/10
+//     (Mars full on 4/8, Jupiter on 5/9, Saturn on 3/10); a planet always
+//     fully aspects its own navamsha. वेध without दृष्टि = NO fruit.
+//  6. वेधफल by स्वामी-सम्बन्ध — saumya vedhaka: svami×1, mitra×¾, sama×½,
+//     shatru×¼; krura vedhaka: svami×¼, mitra×½, sama×¾, shatru×1 (p.44).
+//  7. विश्वा quota — 20 vishvas split: each saumya graha max 5 (=1/limb),
+//     each krura max 4 (=0.8/limb), scaled by limbs pierced × drishti.
+//  8. तिथि-वेध — full fruit in Shukla paksha, HALF in Krishna paksha.
+//  9. NET — subtract smaller side from larger: remainder SAUMYA ⇒ मंदी
+//     (bearish), remainder KRURA ⇒ तेजी (bullish). [p.47 — note the
+//     inversion: shubha vedha = mandi, papa vedha = teji]
+// 10. टकेवार — the day/month/year opening price = 20 vishvas; each net
+//     vishva moves price by 1/20th of that anchor until period end.
+// 11. चन्द्र exception (p.224): Moon co-piercing WITH a papa graha turns
+//     तेजीकारक (its vishva shifts to the teji side).
+// 12. Virgo is co-ruled by Mercury & Rahu, Pisces by Jupiter & Ketu —
+//     whichever is stronger (uccha-bala) acts as lord (p.39).
+// ═══════════════════════════════════════════════════════════════════
+const SBC_EAST=[2,3,4,5,6,7,8], SBC_SOUTH=[9,10,11,12,13,14,15],
+      SBC_WEST=[21,'AB',20,19,18,17,16], SBC_NORTH=[1,0,26,25,24,23,22];
+const SBC_RINGPOS={};
+SBC_EAST .forEach((k,i)=>SBC_RINGPOS[k]={r:0,  c:1+i,edge:'E'});
+SBC_SOUTH.forEach((k,i)=>SBC_RINGPOS[k]={r:1+i,c:8,  edge:'S'});
+SBC_WEST .forEach((k,i)=>SBC_RINGPOS[k]={r:8,  c:1+i,edge:'W'});
+SBC_NORTH.forEach((k,i)=>SBC_RINGPOS[k]={r:1+i,c:0,  edge:'N'});
+const SBC_AK={
+ '1,1':['00','उ'],'1,2':['A','अ'],'1,3':['VA','व'],'1,4':['KA','क'],'1,5':['HA','ह'],'1,6':['DA','ड'],'1,7':['00','ऊ'],
+ '2,1':['LA','ल'],'2,2':['LRI','लृ'],'2,6':['LREE','लॣ'],'2,7':['MA','म'],
+ '3,1':['CHA','च'],'3,3':['O','ओ'],'3,5':['OU','औ'],'3,7':['TA','ट'],
+ '4,1':['DHA','ध'],'4,7':['PA','प'],
+ '5,1':['SA','स'],'5,3':['AHA','अः'],'5,5':['AM','अं'],'5,7':['RA','र'],
+ '6,1':['GA','ग'],'6,2':['AEI','ऐ'],'6,6':['AE','ए'],'6,7':['THA','त'],
+ '7,1':['REE','ॠ'],'7,2':['KHA','ख'],'7,3':['JA','ज'],'7,4':['BHA','भ'],'7,5':['YA','य'],'7,6':['NA','न'],'7,7':['RE','ऋ']
+};
+const SBC_RASHI=[[2,3,2],[2,4,3],[2,5,4],[3,6,5],[4,6,6],[5,6,7],[6,5,8],[6,4,9],[6,3,10],[5,2,11],[4,2,12],[3,2,1]];
+const SBC_RASHI_CELL={}; SBC_RASHI.forEach(rc=>{SBC_RASHI_CELL[rc[2]-1]=rc[0]+','+rc[1];});
+const SBC_TITHI_CELL={NANDA:'3,4',RIKTA:'4,3',PURNA:'4,4',BHADRA:'4,5',JAYA:'5,4'};
+// corner vedha triggers (book: ईशान भरणी-कृत्तिका · आग्नेय आश्लेषा-मघा · विशाखा-अनुराधा · श्रवण-धनिष्ठा; pada 4 of the earlier, pada 1 of the later)
+const SBC_CORNER_TRIG={1:{pada:4,corner:[0,0]},2:{pada:1,corner:[0,0]},8:{pada:4,corner:[0,8]},9:{pada:1,corner:[0,8]},
+                       15:{pada:4,corner:[8,8]},16:{pada:1,corner:[8,8]},21:{pada:4,corner:[8,0]},22:{pada:1,corner:[8,0]}};
+const SBC_GRAHAS=['Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn','Rahu','Ketu'];
+const SBC_KRURA_BASE=new Set(['Sun','Mars','Saturn','Rahu','Ketu']);
+const SBC_FAST={Mars:0.60,Mercury:1.40,Jupiter:0.13,Venus:1.20,Saturn:0.095}; // °/day — faster ⇒ शीघ्री
+// परम उच्च [signIdx, deg] from the book's chart (p.39); नीच = opposite point
+const SBC_UCCHA={Sun:[0,10],Moon:[1,3],Mars:[9,28],Mercury:[5,15],Jupiter:[3,5],Venus:[11,27],Saturn:[6,20],Rahu:[2,15],Ketu:[8,15]};
+// Instruments — वर्णादि पञ्चक built from the book's own tables (pp.34-36).
+// चाँदी validated by the book itself: च → ओ स्वर, पूर्णा तिथि, रेवती नक्षत्र.
+const SBC_INSTR=[
+ {key:'nifty', name:'NIFTY 50',   dev:'निफ्टी',     letter:'न',     varnaCell:'7,6', svara:'उ', svaraCell:'1,1', tithiGrp:'JAYA',  nakRing:16, nakPada:1, rashi:7,  anchor:'nifty'},
+ {key:'bn',    name:'BANK NIFTY', dev:'बैंक निफ्टी', letter:'ब→व',  varnaCell:'1,3', svara:'ओ', svaraCell:'3,3', tithiGrp:'PURNA', nakRing:3,  nakPada:2, rashi:1,  anchor:'bn'},
+ {key:'sensex',name:'SENSEX',     dev:'सेंसेक्स',    letter:'स (से)', varnaCell:'5,1', svara:'ए', svaraCell:'6,6', tithiGrp:'RIKTA', nakRing:24, nakPada:1, rashi:10},
+ {key:'gold',  name:'GOLD',       dev:'सोना',       letter:'स (सो)', varnaCell:'5,1', svara:'ए', svaraCell:'6,6', tithiGrp:'RIKTA', nakRing:24, nakPada:2, rashi:10},
+ {key:'silver',name:'SILVER',     dev:'चाँदी',      letter:'च',     varnaCell:'3,1', svara:'ओ', svaraCell:'3,3', tithiGrp:'PURNA', nakRing:26, nakPada:3, rashi:11},
+ {key:'crude', name:'CRUDE OIL',  dev:'कच्चा तेल',  letter:'त (ते)', varnaCell:'6,7', svara:'ए', svaraCell:'6,6', tithiGrp:'RIKTA', nakRing:15, nakPada:3, rashi:6}
+];
+// book pp.48-52 — per-nakshatra vedha effects (direction, window, goods)
+const SBC_NAK_FX={
+ 2:['दक्षिण','8 मास','अनाज, सोना-चाँदी, रत्न, तिलहन'],3:['पूर्व','7 दिन','सब धान्य, रस, धातु, ऊनी वस्त्र'],
+ 4:['उत्तर','—','पशु, धान्य, रत्न, लाख, तरल पदार्थ'],5:['पश्चिम','1 मास','लवण-क्षार-रस, तैल'],
+ 6:['उत्तर','60 दिन','धान्य, धातु, सूत, कपास, रुई, पाट'],7:['उत्तर','8 मास','सोना, चाँदी, रस, धान्य, तेल, क्षार'],
+ 8:['पश्चिम','1 मास','गुड़, खाँड, शक्कर, चावल, मिर्च'],9:['दक्षिण','8 मास','सभी व्यापारिक वस्तुएँ'],
+ 10:['दक्षिण','8 मास','अन्न, कम्बल, तिल-तेल, वस्त्र'],11:['उत्तर','2 मास','व्यापारिक वस्तुएँ'],
+ 12:['उत्तर','2 मास','किराना'],13:['उत्तर','2 मास','धातु, चौपाये'],14:['उत्तर','7 दिन','किराना (तुला राशि)'],
+ 15:['दक्षिण','8 मास','धान्यादि'],16:['पूर्व','7 दिन','धान्य-मात्र'],17:['पूर्व','7 दिन','लाख, कर्पूर, पारा, हींग, कांसी'],
+ 18:['पश्चिम','1 मास','धान्य, रस, सूत'],19:['पश्चिम','1 मास','व्यापारिक वस्तुएँ'],20:['पूर्व','7 दिन','चौपाये, धातु, रस'],
+ 'AB':['पूर्व','7 दिन','सुपारी, इलायची, जायफल, किराना'],21:['सर्व (पूर्व)','7 दिन','किराना'],
+ 22:['पूर्व','7 दिन','धातु, मणि, रत्न'],23:['पश्चिम','1 मास','आँवला, छाल, सुपारी, मद्य, तैल'],
+ 24:['दक्षिण','8 मास','किराना, धातु, धान्य, औषधियाँ'],25:['पश्चिम','1 मास','धान्य, गुड़, तिलहन, चावल, घृत, धातु'],
+ 26:['उत्तर','2 मास','किराना'],0:['उत्तर','2 मास','चौपाये, घास, धान्य'],1:['दक्षिण','8 मास','तृण, धान्य, किराना']
+};
+// vedha-line marching vectors per edge: front / left(शीघ्री) / right(वक्री)
+const SBC_VEC={E:{front:[1,0],left:[1,1],right:[1,-1]},S:{front:[0,-1],left:[1,-1],right:[-1,-1]},
+               W:{front:[-1,0],left:[-1,-1],right:[-1,1]},N:{front:[0,1],left:[-1,1],right:[1,1]}};
+function sbcLineCells(ringKey,dir){
+  const p=SBC_RINGPOS[ringKey]; if(!p)return[];
+  const v=SBC_VEC[p.edge][dir]; const cells=[]; let r=p.r,c=p.c;
+  for(let k=0;k<9;k++){ r+=v[0]; c+=v[1];
+    if(r<0||r>8||c<0||c>8)break;
+    cells.push(r+','+c);
+    if(r===0||r===8||c===0||c===8)break; }
+  return cells;
+}
+function sbcCornerLine(corner){
+  const dr=corner[0]===0?1:-1, dc=corner[1]===0?1:-1; const cells=[];
+  let r=corner[0],c=corner[1];
+  for(let k=0;k<8;k++){ r+=dr; c+=dc; if(r<0||r>8||c<0||c>8)break; cells.push(r+','+c); }
+  return cells;
+}
+const SBC_RINGKEY_AT={}; Object.keys(SBC_RINGPOS).forEach(k=>{const p=SBC_RINGPOS[k]; SBC_RINGKEY_AT[p.r+','+p.c]=(k==='AB')?'AB':+k;});
+function sbcUcchaBala(name,lonSid){ // book p.43: full at परम उच्च, half at परम नीच, proportional between
+  const u=SBC_UCCHA[name]; if(!u)return 0.75;
+  const ucchaLon=u[0]*30+u[1], nichaLon=n360(ucchaLon+180);
+  let d=Math.abs(n360(lonSid)-nichaLon); if(d>180)d=360-d;
+  return 0.5+0.5*(d/180);
+}
+// per-moment snapshot of the 9 grahas with गति, वेध-lines & pierced cells
+function sbcSnapshot(J,ayMode,gatiCache){
+  const ay=getAyanamsa(J,ayMode);
+  const sunSid=n360(geoLon('Sun',J)-ay), moonSid=n360(geoLon('Moon',J)-ay);
+  const tith=tithiCompute(sunSid,moonSid);
+  const moonKrura=(tith.num>=26||tith.num<=5);   // क्षीण चन्द्र (Krishna-11 → Shukla-5)
+  const planets=SBC_GRAHAS.map(name=>{
+    const lon=(name==='Sun')?sunSid:(name==='Moon')?moonSid:n360(geoLon(name,J)-ay);
+    const sign=Math.floor(lon/30), d9=getD9(lon), nak=getNak(lon);
+    let gati,dirs;
+    if(name==='Sun'||name==='Moon'){gati='सदा मार्गी';dirs=['front','left','right'];}
+    else if(name==='Rahu'||name==='Ketu'){gati='सदा वक्री';dirs=['front','left','right'];}
+    else{ const spd=gatiCache?gatiCache[name]:planetSpeed(name,J);
+      if(spd<0){gati='वक्री';dirs=['right'];}
+      else if(spd>SBC_FAST[name]){gati='शीघ्री';dirs=['left'];}
+      else{gati='मध्यचारी';dirs=['front'];} }
+    return {name,lon,sign,d9,nak,gati,dirs};
+  });
+  const kruraD9=new Set(planets.filter(p=>SBC_KRURA_BASE.has(p.name)).map(p=>p.d9));
+  planets.forEach(p=>{
+    p.krura = SBC_KRURA_BASE.has(p.name) ? true
+            : p.name==='Mercury' ? kruraD9.has(p.d9)        // बुध क्रूर-नवांश में क्रूर
+            : p.name==='Moon'    ? moonKrura : false;
+    p.saumya=!p.krura;
+    const ringKey=p.nak.idx; p.ringKey=ringKey;
+    const cells=new Set(), nakHits=new Set(), lines=[];
+    for(const d of p.dirs){ const cs=sbcLineCells(ringKey,d); if(cs.length){lines.push({dir:d,cells:cs});
+      cs.forEach(cc=>{cells.add(cc); if(SBC_RINGKEY_AT[cc]!==undefined)nakHits.add(SBC_RINGKEY_AT[cc]);});}}
+    const trig=SBC_CORNER_TRIG[ringKey];
+    p.cornerVedha=!!(trig&&p.nak.pada===trig.pada);
+    if(p.cornerVedha){ const cs=sbcCornerLine(trig.corner); lines.push({dir:'corner',cells:cs,corner:trig.corner});
+      cs.forEach(cc=>{cells.add(cc); if(SBC_RINGKEY_AT[cc]!==undefined)nakHits.add(SBC_RINGKEY_AT[cc]);}); }
+    p.pierced=cells; p.nakHits=nakHits; p.lines=lines;
+  });
+  return {J,ay,tith,planets,moonKrura};
+}
+function sbcDrishtiFrac(p,targetSign){ // classical drishti-pada chart (book p.45) + own-navamsha rule
+  if(p.d9===targetSign) return 1;                      // अपने नवांश पर सदैव पूर्ण दृष्टि
+  const hs=((targetSign-p.sign+12)%12)+1;
+  if(hs===7)return 1;
+  if(hs===4||hs===8) return (p.name==='Mars')?1:0.75;
+  if(hs===5||hs===9) return (p.name==='Jupiter')?1:0.5;
+  if(hs===3||hs===10)return (p.name==='Saturn')?1:0.25;
+  return 0;
+}
+function sbcLordOf(rashi,planets){ // Virgo: Mercury|Rahu, Pisces: Jupiter|Ketu — stronger rules (p.39)
+  const co= rashi===5?['Mercury','Rahu'] : rashi===11?['Jupiter','Ketu'] : null;
+  if(!co) return SLRD[rashi];
+  const a=planets.find(p=>p.name===co[0]), b=planets.find(p=>p.name===co[1]);
+  return sbcUcchaBala(a.name,a.lon)>=sbcUcchaBala(b.name,b.lon)?co[0]:co[1];
+}
+function sbcVerdict(snap,instr){
+  const lord=sbcLordOf(instr.rashi,snap.planets);
+  const tithiCell=SBC_TITHI_CELL[instr.tithiGrp];
+  const rashiCell=SBC_RASHI_CELL[instr.rashi];
+  const tithiWorth=snap.tith.paksha==='Shukla'?1:0.5;   // p.46
+  const rows=[];
+  for(const p of snap.planets){
+    const angas={
+      varna:p.pierced.has(instr.varnaCell),
+      svara:p.pierced.has(instr.svaraCell),
+      tithi:p.pierced.has(tithiCell),
+      nak:  p.nakHits.has(instr.nakRing),
+      rashi:p.pierced.has(rashiCell)
+    };
+    const n=(angas.varna?1:0)+(angas.svara?1:0)+(angas.nak?1:0)+(angas.rashi?1:0)+(angas.tithi?tithiWorth:0);
+    if(n<=0)continue;
+    const frac=sbcDrishtiFrac(p,instr.rashi);
+    const rel= p.name===lord?'स्वामी' : natRel(p.name,lord)==='Friend'?'मित्र' : natRel(p.name,lord)==='Enemy'?'शत्रु' : 'सम';
+    const factor= p.saumya ? {'स्वामी':1,'मित्र':0.75,'सम':0.5,'शत्रु':0.25}[rel]
+                           : {'स्वामी':0.25,'मित्र':0.5,'सम':0.75,'शत्रु':1}[rel];
+    const quota=p.saumya?1:0.8;
+    const vishva=Math.round(n*frac*quota*factor*100)/100;
+    rows.push({planet:p.name,gati:p.gati,corner:p.cornerVedha,angas,n,frac,rel,saumya:p.saumya,vishva,
+               side:p.saumya?'mandi':'teji',noDrishti:frac===0});
+  }
+  // चन्द्र exception (p.224): Moon co-piercing with a papa graha ⇒ तेजीकारक
+  const moonRow=rows.find(r=>r.planet==='Moon'&&r.saumya&&r.vishva>0);
+  const kruraActive=rows.some(r=>!r.saumya&&r.vishva>0);
+  let moonFlip=false;
+  if(moonRow&&kruraActive){ moonRow.side='teji'; moonRow.flip=true; moonFlip=true; }
+  let mandi=0,teji=0;
+  rows.forEach(r=>{ if(r.side==='mandi')mandi+=r.vishva; else teji+=r.vishva; });
+  mandi=Math.round(mandi*100)/100; teji=Math.round(teji*100)/100;
+  const net=Math.round((teji-mandi)*100)/100;
+  const dir=net>0.05?'TEJI':net<-0.05?'MANDI':'SAMA';
+  return {instr,lord,rows,mandi,teji,net,dir,moonFlip,paksha:snap.tith.paksha,tithiWorth};
+}
+// 15-min intraday matrix: every slot × every instrument
+function sbcIntraday(ayMode){
+  const dp=S.date.split('-').map(Number);
+  const loc=(typeof LOCATIONS!=='undefined'&&LOCATIONS[S.loc])||{open:9.25,close:15.5,abbr:'IST'};
+  const Jmid=JD(dp[0],dp[1],dp[2],12);
+  const gatiCache={}; ['Mars','Mercury','Jupiter','Venus','Saturn'].forEach(n=>{gatiCache[n]=planetSpeed(n,Jmid);});
+  const slots=[]; const nSlots=Math.round((loc.close-loc.open)/0.25);
+  for(let k=0;k<=nSlots;k++){
+    const t=Math.round((loc.open+k*0.25)*100)/100;
+    const snap=sbcSnapshot(JD(dp[0],dp[1],dp[2],t),ayMode,gatiCache);
+    const verdicts={}; SBC_INSTR.forEach(ins=>{verdicts[ins.key]=sbcVerdict(snap,ins);});
+    const moon=snap.planets.find(p=>p.name==='Moon');
+    slots.push({t,verdicts,moonNak:moon.nak.n,moonPada:moon.nak.pada,paksha:snap.tith.paksha});
+  }
+  return {slots,open:loc.open,close:loc.close,abbr:loc.abbr||'IST'};
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TAB: SBC GRID — chakra + व्यापार रत्न vedha forecast + 15-min heatmap
+// ═══════════════════════════════════════════════════════════════════
 function tSBC(){
   const D=DATA;
-  const activeNaks=new Set(D.planets.map(p=>getNak(p.lon).idx));
-  const VEDHA={0:13,1:14,2:15,3:16,4:17,5:18,6:19,7:20,8:21,9:22,10:23,11:24,12:25,13:0,14:1,15:2,16:3,17:4,18:5,19:6,20:7,21:8,22:9,23:10,24:11,25:12};
+  const dp=S.date.split('-').map(Number);
+  const Jnow=JD(dp[0],dp[1],dp[2],parseFloat(S.time)||9.25);
+  const snap=sbcSnapshot(Jnow,S.ayMode);
+  const verdicts=SBC_INSTR.map(ins=>sbcVerdict(snap,ins));
+  window.SBCX={snap,verdicts};
+  const activeNaks=new Set(snap.planets.map(p=>p.nak.idx));
+  // naks pierced by anything (for ring colouring) → {saumya:n,krura:n}
+  const nakPierce={};
+  snap.planets.forEach(p=>p.nakHits.forEach(k=>{ const e=nakPierce[k]=nakPierce[k]||{s:0,k:0}; p.saumya?e.s++:e.k++; }));
 
-  // Build per-nakshatra polarity map. For each active nak, sum the polarity
-  // contribution from each vedha pair it participates in using rules.md logic:
-  //   Shubh-Shubh = -ve (resistance/profit-booking)
-  //   Paap-Paap   = +ve (short-cover/spike)
-  //   Mixed       = mild (sign of the heavier side)
-  const SHUBH = new Set(['Moon','Mercury','Jupiter','Venus']);
-  const PAPA  = new Set(['Sun','Mars','Saturn','Rahu','Ketu']);
-  // map: nakIdx → list of {with: otherNakIdx, plnHere: [], plnThere: [], dir, label}
-  const nakVedha = new Map();
-  for(const ni of activeNaks){
-    const vi=VEDHA[ni];
-    if(vi===undefined || !activeNaks.has(vi)) continue;
-    const here  = D.planets.filter(p=>getNak(p.lon).idx===ni).map(p=>p.name);
-    const there = D.planets.filter(p=>getNak(p.lon).idx===vi).map(p=>p.name);
-    // Determine class for the pair (worst-of for visualization)
-    let dirSum = 0, classes = [];
-    for(const p1 of here) for(const p2 of there){
-      const s1=SHUBH.has(p1), s2=SHUBH.has(p2);
-      const m1=PAPA.has(p1),  m2=PAPA.has(p2);
-      if(s1&&s2)      { dirSum -= 1.0; classes.push('Shubh-Shubh ▼'); }
-      else if(m1&&m2) { dirSum += 1.0; classes.push('Paap-Paap ▲'); }
-      else if(s1||s2) { dirSum -= 0.5; classes.push('Mixed-Shubh ▽'); }
-      else            { dirSum += 0.5; classes.push('Mixed-Paap △'); }
-    }
-    if(!nakVedha.has(ni)) nakVedha.set(ni, []);
-    nakVedha.get(ni).push({ with:vi, plnHere:here, plnThere:there, dir:dirSum, classes });
-  }
-  // For grid coloring, decide each nak's net polarity color
-  const nakPol = new Map();   // nakIdx → +1 / -1 / 0
-  for(const [ni, ents] of nakVedha){
-    const s = ents.reduce((a,e)=>a+e.dir, 0);
-    nakPol.set(ni, Math.sign(s));
-  }
-
-  // ── Sarvatobhadra Chakra — classical Jagannatha-Hora layout ──
-  //    EAST=top, SOUTH=right, WEST=bottom, NORTH=left. Inner 7x7 = aksharas + rashis + tithi/vaara.
-  const EAST =[2,3,4,5,6,7,8];           // Krittika -> Ashlesha
-  const SOUTH=[9,10,11,12,13,14,15];     // Magha -> Vishakha
-  const WEST =[21,'AB',20,19,18,17,16];  // Shravana, Abhijit, U.Ashadha -> Anuradha
-  const NORTH=[1,0,26,25,24,23,22];      // Bharani, Ashwini, Revati -> Dhanishtha
-  const ABHIJIT={n:'Abhijit', l:'Brahma'};
-  const ringPos={};
-  EAST.forEach((k,i)=>ringPos[k]={r:0,c:1+i});
-  SOUTH.forEach((k,i)=>ringPos[k]={r:1+i,c:8});
-  WEST.forEach((k,i)=>ringPos[k]={r:8,c:1+i});
-  NORTH.forEach((k,i)=>ringPos[k]={r:1+i,c:0});
-  // inner aksharas  'r,c':[latin, devanagari]
-  const AK={
-   '1,1':['00','उ'],'1,2':['A','अ'],'1,3':['VA','व'],'1,4':['KA','क'],'1,5':['HA','ह'],'1,6':['DA','ड'],'1,7':['00','ऊ'],
-   '2,1':['LA','ल'],'2,2':['LRI','लृ'],'2,6':['LREE','लॣ'],'2,7':['MA','म'],
-   '3,1':['CHA','च'],'3,3':['O','ओ'],'3,5':['OU','औ'],'3,7':['TA','ट'],
-   '4,1':['DHA','ध'],'4,7':['PA','प'],
-   '5,1':['SA','स'],'5,3':['AHA','अः'],'5,5':['AM','अं'],'5,7':['RA','र'],
-   '6,1':['GA','ग'],'6,2':['AEI','ऐ'],'6,6':['AE','ए'],'6,7':['THA','त'],
-   '7,1':['REE','ॠ'],'7,2':['KHA','ख'],'7,3':['JA','ज'],'7,4':['BHA','भ'],'7,5':['YA','य'],'7,6':['NA','न'],'7,7':['RE','ऋ']
-  };
-  // rashi ring [r,c,signIdx]
-  const RASHI=[[2,3,2],[2,4,3],[2,5,4],[3,6,5],[4,6,6],[5,6,7],[6,5,8],[6,4,9],[6,3,10],[5,2,11],[4,2,12],[3,2,1]];
+  // ── SVG chakra (geometry identical to the classical एकाशीतिपद layout) ──
+  const EAST=SBC_EAST,SOUTH=SBC_SOUTH,WEST=SBC_WEST,NORTH=SBC_NORTH;
+  const ABHIJIT={n:'Abhijit',l:'Brahma'};
+  const ringPos={}; Object.keys(SBC_RINGPOS).forEach(k=>{ringPos[k==='AB'?'AB':+k]=SBC_RINGPOS[k];});
+  const AK=SBC_AK, RASHI=SBC_RASHI;
   const RNAME=['Aries','Taurus','Gemini','Cancer','Leo','Virgo','Libra','Scorpio','Sagittarius','Capricorn','Aquarius','Pisces'];
-  const RDEV =['मेष','वृष','मिथुन','कर्क','सिंह','कन्या','तुला','वृश्चिक','धनु','मकर','कुंभ','मीन'];
-  const SAB  =['Ar','Ta','Ge','Cn','Le','Vi','Li','Sc','Sg','Cp','Aq','Pi'];
+  const RDEV=['मेष','वृष','मिथुन','कर्क','सिंह','कन्या','तुला','वृश्चिक','धनु','मकर','कुंभ','मीन'];
+  const SAB=['Ar','Ta','Ge','Cn','Le','Vi','Li','Sc','Sg','Cp','Aq','Pi'];
   const TVA=[[3,4,'NANDA','Sun · Tue','1·6·11','#00f07a'],[4,3,'RIKTA','Fri','4·9·14','#ff3355'],[4,4,'PURNA','Sat','5·10·15·30','#ffc107'],[4,5,'BHADRA','Mon · Wed','2·7·12','#69F0AE'],[5,4,'JAYA','Thu','3·8·13','#00e8ff']];
-  const DEITY={'0,0':['ईशान','Ishana'],'0,8':['आग्नेय','Agni'],'8,8':['नैऋत्य','Nirriti'],'8,0':['वायव्य','Vayu']};
-
-  const NG=9, CS=82, PADAB=15, NAVB=15, SIGNB=20, BND=PADAB+NAVB+SIGNB, DM=26, O=DM+BND, SZ=O+NG*CS+BND+DM, SUB=CS/4;
-  const gX=c=>O+c*CS, gY=r=>O+r*CS, cX=c=>O+c*CS+CS/2, cY=r=>O+r*CS+CS/2;
+  const DEITY={'0,0':['ईशान','Bha₄·Kri₁'],'0,8':['आग्नेय','Ash₄·Mag₁'],'8,8':['नैऋत्य','Vis₄·Anu₁'],'8,0':['वायव्य','Shr₄·Dha₁']};
+  const NG=9,CS=82,PADAB=15,NAVB=15,SIGNB=20,BND=PADAB+NAVB+SIGNB,DM=26,O=DM+BND,SZ=O+NG*CS+BND+DM,SUB=CS/4;
+  const gX=c=>O+c*CS,gY=r=>O+r*CS,cX=c=>O+c*CS+CS/2,cY=r=>O+r*CS+CS/2;
   const navOf=(ni,p)=>((ni*4+p)%12)+1;
   const signOf=(ni,p)=>Math.floor((ni*13.33333+p*3.33333)/30)%12+1;
   const signFill=['#3a1a1a','#2a2a14','#143a2a','#142a3a','#3a2a14','#1a3a1a','#2a1a3a','#3a1428','#2a1a14','#14283a','#1a2a3a','#1a1428'];
-
   let svg=`<svg width="${SZ}" height="${SZ}" viewBox="0 0 ${SZ} ${SZ}" xmlns="http://www.w3.org/2000/svg" font-family="Courier New">`;
-  svg+=`<defs>
-    <marker id="vbull" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#00f07a"/></marker>
-    <marker id="vbear" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#ff3355"/></marker>
-    <marker id="vneut" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#ffc107"/></marker></defs>`;
   svg+=`<rect width="${SZ}" height="${SZ}" fill="#010b0f"/>`;
-  // core grid cells
   for(let r=0;r<NG;r++)for(let c=0;c<NG;c++){ const corner=(r===0||r===8)&&(c===0||c===8);
     svg+=`<rect x="${gX(c)}" y="${gY(r)}" width="${CS}" height="${CS}" fill="${corner?'#02141c':'#011a26'}" stroke="#103848" stroke-width=".8"/>`; }
-
-  // ── edge bands: SIGN / NAVAMSA / PADA (7 naks x 4 padas) ──
-  function band(naks, edge){
+  function band(naks,edge){
     for(let i=0;i<7;i++){ const key=naks[i]; const ni=(key==='AB')?-1:key;
       for(let p=0;p<4;p++){
-        let pr,nr,sr; const naxX=gX(1+i), naxY=gY(1+i);
-        if(edge==='top'){ const x=naxX+p*SUB; pr=[x,O-PADAB,SUB,PADAB]; nr=[x,O-PADAB-NAVB,SUB,NAVB]; sr=[x,O-BND,SUB,SIGNB]; }
-        else if(edge==='bottom'){ const x=naxX+p*SUB,yb=O+NG*CS; pr=[x,yb,SUB,PADAB]; nr=[x,yb+PADAB,SUB,NAVB]; sr=[x,yb+PADAB+NAVB,SUB,SIGNB]; }
-        else if(edge==='right'){ const y=naxY+p*SUB,xr=O+NG*CS; pr=[xr,y,PADAB,SUB]; nr=[xr+PADAB,y,NAVB,SUB]; sr=[xr+PADAB+NAVB,y,SIGNB,SUB]; }
-        else { const y=naxY+p*SUB; pr=[O-PADAB,y,PADAB,SUB]; nr=[O-PADAB-NAVB,y,NAVB,SUB]; sr=[O-BND,y,SIGNB,SUB]; }
+        let pr,nr,sr; const naxX=gX(1+i),naxY=gY(1+i);
+        if(edge==='top'){const x=naxX+p*SUB;pr=[x,O-PADAB,SUB,PADAB];nr=[x,O-PADAB-NAVB,SUB,NAVB];sr=[x,O-BND,SUB,SIGNB];}
+        else if(edge==='bottom'){const x=naxX+p*SUB,yb=O+NG*CS;pr=[x,yb,SUB,PADAB];nr=[x,yb+PADAB,SUB,NAVB];sr=[x,yb+PADAB+NAVB,SUB,SIGNB];}
+        else if(edge==='right'){const y=naxY+p*SUB,xr=O+NG*CS;pr=[xr,y,PADAB,SUB];nr=[xr+PADAB,y,NAVB,SUB];sr=[xr+PADAB+NAVB,y,SIGNB,SUB];}
+        else{const y=naxY+p*SUB;pr=[O-PADAB,y,PADAB,SUB];nr=[O-PADAB-NAVB,y,NAVB,SUB];sr=[O-BND,y,SIGNB,SUB];}
         const si=(ni>=0)?signOf(ni,p):0;
         svg+=`<rect x="${sr[0]}" y="${sr[1]}" width="${sr[2]}" height="${sr[3]}" fill="${si?signFill[si-1]:'#06141c'}" stroke="#0d2a34" stroke-width=".5"/>`;
-        if(si) svg+=`<text x="${sr[0]+sr[2]/2}" y="${sr[1]+sr[3]/2+3}" text-anchor="middle" fill="#e0b050" font-size="8">${SAB[si-1]}</text>`;
+        if(si)svg+=`<text x="${sr[0]+sr[2]/2}" y="${sr[1]+sr[3]/2+3}" text-anchor="middle" fill="#e0b050" font-size="8">${SAB[si-1]}</text>`;
         svg+=`<rect x="${nr[0]}" y="${nr[1]}" width="${nr[2]}" height="${nr[3]}" fill="#04121a" stroke="#0d2a34" stroke-width=".5"/>`;
-        if(ni>=0) svg+=`<text x="${nr[0]+nr[2]/2}" y="${nr[1]+nr[3]/2+3}" text-anchor="middle" fill="#5a90a0" font-size="8">${navOf(ni,p)}</text>`;
+        if(ni>=0)svg+=`<text x="${nr[0]+nr[2]/2}" y="${nr[1]+nr[3]/2+3}" text-anchor="middle" fill="#5a90a0" font-size="8">${navOf(ni,p)}</text>`;
         svg+=`<rect x="${pr[0]}" y="${pr[1]}" width="${pr[2]}" height="${pr[3]}" fill="#02181f" stroke="#0d2a34" stroke-width=".5"/>`;
         svg+=`<text x="${pr[0]+pr[2]/2}" y="${pr[1]+pr[3]/2+3}" text-anchor="middle" fill="#3a8090" font-size="8">${p+1}</text>`;
       }
     }
   }
-  band(EAST,'top'); band(SOUTH,'right'); band(WEST,'bottom'); band(NORTH,'left');
-  // band group labels
+  band(EAST,'top');band(SOUTH,'right');band(WEST,'bottom');band(NORTH,'left');
   svg+=`<text x="${O-PADAB-NAVB/2}" y="${O-2}" text-anchor="middle" fill="#3a8090" font-size="7" transform="rotate(-90 ${O-PADAB-NAVB/2} ${O-2})">NAVAMSA</text>`;
   svg+=`<text x="${gX(0)+CS/2}" y="${O-BND-3}" text-anchor="middle" fill="#5a90a0" font-size="8">SIGNS</text>`;
-
-  // direction labels
   svg+=`<text x="${SZ/2}" y="${DM-8}" text-anchor="middle" fill="#00e8ff" font-size="16" font-weight="bold">EAST · पूर्व</text>`;
   svg+=`<text x="${SZ/2}" y="${SZ-6}" text-anchor="middle" fill="#00e8ff" font-size="16" font-weight="bold">WEST · पश्चिम</text>`;
   svg+=`<text x="${DM-8}" y="${SZ/2}" text-anchor="middle" fill="#00e8ff" font-size="16" font-weight="bold" transform="rotate(-90 ${DM-8} ${SZ/2})">NORTH · उत्तर</text>`;
   svg+=`<text x="${SZ-DM+10}" y="${SZ/2}" text-anchor="middle" fill="#00e8ff" font-size="16" font-weight="bold" transform="rotate(90 ${SZ-DM+10} ${SZ/2})">SOUTH · दक्षिण</text>`;
-  svg+=`<text x="${gX(1)+4}" y="${DM-8}" fill="#cc1030" font-size="9">◄ Right-Side Vedha</text>`;
-  svg+=`<text x="${gX(8)-4}" y="${DM-8}" text-anchor="end" fill="#00b84a" font-size="9">Left-Side Vedha ►</text>`;
-
-  // corner deities
-  for(const key in DEITY){ const rc=key.split(',').map(Number), d=DEITY[key];
-    svg+=`<text x="${cX(rc[1])}" y="${cY(rc[0])-5}" text-anchor="middle" fill="#b89cff" font-size="14" font-weight="bold">${d[0]}</text>`;
-    svg+=`<text x="${cX(rc[1])}" y="${cY(rc[0])+13}" text-anchor="middle" fill="#8a78c8" font-size="10">${d[1]}</text>`; }
-
-  // inner aksharas
-  for(const key in AK){ const rc=key.split(',').map(Number), a=AK[key];
+  svg+=`<text x="${gX(1)+4}" y="${DM-8}" fill="#cc1030" font-size="9">◄ वक्री = Right-Side Vedha</text>`;
+  svg+=`<text x="${gX(8)-4}" y="${DM-8}" text-anchor="end" fill="#00b84a" font-size="9">शीघ्री = Left-Side Vedha ►</text>`;
+  for(const key in DEITY){const rc=key.split(',').map(Number),d=DEITY[key];
+    svg+=`<text x="${cX(rc[1])}" y="${cY(rc[0])-5}" text-anchor="middle" fill="#b89cff" font-size="13" font-weight="bold">${d[0]}</text>`;
+    svg+=`<text x="${cX(rc[1])}" y="${cY(rc[0])+13}" text-anchor="middle" fill="#8a78c8" font-size="9">${d[1]}</text>`;}
+  for(const key in AK){const rc=key.split(',').map(Number),a=AK[key];
     svg+=`<text x="${cX(rc[1])}" y="${cY(rc[0])-5}" text-anchor="middle" fill="#9fe8ff" font-size="15" font-weight="bold">${a[0]}</text>`;
-    svg+=`<text x="${cX(rc[1])}" y="${cY(rc[0])+15}" text-anchor="middle" fill="#5a90a0" font-size="14">${a[1]}</text>`; }
-
-  // rashi ring
-  for(const rc of RASHI){ const r=rc[0],c=rc[1],si=rc[2];
+    svg+=`<text x="${cX(rc[1])}" y="${cY(rc[0])+15}" text-anchor="middle" fill="#5a90a0" font-size="14">${a[1]}</text>`;}
+  for(const rc of RASHI){const r=rc[0],c=rc[1],si=rc[2];
     svg+=`<rect x="${gX(c)+1}" y="${gY(r)+1}" width="${CS-2}" height="${CS-2}" fill="#02202e" stroke="#145060" stroke-width="1"/>`;
     svg+=`<text x="${cX(c)}" y="${cY(r)-3}" text-anchor="middle" fill="#ffc107" font-size="11" font-weight="bold">${RNAME[si-1]}</text>`;
-    svg+=`<text x="${cX(c)}" y="${cY(r)+13}" text-anchor="middle" fill="#cc8800" font-size="11">${si} · ${RDEV[si-1]}</text>`; }
-  // tithi/vaara center
+    svg+=`<text x="${cX(c)}" y="${cY(r)+13}" text-anchor="middle" fill="#cc8800" font-size="11">${si} · ${RDEV[si-1]}</text>`;}
   svg+=`<rect x="${gX(3)}" y="${gY(3)}" width="${3*CS}" height="${3*CS}" fill="none" stroke="#145060" stroke-width="1"/>`;
-  for(const t of TVA){ const r=t[0],c=t[1];
+  for(const t of TVA){const r=t[0],c=t[1];
     svg+=`<rect x="${gX(c)+1}" y="${gY(r)+1}" width="${CS-2}" height="${CS-2}" fill="#02141c" stroke="${t[5]}66" stroke-width="1.5"/>`;
     svg+=`<text x="${cX(c)}" y="${cY(r)-12}" text-anchor="middle" fill="${t[5]}" font-size="12" font-weight="bold">${t[2]}</text>`;
     svg+=`<text x="${cX(c)}" y="${cY(r)+3}" text-anchor="middle" fill="#cde" font-size="9">${t[3]}</text>`;
-    svg+=`<text x="${cX(c)}" y="${cY(r)+17}" text-anchor="middle" fill="#89a" font-size="9">${t[4]}</text>`; }
-
-  // vedha arrows across the chakra
-  for(const ent of nakVedha){ const ni=ent[0], ents=ent[1]; if(!ringPos[ni])continue;
-    for(const e of ents){ if(!ringPos[e.with])continue; const a=ringPos[ni], b=ringPos[e.with];
-      const col=e.dir>0?'#00f07a':e.dir<0?'#ff3355':'#ffc107', mk=e.dir>0?'vbull':e.dir<0?'vbear':'vneut';
-      svg+=`<line x1="${cX(a.c)}" y1="${cY(a.r)}" x2="${cX(b.c)}" y2="${cY(b.r)}" stroke="${col}" stroke-width="1.7" opacity="0.6" marker-end="url(#${mk})"/>`; } }
-
-  // nakshatra ring cells (lord + transiting planets + polarity)
-  function drawNak(key){ const pos=ringPos[key]; if(!pos)return; const r=pos.r,c=pos.c;
-    const ni=(key==='AB')?-1:key; const nak=(key==='AB')?ABHIJIT:NAKS[ni];
-    const isAct=ni>=0&&activeNaks.has(ni), isVedha=ni>=0&&nakVedha.has(ni), pol=nakPol.get(ni)||0;
+    svg+=`<text x="${cX(c)}" y="${cY(r)+17}" text-anchor="middle" fill="#89a" font-size="9">${t[4]}</text>`;}
+  // ── TRUE vedha lines per the book: front/left/right by गति + कोण diagonals ──
+  for(const p of snap.planets){
+    const col=p.saumya?'#ff3355':'#00f07a';  // सौम्य वेध ⇒ मंदी (red) · क्रूर वेध ⇒ तेजी (green)
+    const a=ringPos[p.ringKey]; if(!a)continue;
+    for(const ln of p.lines){
+      const last=ln.cells[ln.cells.length-1]; if(!last)continue;
+      const [er,ec]=last.split(',').map(Number);
+      if(ln.dir==='corner'){
+        svg+=`<line x1="${cX(ln.corner[1])}" y1="${cY(ln.corner[0])}" x2="${cX(ec)}" y2="${cY(er)}" stroke="#b89cff" stroke-width="1.6" stroke-dasharray="5,4" opacity="0.55"/>`;
+      } else {
+        svg+=`<line x1="${cX(a.c)}" y1="${cY(a.r)}" x2="${cX(ec)}" y2="${cY(er)}" stroke="${col}" stroke-width="1.8" opacity="0.5"/>`;
+      }
+    }
+  }
+  // nakshatra ring cells — coloured by who pierces them
+  function drawNak(key){const pos=ringPos[key];if(!pos)return;const r=pos.r,c=pos.c;
+    const ni=(key==='AB')?-1:key;const nak=(key==='AB')?ABHIJIT:NAKS[ni];
+    const pierce=nakPierce[key==='AB'?'AB':ni];
+    const isAct=ni>=0&&activeNaks.has(ni);
     let fill='#011a26',stroke='#145060',sw=0.9;
-    if(isAct&&!isVedha){fill='#003020';stroke='#00b84a';sw=1.6;}
-    else if(isVedha&&pol>0){fill='#002a14';stroke='#00b84a';sw=2;}
-    else if(isVedha&&pol<0){fill='#280008';stroke='#cc1030';sw=2;}
-    else if(isVedha){fill='#2a2000';stroke='#cc8800';sw=1.6;}
+    if(pierce&&pierce.s&&pierce.k){fill='#2a2000';stroke='#cc8800';sw=2;}
+    else if(pierce&&pierce.k){fill='#002a14';stroke='#00b84a';sw=2;}
+    else if(pierce&&pierce.s){fill='#280008';stroke='#cc1030';sw=2;}
+    else if(isAct){fill='#062c3c';stroke='#3a8090';sw=1.4;}
     svg+=`<rect x="${gX(c)+1}" y="${gY(r)+1}" width="${CS-2}" height="${CS-2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
-    const tc=isVedha&&pol>0?'#00f07a':isVedha&&pol<0?'#ff3355':isVedha?'#ffc107':isAct?'#00f07a':'#6ac8e0';
+    const tc=pierce&&pierce.s&&pierce.k?'#ffc107':pierce&&pierce.k?'#00f07a':pierce&&pierce.s?'#ff3355':isAct?'#7ecad8':'#6ac8e0';
     svg+=`<text x="${cX(c)}" y="${gY(r)+15}" text-anchor="middle" fill="${tc}" font-size="10" font-weight="bold">${nak.n.slice(0,10)}</text>`;
     svg+=`<text x="${cX(c)}" y="${gY(r)+28}" text-anchor="middle" fill="${PC[nak.l]||'#7ecad8'}" font-size="10" font-weight="bold">${nak.l.slice(0,3)}</text>`;
-    if(isVedha){const badge=pol>0?'+VE':pol<0?'-VE':'±',bc=pol>0?'#00f07a':pol<0?'#ff3355':'#ffc107';svg+=`<text x="${gX(c)+CS-4}" y="${gY(r)+11}" text-anchor="end" fill="${bc}" font-size="8" font-weight="bold">${badge}</text>`;}
-    if(ni>=0){const ps=D.planets.filter(p=>getNak(p.lon).idx===ni); ps.forEach((p,i)=>{svg+=`<text x="${cX(c)}" y="${gY(r)+44+i*14}" text-anchor="middle" fill="${PC[p.name]}" font-size="13" font-weight="bold">${p.abbr}${p.retro?'°':''}</text>`;});}
+    if(pierce){const lbl=pierce.s&&pierce.k?'±':pierce.k?'तेजी':'मंदी',bc=pierce.s&&pierce.k?'#ffc107':pierce.k?'#00f07a':'#ff3355';
+      svg+=`<text x="${gX(c)+CS-4}" y="${gY(r)+11}" text-anchor="end" fill="${bc}" font-size="8" font-weight="bold">${lbl}</text>`;}
+    if(ni>=0){const ps=snap.planets.filter(p=>p.nak.idx===ni);
+      ps.forEach((p,i)=>{const gl=p.gati==='वक्री'?'व':p.gati==='शीघ्री'?'शी':p.gati==='मध्यचारी'?'म':'';
+        svg+=`<text x="${cX(c)}" y="${gY(r)+44+i*14}" text-anchor="middle" fill="${PC[p.name]}" font-size="13" font-weight="bold">${pShort(p.name)}${gl?'·'+gl:''}${p.cornerVedha?'◇':''}</text>`;});}
   }
   [].concat(EAST,SOUTH,WEST,NORTH).forEach(drawNak);
   svg+=`</svg>`;
 
-  // Build pair-level vedha list with explicit polarity per pair
-  const vedhaPairs = [];
-  const seen = new Set();
-  for(const [ni, ents] of nakVedha){
-    for(const e of ents){
-      const key = Math.min(ni,e.with) + '-' + Math.max(ni,e.with);
-      if(seen.has(key)) continue;
-      seen.add(key);
-      for(let i=0;i<e.plnHere.length;i++){
-        for(let j=0;j<e.plnThere.length;j++){
-          const p1=e.plnHere[i], p2=e.plnThere[j];
-          const s1=SHUBH.has(p1), s2=SHUBH.has(p2);
-          const m1=PAPA.has(p1),  m2=PAPA.has(p2);
-          let dir, klass, hint;
-          if(s1&&s2)      { dir=-1; klass='SHUBH ↔ SHUBH'; hint='Resistance to upside · profit-booking · supply at highs'; }
-          else if(m1&&m2) { dir=+1; klass='PAAP ↔ PAAP';   hint='Short-covering · sudden uptick · breakout-prone'; }
-          else if(s1||s2) { dir=-0.5; klass='MIXED (Shubh-side)'; hint='Mild negative · soft resistance'; }
-          else            { dir=+0.5; klass='MIXED (Paap-side)';  hint='Mild positive · soft demand'; }
-          vedhaPairs.push({nak1:NAKS[ni].n, nak2:NAKS[e.with].n, p1, p2, dir, klass, hint});
-        }
-      }
+  // ── verdict cards ──
+  const dirCol=d=>d==='TEJI'?'var(--bull)':d==='MANDI'?'var(--bear)':'var(--neut)';
+  const dirLbl=d=>d==='TEJI'?'तेजी · BULLISH':d==='MANDI'?'मंदी · BEARISH':'सम · NEUTRAL';
+  const cards=verdicts.map(v=>{
+    const c=dirCol(v.dir);
+    let priceHTML='';
+    if(v.instr.anchor){
+      const open=parseFloat(v.instr.anchor==='nifty'?S.niftyOpen:S.bnOpen), pc=parseFloat(v.instr.anchor==='nifty'?S.niftyPC:S.bnPC);
+      const a=resolveAnchor(S.gannAnchor||'open',open,pc);
+      if(a.price>0){ const move=a.price*Math.abs(v.net)/20, tgt=v.net>=0?a.price+move:a.price-move;
+        priceHTML=`<div style="font-size:10px;color:var(--tx2);margin-top:4px">टकेवार (${a.label} ${fmtPrice(a.price)} = 20 विश्वा)<br>
+        <b style="color:${c}">${v.net>=0?'+':'−'}${fmtPrice(move)} pts</b> → <b style="color:${c}">${fmtPrice(tgt)}</b></div>`; }
     }
-  }
-  // Sort by absolute strength desc
-  vedhaPairs.sort((a,b)=>Math.abs(b.dir)-Math.abs(a.dir));
+    const top=v.rows.filter(r=>r.vishva>0).sort((a,b)=>b.vishva-a.vishva).slice(0,3)
+      .map(r=>`<span style="color:${PC[r.planet]}">${pShort(r.planet)}</span>&thinsp;${r.side==='teji'?'▲':'▼'}${r.vishva}`).join(' · ')||'—';
+    return `<div style="flex:1;min-width:170px;background:var(--bg2);border:1px solid ${c}44;border-top:3px solid ${c};border-radius:4px;padding:8px 10px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-size:12px;font-weight:800;color:var(--tx0)">${v.instr.name}</span>
+        <span style="font-size:9px;color:var(--tx3)">${v.instr.dev} · ${v.instr.letter}</span></div>
+      <div style="font-size:15px;font-weight:800;color:${c};margin-top:2px">${dirLbl(v.dir)}</div>
+      <div style="font-size:10px;color:var(--tx2)">net <b style="color:${c}">${v.net>0?'+':''}${v.net}</b> विश्वा /20 · तेजी ${v.teji} − मंदी ${v.mandi}${v.moonFlip?' · <span style="color:var(--neut)">चन्द्र+पाप→तेजी</span>':''}</div>
+      <div style="font-size:10px;color:var(--tx2);margin-top:3px">${top}</div>
+      ${priceHTML}
+      <div style="font-size:9px;color:var(--tx3);margin-top:3px">पञ्चक: ${v.instr.letter} · ${v.instr.svara} · ${v.instr.tithiGrp.toLowerCase()} · ${v.instr.nakRing==='AB'?'Abhijit':NAKS[v.instr.nakRing].n} p${v.instr.nakPada} · ${RNAME[v.instr.rashi]} (स्वामी ${v.lord})</div>
+    </div>`;
+  }).join('');
 
-  // Net polarity summary
-  const netSum = vedhaPairs.reduce((s,v)=>s+v.dir, 0);
-  const netLabel = netSum > 0.5 ? '+VE (paap-dominant)' : netSum < -0.5 ? '−VE (shubh-dominant)' : netSum === 0 ? 'NO VEDHA' : 'MIXED / NEUTRAL';
-  const netCol   = netSum > 0.5 ? 'var(--bull)' : netSum < -0.5 ? 'var(--bear)' : 'var(--neut)';
+  // ── 15-min heatmap ──
+  const ID=sbcIntraday(S.ayMode);
+  const hmHead=ID.slots.map(s=>`<th style="padding:2px 1px;font-size:8px;color:var(--tx3);font-weight:400;min-width:26px">${mtt(s.t*60)}</th>`).join('');
+  let lastMoon='';
+  const moonRow=ID.slots.map(s=>{const k=s.moonNak+' p'+s.moonPada;const show=k!==lastMoon;lastMoon=k;
+    return `<td style="padding:1px;font-size:7px;color:${show?PC.Moon:'var(--bd2)'};white-space:nowrap;overflow:visible">${show?'☾'+s.moonNak.slice(0,5)+'·'+s.moonPada:'·'}</td>`;}).join('');
+  const hmRows=SBC_INSTR.map(ins=>{
+    const cells=ID.slots.map(s=>{
+      const v=s.verdicts[ins.key]; const net=v.net;
+      const a=Math.min(0.85,0.10+Math.abs(net)/6);
+      const bg=net>0.05?`rgba(0,200,90,${a})`:net<-0.05?`rgba(255,40,70,${a})`:'rgba(120,140,150,0.10)';
+      const tcol=Math.abs(net)>2.5?'#fff':'var(--tx1)';
+      const topR=v.rows.filter(r=>r.vishva>0).sort((x,y)=>y.vishva-x.vishva)[0];
+      const tip=`${mtt(s.t*60)} · ${ins.name} · ${net>0.05?'तेजी':net<-0.05?'मंदी':'सम'} ${net>0?'+':''}${net} विश्वा${topR?' · '+topR.planet+' '+(topR.side==='teji'?'▲':'▼')+topR.vishva:''}`;
+      return `<td title="${tip}" style="background:${bg};text-align:center;padding:4px 1px;font-size:8.5px;font-family:monospace;color:${tcol};border:1px solid #04222e">${net>0?'+':''}${net.toFixed(1)}</td>`;
+    }).join('');
+    return `<tr><td style="font-size:10px;font-weight:700;color:var(--tx0);white-space:nowrap;padding:3px 8px 3px 4px;position:sticky;left:0;background:var(--bg1)">${ins.name}<div style="font-size:8px;color:var(--tx3);font-weight:400">${ins.dev}</div></td>${cells}</tr>`;
+  }).join('');
 
-  return`
+  // ── workings table ──
+  const angaChip=(on,lbl)=>`<span style="display:inline-block;padding:0 4px;margin:0 1px;border-radius:2px;font-size:9px;${on?'background:#06303f;color:#8df7ff;border:1px solid #1a6878':'color:var(--bd2);border:1px solid var(--bd)'}">${lbl}</span>`;
+  const workRows=verdicts.map(v=>{
+    const rws=v.rows.length?v.rows.map((r,i)=>`<tr class="${r.side==='teji'?'tr-b':'tr-r'}">
+      ${i===0?`<td rowspan="${v.rows.length}" style="font-weight:800;color:${dirCol(v.dir)};font-size:11px;vertical-align:top">${v.instr.name}<div style="font-size:9px;color:var(--tx3);font-weight:400">${dirLbl(v.dir)}<br>net ${v.net>0?'+':''}${v.net}</div></td>`:''}
+      <td style="color:${PC[r.planet]};font-weight:700">${r.planet} <span style="font-size:9px;color:var(--tx3)">(${r.saumya?'सौम्य':'क्रूर'})</span></td>
+      <td style="font-size:10px;color:var(--tx1)">${r.gati}${r.corner?' + कोण◇':''}</td>
+      <td>${angaChip(r.angas.varna,'वर्ण')}${angaChip(r.angas.svara,'स्वर')}${angaChip(r.angas.tithi,'तिथि'+(v.tithiWorth<1?'½':''))}${angaChip(r.angas.nak,'नक्षत्र')}${angaChip(r.angas.rashi,'राशि')} <span style="font-size:9px;color:var(--tx2)">n=${r.n}</span></td>
+      <td style="text-align:center;font-family:monospace;color:${r.frac?'var(--tx0)':'var(--bear)'}">${r.frac===0?'दृष्टि नहीं ⇒ 0':r.frac===1?'पूर्ण':r.frac===0.75?'¾':r.frac===0.5?'½':'¼'}</td>
+      <td style="text-align:center;font-size:10px">${r.rel}</td>
+      <td style="text-align:center;font-weight:800;color:${r.side==='teji'?'var(--bull)':'var(--bear)'};font-family:monospace">${r.side==='teji'?'▲':'▼'} ${r.vishva}${r.flip?' <span style="font-size:8px;color:var(--neut)">(चन्द्र+पाप)</span>':''}</td>
+    </tr>`).join('')
+    :`<tr><td style="font-weight:800;color:var(--neut)">${v.instr.name}</td><td colspan="6" style="color:var(--tx3);font-size:10px">कोई वेध नहीं — no graha pierces its पञ्चक right now</td></tr>`;
+    return rws;
+  }).join('');
+
+  // ── pierced nakshatra book-effects ──
+  const fxRows=Object.keys(nakPierce).map(k=>{
+    const fx=SBC_NAK_FX[k]; if(!fx)return '';
+    const e=nakPierce[k]; const nm=k==='AB'?'Abhijit':NAKS[+k].n;
+    const piercers=snap.planets.filter(p=>p.nakHits.has(k==='AB'?'AB':+k));
+    const verdict=e.s&&e.k?'<span style="color:var(--neut)">मिश्र</span>':e.k?'<span style="color:var(--bull)">तेजी ▲</span>':'<span style="color:var(--bear)">मंदी ▼</span>';
+    return `<tr><td style="font-weight:700;font-size:11px">${nm}</td>
+      <td>${piercers.map(p=>`<span style="color:${PC[p.name]};font-weight:700">${pShort(p.name)}</span><span style="font-size:8px;color:var(--tx3)">${p.saumya?'सौ':'क्रू'}</span>`).join(' ')}</td>
+      <td style="text-align:center">${verdict}</td><td style="font-size:10px;color:var(--tx1)">${fx[0]}</td>
+      <td style="font-size:10px;color:var(--tx1)">${fx[1]}</td><td style="font-size:10px;color:var(--tx2)">${fx[2]}</td></tr>`;
+  }).filter(Boolean).join('');
+
+  return `
 <div style="display:flex;flex-direction:column;gap:10px">
 
-  <!-- ▒▒▒ POLARITY RULES LEGEND ▒▒▒ -->
+  <!-- वेध-पद्धति verdicts -->
   <div class="pnl">
-    <div class="ph"><span class="dot"></span>SBC VEDHA POLARITY RULES · WHEN +VE / WHEN −VE</div>
+    <div class="ph"><span class="dot"></span>व्यापार रत्न · सर्वतोभद्र वेध-पद्धति VERDICTS · ${S.date} ${mtt(parseFloat(S.time)*60)} · ${snap.tith.paksha} पक्ष ${snap.tith.name}${snap.moonKrura?' · <span style="color:var(--bear)">क्षीण चन्द्र (क्रूर)</span>':''}</div>
+    <div class="pb"><div style="display:flex;gap:8px;flex-wrap:wrap">${cards}</div>
+    <div style="font-size:9px;color:var(--tx3);margin-top:6px">Book rule (p.47): शेष विश्वे सौम्य ⇒ <b style="color:var(--bear)">मंदी (bearish)</b> · शेष विश्वे क्रूर ⇒ <b style="color:var(--bull)">तेजी (bullish)</b>. टकेवार (p.48): anchor price = 20 विश्वा; each net विश्वा ⇒ 1/20 of anchor, valid to period end. दिन begins at sunrise (market proxy: open).</div></div>
+  </div>
+
+  <!-- 15-min heatmap -->
+  <div class="pnl">
+    <div class="ph"><span class="dot"></span>15-MIN वेध BIAS HEATMAP · ${ID.abbr} ${mtt(ID.open*60)} → ${mtt(ID.close*60)} · net विश्वा per slot</div>
     <div class="pb">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div style="background:var(--bull3);border:1px solid var(--bull2);border-radius:4px;padding:10px 12px">
-          <div style="font-size:13px;font-weight:700;color:var(--bull);margin-bottom:6px">▲ +VE  (Bullish · Short-Cover · Spike)</div>
-          <div style="font-size:11px;color:var(--tx0);line-height:1.6">
-            <strong style="color:var(--bull)">PAAP ↔ PAAP vedha</strong> &nbsp; full +VE
-            <div style="margin:4px 0 6px 8px;color:var(--tx2);font-size:10px">Two malefics (Sun, Mars, Saturn, Rahu, Ketu) sit in opposing nakshatras of the SBC table.</div>
-            <strong style="color:var(--bull)">PAAP-side MIXED</strong> &nbsp; mild +VE
-            <div style="margin:4px 0 0 8px;color:var(--tx2);font-size:10px">One side is a paap planet, the other is neutral / shubh — net leans positive.</div>
-          </div>
-        </div>
-        <div style="background:var(--bear3);border:1px solid var(--bear2);border-radius:4px;padding:10px 12px">
-          <div style="font-size:13px;font-weight:700;color:var(--bear);margin-bottom:6px">▼ −VE  (Resistance · Profit-Booking · Supply)</div>
-          <div style="font-size:11px;color:var(--tx0);line-height:1.6">
-            <strong style="color:var(--bear)">SHUBH ↔ SHUBH vedha</strong> &nbsp; full −VE
-            <div style="margin:4px 0 6px 8px;color:var(--tx2);font-size:10px">Two benefics (Moon, Mercury, Jupiter, Venus) sit in opposing nakshatras of the SBC table.</div>
-            <strong style="color:var(--bear)">SHUBH-side MIXED</strong> &nbsp; mild −VE
-            <div style="margin:4px 0 0 8px;color:var(--tx2);font-size:10px">One side is a shubh planet, the other is neutral / paap — net leans negative.</div>
-          </div>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
-        <div style="background:var(--bg2);border-left:3px solid var(--bull);padding:6px 10px;font-size:11px">
-          <strong style="color:var(--bull)">Shubh planets:</strong>
-          <span style="color:${PC.Moon};font-weight:700">Moon</span> · <span style="color:${PC.Mercury};font-weight:700">Mercury</span> · <span style="color:${PC.Jupiter};font-weight:700">Jupiter</span> · <span style="color:${PC.Venus};font-weight:700">Venus</span>
-        </div>
-        <div style="background:var(--bg2);border-left:3px solid var(--bear);padding:6px 10px;font-size:11px">
-          <strong style="color:var(--bear)">Paap planets:</strong>
-          <span style="color:${PC.Sun};font-weight:700">Sun</span> · <span style="color:${PC.Mars};font-weight:700">Mars</span> · <span style="color:${PC.Saturn};font-weight:700">Saturn</span> · <span style="color:${PC.Rahu};font-weight:700">Rahu</span> · <span style="color:${PC.Ketu};font-weight:700">Ketu</span>
-        </div>
+      <div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%">
+        <thead><tr><th style="position:sticky;left:0;background:var(--bg1)"></th>${hmHead}</tr></thead>
+        <tbody>${hmRows}
+        <tr><td style="font-size:8px;color:${PC.Moon};position:sticky;left:0;background:var(--bg1)">☾ nak·pada</td>${moonRow}</tr></tbody>
+      </table></div>
+      <div style="display:flex;gap:12px;margin-top:6px;font-size:10px;flex-wrap:wrap">
+        <span><span style="display:inline-block;width:12px;height:12px;background:rgba(0,200,90,.6);vertical-align:-2px"></span> तेजी (krura vedha dominant)</span>
+        <span><span style="display:inline-block;width:12px;height:12px;background:rgba(255,40,70,.6);vertical-align:-2px"></span> मंदी (saumya vedha dominant)</span>
+        <span style="color:var(--tx3)">intensity ∝ |net विश्वा| · timing shifts occur at चन्द्र pada/nakshatra crossings, tithi & paksha changes, कोण-वेध triggers</span>
       </div>
     </div>
   </div>
 
-  <!-- ▒▒▒ NET POLARITY HEADLINE ▒▒▒ -->
-  <div class="pnl" style="border-color:${netCol}55">
-    <div class="ph"><span class="dot" style="background:${netCol}"></span>NET SBC VEDHA POLARITY TODAY</div>
-    <div class="pb" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-      <div>
-        <div style="font-size:20px;font-weight:800;color:${netCol};letter-spacing:.1em">${netLabel}</div>
-        <div style="font-size:11px;color:var(--tx2);margin-top:2px">${vedhaPairs.length} active vedha pair${vedhaPairs.length===1?'':'s'} · Σ direction = ${netSum>0?'+':''}${netSum.toFixed(1)}</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:9px;color:var(--tx3)">+VE pairs &nbsp;/&nbsp; −VE pairs &nbsp;/&nbsp; mixed</div>
-        <div style="font-size:14px;font-weight:700;font-family:monospace">
-          <span style="color:var(--bull)">${vedhaPairs.filter(v=>v.dir>0.5).length}</span> &nbsp;/&nbsp;
-          <span style="color:var(--bear)">${vedhaPairs.filter(v=>v.dir<-0.5).length}</span> &nbsp;/&nbsp;
-          <span style="color:var(--neut)">${vedhaPairs.filter(v=>Math.abs(v.dir)<=0.5 && v.dir!==0).length}</span>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ▒▒▒ THE GRID ▒▒▒ -->
+  <!-- the chakra -->
   <div class="pnl">
-    <div class="ph"><span class="dot"></span>SARVATOBHADRA CHAKRA · ${S.date} · IST ${mtt(parseFloat(S.time)*60)}</div>
+    <div class="ph"><span class="dot"></span>SARVATOBHADRA CHAKRA · वेध lines by गति · ${S.date} · ${mtt(parseFloat(S.time)*60)}</div>
     <div class="pb">
       <div style="overflow-x:auto;display:flex;justify-content:center">${svg}</div>
       <div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;font-size:11px">
-        <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:14px;background:#003020;border:1.5px solid #00b84a;display:inline-block"></span><span style="color:#00f07a;font-weight:700">Active (no vedha)</span></span>
-        <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:14px;background:#002a14;border:2px solid #00b84a;display:inline-block"></span><span style="color:#00f07a;font-weight:700">+VE vedha (paap-paap)</span></span>
-        <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:14px;background:#280008;border:2px solid #cc1030;display:inline-block"></span><span style="color:#ff3355;font-weight:700">−VE vedha (shubh-shubh)</span></span>
-        <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:14px;background:#2a2000;border:1.5px solid #cc8800;display:inline-block"></span><span style="color:#ffc107;font-weight:700">Mixed vedha</span></span>
+        <span><span style="display:inline-block;width:18px;height:3px;background:#00f07a;vertical-align:3px"></span> क्रूर ग्रह वेध ⇒ तेजी</span>
+        <span><span style="display:inline-block;width:18px;height:3px;background:#ff3355;vertical-align:3px"></span> सौम्य ग्रह वेध ⇒ मंदी</span>
+        <span><span style="display:inline-block;width:18px;height:0;border-top:2px dashed #b89cff;vertical-align:3px"></span> कोण-वेध diagonal (◇ pada-trigger)</span>
+        <span style="color:var(--tx2)">planet badge: ·म = मध्यचारी (front) · ·शी = शीघ्री (left) · ·व = वक्री (right) · Sun/Moon/Rahu/Ketu pierce all three</span>
       </div>
     </div>
   </div>
 
-  <!-- ▒▒▒ ACTIVE VEDHA PAIRS TABLE (with polarity) ▒▒▒ -->
+  <!-- workings -->
   <div class="pnl">
-    <div class="ph"><span class="dot"></span>ACTIVE VEDHA PAIRS · WITH POLARITY</div>
-    ${vedhaPairs.length === 0 ? `
-      <div class="pb"><div style="padding:10px;color:var(--tx3);font-size:11px">No nakshatra-pair vedha active right now.</div></div>
-    ` : `<div class="ts"><table class="tbl">
-      <thead><tr><th>Nakshatra A</th><th>Nakshatra B</th><th>Planet A</th><th>Planet B</th><th>Class</th><th style="text-align:center">Polarity</th><th>Interpretation</th></tr></thead>
-      <tbody>${vedhaPairs.map(v=>{
-        const col = v.dir>0 ? 'var(--bull)' : 'var(--bear)';
-        const trCls = v.dir>0.5 ? 'tr-b' : v.dir<-0.5 ? 'tr-r' : 'tr-n';
-        const pol = v.dir>0.5 ? '▲ +VE' : v.dir<-0.5 ? '▼ −VE' : v.dir>0 ? '△ mild +VE' : '▽ mild −VE';
-        return `<tr class="${trCls}">
-          <td style="font-size:11px;font-weight:700">${v.nak1}</td>
-          <td style="font-size:11px;font-weight:700">${v.nak2}</td>
-          <td style="color:${pc(v.p1)};font-weight:700">${v.p1} <span style="font-size:9px;color:var(--tx3)">(${SHUBH.has(v.p1)?'shubh':'paap'})</span></td>
-          <td style="color:${pc(v.p2)};font-weight:700">${v.p2} <span style="font-size:9px;color:var(--tx3)">(${SHUBH.has(v.p2)?'shubh':'paap'})</span></td>
-          <td style="font-size:10px;color:var(--tx2)">${v.klass}</td>
-          <td style="text-align:center;font-weight:700;color:${col};white-space:nowrap">${pol}</td>
-          <td style="font-size:10px;color:var(--tx2)">${v.hint}</td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table></div>`}
+    <div class="ph"><span class="dot"></span>वेध WORKINGS — limb-by-limb (वर्ण · स्वर · तिथि · नक्षत्र · राशि) × दृष्टि × स्वामी-सम्बन्ध</div>
+    <div class="ts"><table class="tbl">
+      <thead><tr><th>Instrument</th><th>Vedhaka</th><th>गति</th><th>पञ्चक limbs pierced</th><th style="text-align:center">दृष्टि</th><th style="text-align:center">सम्बन्ध</th><th style="text-align:center">विश्वा</th></tr></thead>
+      <tbody>${workRows}</tbody></table></div>
+    <div style="font-size:9px;color:var(--tx3);padding:4px 12px">विश्वा = limbs × दृष्टि-पाद × quota (सौम्य 1.0 / क्रूर 0.8 per limb) × स्वामी-factor (सौम्य: स्वामी 1 · मित्र ¾ · सम ½ · शत्रु ¼ — क्रूर inverted). वेध without दृष्टि bears no fruit (p.46). तिथि-वेध halves in कृष्ण पक्ष.</div>
   </div>
 
-  <!-- ▒▒▒ PLANET POSITIONS (with vedha polarity tag per planet) ▒▒▒ -->
+  <!-- nakshatra effects from the book -->
   <div class="pnl">
-    <div class="ph"><span class="dot"></span>NAKSHATRA POSITIONS — ALL PLANETS</div>
-    <div class="pb" style="display:flex;gap:8px;flex-wrap:wrap">
-      ${D.planets.map(p=>{
-        const nk=getNak(p.lon);
-        const vi=VEDHA[nk.idx];
-        const vactive=vi!==undefined&&activeNaks.has(vi);
-        const pol = vactive ? (nakPol.get(nk.idx) || 0) : 0;
-        const polLabel = pol>0 ? '▲ +VE' : pol<0 ? '▼ −VE' : vactive ? '± mixed' : '';
-        const polCol   = pol>0 ? 'var(--bull)' : pol<0 ? 'var(--bear)' : 'var(--neut)';
-        const klass = SHUBH.has(p.name) ? 'shubh' : PAPA.has(p.name) ? 'paap' : 'neutral';
-        return`<div style="background:var(--bg2);border:1px solid var(--bd);border-left:3px solid ${PC[p.name]};padding:6px 10px;border-radius:3px${vactive?';border-top:1px solid '+polCol:''}">
-          <div style="font-size:12px;font-weight:700;color:${PC[p.name]}">${p.name}${p.retro?' <span style="color:var(--bear)">℞</span>':''} <span style="font-size:9px;color:var(--tx3);font-weight:400">(${klass})</span></div>
-          <div style="font-size:11px;color:var(--tx0);margin-top:2px;font-weight:700">${nk.n}</div>
-          <div style="font-size:10px;color:var(--tx1)">${p.sign} ${dmsC(p.deg)} Pd${nk.pada}</div>
-          <div style="font-size:10px;color:${pc(p.sub)};font-weight:700">${p.sub}</div>
-          ${vactive?`<div style="font-size:9px;color:${polCol};font-weight:700">Vedha: ${NAKS[vi]?.n} <span style="float:right">${polLabel}</span></div>`:''}
-        </div>`;
-      }).join('')}
-    </div>
+    <div class="ph"><span class="dot"></span>नक्षत्रों पर वेध — BOOK EFFECTS (pp. 48-52) · direction · window · goods</div>
+    ${fxRows?`<div class="ts"><table class="tbl">
+      <thead><tr><th>Nakshatra</th><th>Pierced by</th><th style="text-align:center">फल</th><th>दिशा</th><th>अवधि</th><th>वस्तुएँ</th></tr></thead>
+      <tbody>${fxRows}</tbody></table></div>`
+    :'<div class="pb"><div style="color:var(--tx3);font-size:11px">No nakshatra is pierced right now.</div></div>'}
+    <div style="font-size:9px;color:var(--tx3);padding:4px 12px">शुभ ग्रहों के वेध से मंदी · पाप ग्रहों के वेध से तेजी — within the stated window & region (p.48).</div>
   </div>
 
 </div>`;
 }
-
 // ═══════════════════════════════════════════════════════════════════
 // TAB: 15-MIN TIMING
 // ═══════════════════════════════════════════════════════════════════
@@ -7141,5 +7291,4 @@ fetchPrices();
 scheduleAutoRefresh();
 
 </script>
-</body>
-</html>
+</body
