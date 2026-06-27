@@ -420,10 +420,27 @@ def run_app():
         zod = st.radio("Zodiac", ["Tropical", "Sidereal (Lahiri)"], index=0)
         sidereal = zod.startswith("Sidereal")
         st.caption("Node = mean node (true node needs the Swiss Ephemeris build).")
+
+        # Persist the chosen instant across reruns. The widgets are KEYED and
+        # seeded once from session_state; seeding them with a live
+        # datetime.now() default (as before) made Streamlit treat the picker as
+        # a new widget every rerun and snap it back to the current time, so
+        # forward dates/times could never "stick".
+        if "calc_date" not in st.session_state:
+            _n = datetime.now(IST)
+            st.session_state.calc_date = _n.date()
+            st.session_state.calc_time = _n.time().replace(second=0, microsecond=0)
+
+        def _reset_now():
+            _n = datetime.now(IST)
+            st.session_state.calc_date = _n.date()
+            st.session_state.calc_time = _n.time().replace(second=0, microsecond=0)
+
         c1, c2 = st.columns(2)
-        now_ist = datetime.now(IST)
-        d_in = c1.date_input("Date (IST)", now_ist.date())
-        t_in = c2.time_input("Time (IST)", now_ist.time())
+        d_in = c1.date_input("Date (IST)", key="calc_date")
+        t_in = c2.time_input("Time (IST)", key="calc_time",
+                             step=timedelta(minutes=5))
+        st.button("\u27f3 Reset to now", on_click=_reset_now, width='stretch')
         dt_ist = datetime.combine(d_in, t_in, tzinfo=IST)
 
         st.header("Degree highlights")
