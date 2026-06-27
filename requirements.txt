@@ -1,6 +1,7 @@
-streamlit>=1.30
-yfinance>=0.2.40
-pyswisseph>=2.10
-plotly>=5.20
-pandas>=2.0
+streamlit
+yfinance
+pyswisseph
+plotly
+pandas
 pytz
+numpy
