@@ -2,7 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#010d12">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Astro Terminal">
+<meta name="format-detection" content="telephone=no">
 <title>Financial Astrology Terminal</title>
 <!-- Astronomy Engine: VSOP87/ELP-2000 ephemeris (~150KB, cached after first load) -->
 <!-- Provides sub-arcsecond accuracy matching JPL Horizons / Swiss Ephemeris -->
@@ -388,7 +395,37 @@ details.coll:not([open])>summary::before{transform:rotate(-90deg)}
 details.coll[open]>summary{border-bottom:1px solid var(--bd)}
 details.coll>summary:hover{background:#06303f;color:#8df7ff}
 @media(max-width:820px){.dayfc-tab,.fats-tab{zoom:1}}
+/* -- app-like mobile hardening (added; non-destructive) -- */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+.main,.ts{-webkit-overflow-scrolling:touch}
+@media(max-width:820px){
+  .main{overflow-x:hidden;padding-bottom:calc(20px + env(safe-area-inset-bottom))}
+  .pnl{max-width:100%}
+  .ts{max-width:100%}
+  .ts table.tbl{min-width:max-content}
+  input.ci,select.ci{font-size:16px}
+  .navtoggle{font-size:18px;padding:7px 13px}
+  .nb{padding:13px 16px;font-size:13px}
+  .hdr{padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right))}
+}
+@media(max-width:480px){
+  .brand{font-size:11px}
+  .brand-sub{font-size:7px;line-height:1.3}
+  .ph{font-size:7.5px}
+  .pb{padding:7px 8px}
+}
 </style>
+<script>
+/* app-like home-screen support: runtime manifest + icon (http/https only; no-ops on file://) */
+(function(){try{
+  var icon="data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="512" height="512" rx="96" fill="#010d12"/><text x="256" y="350" font-size="300" text-anchor="middle" fill="#00e8ff" font-family="monospace">⬡</text></svg>');
+  var mani={name:"Financial Astrology Terminal",short_name:"Astro Term",description:"Financial astrology terminal (NSE/BSE)",display:"standalone",background_color:"#010d12",theme_color:"#010d12",orientation:"any",start_url:".",scope:".",icons:[{src:icon,sizes:"512x512",type:"image/svg+xml",purpose:"any maskable"}]};
+  var url=URL.createObjectURL(new Blob([JSON.stringify(mani)],{type:"application/manifest+json"}));
+  var l=document.createElement("link"); l.rel="manifest"; l.href=url; document.head.appendChild(l);
+  var ic=document.createElement("link"); ic.rel="apple-touch-icon"; ic.href=icon; document.head.appendChild(ic);
+  var fav=document.createElement("link"); fav.rel="icon"; fav.href=icon; document.head.appendChild(fav);
+}catch(e){}})();
+</script>
 </head>
 <body>
 <div class="terminal">
@@ -4938,6 +4975,73 @@ async function planLoad(){
 }
 
 function planSig(kind){ return planInstKey()+'|'+planRange()+'|'+kind+'|'+planBodies().join(',')+'|'+planFwd()+'|'+planOrb(); }
+// ====================================================================
+// SUN-JUPITER ASPECT ENGINE   (added rule -- bhav phal sutra)
+// --------------------------------------------------------------------
+// Tracks GEOCENTRIC Sun-Jupiter aspects at 0 / 45 / 90 / 135 / 180 deg.
+// Step 1: find & plot every such aspect across the chart span.
+// Step 2: per aspect, derive Support/Resistance from the index Mon-Fri
+//   high/low of the "defining week": aspect on a weekday -> that same
+//   Mon-Fri week; aspect on a weekend (Sat/Sun) -> the FOLLOWING Mon-Fri.
+//   Levels hold forward until the next aspect perfects.
+// theta=(SunLon-JupLon) is monotonic (Sun always gains on Jupiter), so
+// each base level below is a clean crossing of the unwrapped phase.
+// ====================================================================
+const SJ_BASE = [
+  {v:0,   a:0,   g:'☌'}, {v:45,  a:45,  g:'∠'}, {v:90,  a:90,  g:'□'},
+  {v:135, a:135, g:'⚼'}, {v:180, a:180, g:'☍'}, {v:225, a:135, g:'⚼'},
+  {v:270, a:90,  g:'□'}, {v:315, a:45,  g:'∠'}
+];
+const SJ_ANGLE_COL = {0:'#ffd700', 45:'#ff9e2c', 90:'#ff5d6c', 135:'#c39bff', 180:'#5ad0e8'};
+
+function planISTDateStr(ms){ const d=new Date(ms+5.5*3600000);
+  return d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0'); }
+
+// Find every Sun-Jupiter aspect perfection inside [t0,t1].
+function planSJFindAspects(t0, t1){
+  const DAY=PLAN_DAYMS; let prev=null, phi=0; const S0=[];
+  for(let ms=t0-DAY; ms<=t1+DAY; ms+=DAY){
+    const J=planJDfromMs(ms); const th=n360(geoLon('Sun',J)-geoLon('Jupiter',J));
+    if(prev===null) phi=th; else { let d=th-prev; if(d>180)d-=360; if(d<-180)d+=360; phi+=d; }
+    prev=th; S0.push({ms:ms, phi:phi});
+  }
+  const ev=[];
+  for(let i=1;i<S0.length;i++){ const A=S0[i-1], B=S0[i];
+    for(let ti=0;ti<SJ_BASE.length;ti++){ const t=SJ_BASE[ti];
+      let k=Math.ceil((A.phi - t.v)/360);
+      for(;;k++){ const lv=t.v+360*k;
+        if(lv <= A.phi){ continue; } if(lv > B.phi){ break; }
+        const f=(lv-A.phi)/((B.phi-A.phi)||1); const ms=A.ms+f*(B.ms-A.ms);
+        if(ms>=t0 && ms<=t1) ev.push({ms:ms, angle:t.a, glyph:t.g}); } } }
+  ev.sort((x,y)=>x.ms-y.ms); return ev;
+}
+
+// Defining Mon-Fri week for an aspect, applying the weekend -> next-week rule.
+function planSJWeek(ms){
+  const dms=planMs(planISTDateStr(ms));      // UTC-midnight of the IST aspect date
+  const dow=new Date(dms).getUTCDay();       // 0=Sun ... 6=Sat
+  const weekend=(dow===0 || dow===6);
+  let off; if(dow===0) off=1; else if(dow===6) off=2; else off=1-dow;
+  const monMs=dms+off*PLAN_DAYMS, friMs=monMs+4*PLAN_DAYMS;
+  return {monMs:monMs, friMs:friMs, dow:dow, weekend:weekend};
+}
+
+// Build forward-holding S/R segments from the aspect list + index OHLC.
+function planSJSegments(aspects, ohlc, tEnd){
+  const segs=[];
+  for(let i=0;i<aspects.length;i++){ const a=aspects[i]; const wk=planSJWeek(a.ms);
+    let hi=-Infinity, lo=Infinity, nb=0;
+    for(let r=0;r<ohlc.length;r++){ const bar=ohlc[r];
+      if(bar.ms>=wk.monMs && bar.ms<=wk.friMs){ if(bar.h>hi)hi=bar.h; if(bar.l<lo)lo=bar.l; nb++; } }
+    const has=nb>0 && isFinite(hi) && isFinite(lo);
+    segs.push({ ms:a.ms, angle:a.angle, glyph:a.glyph,
+      monMs:wk.monMs, friMs:wk.friMs, dow:wk.dow, weekend:wk.weekend,
+      support: has?lo:null, resistance: has?hi:null, bars:nb,
+      from:a.ms, to:(i+1<aspects.length)?aspects[i+1].ms:tEnd });
+  }
+  return segs;
+}
+
 function planComputeData(kind){
   const key=planInstKey()+'|'+planRange(); const ohlc=window.PLAN.ohlc[key]; if(!ohlc) return;
   const bodies=planBodies();
@@ -4954,7 +5058,9 @@ function planComputeData(kind){
         if(d<=orb){ if(!inC){inC=true;bi=i;best=d;} else if(d<best){best=d;bi=i;} } else if(inC){ conj.push({ms:times[bi],p1:bodies[a],p2:bodies[b],sep:best}); inC=false;best=999; } }
       if(inC) conj.push({ms:times[bi],p1:bodies[a],p2:bodies[b],sep:best}); }
     conj.sort((x,y)=>x.ms-y.ms); }
-  window.PLAN.data={sig:planSig(kind), kind, bodies, t0, t1, tLastP, ohlc, times, series, retro, conj, nS};
+  let sjAspects=[], sjSegments=[];
+  if(kind==='lon'){ sjAspects=planSJFindAspects(t0,t1); sjSegments=planSJSegments(sjAspects, ohlc, t1); }
+  window.PLAN.data={sig:planSig(kind), kind, bodies, t0, t1, tLastP, ohlc, times, series, retro, conj, sjAspects, sjSegments, nS};
 }
 
 function planDrawSVG(kind){
@@ -5006,6 +5112,27 @@ function planDrawSVG(kind){
   }
   if(kind==='lon' && S.planConj!==false){ D.conj.forEach(cj=>{ if(inWin(cj.ms)){const x=X(cj.ms);conjLines+=`<line x1="${x.toFixed(1)}" y1="${PADT}" x2="${x.toFixed(1)}" y2="${(topB+HB).toFixed(1)}" stroke="#5ad0e8" stroke-width="0.5" stroke-dasharray="2 4" opacity="0.4"/>`;} }); }
 
+  // -- Sun-Jupiter aspects: vertical perfection lines, defining-week band, stepwise S/R --
+  let sjBands='', sjLines='';
+  if(kind==='lon' && S.planSJ!==false && D.sjSegments && D.sjSegments.length){
+    for(let _si=0;_si<D.sjSegments.length;_si++){ const sg=D.sjSegments[_si];
+      const col=SJ_ANGLE_COL[sg.angle]||'#ffd700';
+      // defining-week highlight band on the price panel
+      if(sg.friMs>=vt0 && sg.monMs<=vt1){ const bx0=Math.max(PADL,X(sg.monMs)), bx1=Math.min(W-PADR,X(sg.friMs)); const bw=Math.max(2,bx1-bx0);
+        sjBands+=`<rect x="${bx0.toFixed(1)}" y="${PADT}" width="${bw.toFixed(1)}" height="${HP}" fill="${col}" opacity="0.08"/>`; }
+      // stepwise S/R held forward until the next aspect
+      if(sg.support!=null){ const a0=Math.max(sg.from,vt0), a1=Math.min(sg.to,vt1);
+        if(a1>a0){ const sx0=X(a0), sx1=X(a1);
+          if(sg.resistance>=pmin&&sg.resistance<=pmax){ const yR=yP(sg.resistance); sjLines+=`<line x1="${sx0.toFixed(1)}" y1="${yR.toFixed(1)}" x2="${sx1.toFixed(1)}" y2="${yR.toFixed(1)}" stroke="#ff5d6c" stroke-width="1.1" stroke-dasharray="6 3" opacity="0.9"/>`; }
+          if(sg.support>=pmin&&sg.support<=pmax){ const yS=yP(sg.support); sjLines+=`<line x1="${sx0.toFixed(1)}" y1="${yS.toFixed(1)}" x2="${sx1.toFixed(1)}" y2="${yS.toFixed(1)}" stroke="#39d98a" stroke-width="1.1" stroke-dasharray="6 3" opacity="0.9"/>`; } } }
+      // vertical aspect-perfection line across both panels + marker & label
+      if(sg.ms>=vt0 && sg.ms<=vt1){ const x=X(sg.ms);
+        sjLines+=`<line x1="${x.toFixed(1)}" y1="${PADT}" x2="${x.toFixed(1)}" y2="${(topB+HB).toFixed(1)}" stroke="${col}" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.92"/>`;
+        sjLines+=`<path d="M ${x.toFixed(1)} ${(PADT+3).toFixed(1)} l 3.4 4 l -3.4 4 l -3.4 -4 z" fill="${col}"/>`;
+        sjLines+=`<text x="${(x+5).toFixed(1)}" y="${(PADT+11)}" fill="${col}" font-size="8.5" font-weight="700">☉${sg.glyph}♃ ${sg.angle}°</text>`; }
+    }
+  }
+
   // x-axis ticks adaptive to visible span
   const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const spanD=(vt1-vt0)/PLAN_DAYMS; let xAxis='';
@@ -5024,7 +5151,7 @@ function planDrawSVG(kind){
   const clip=`<clipPath id="plan-clip"><rect x="${PADL}" y="${PADT}" width="${IW}" height="${(topB+HB-PADT).toFixed(1)}"/></clipPath>`;
   return `<svg id="plan-svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;background:#02141c;border:1px solid #0d3848;border-radius:4px;cursor:crosshair;touch-action:none">
     <defs>${clip}</defs>${deco}${pGrid}${bGrid}${xAxis}
-    <g clip-path="url(#plan-clip)">${conjLines}${priceSVG}${curves}${markers}</g>
+    <g clip-path="url(#plan-clip)">${conjLines}${sjBands}${priceSVG}${curves}${markers}${sjLines}</g>
     ${legend}${titles}<g id="plan-cross"></g></svg>`;
 }
 
@@ -5114,6 +5241,19 @@ function planChart(kind){
   if(kind==='lon' && D && D.conj.length){ const rows=D.conj.slice(0,60).map(c=>`<tr><td style="white-space:nowrap">${planFmtIST(c.ms)}</td><td style="color:${PLAN_COL[c.p1]}">${c.p1}</td><td style="color:${PLAN_COL[c.p2]}">${c.p2}</td><td style="text-align:right">${c.sep.toFixed(2)}°</td></tr>`).join('');
     conjTable=`<div class="pnl" style="margin-top:10px"><div class="ph"><span class="dot"></span>CONJUNCTION EVENTS — ${D.conj.length} found (orb ≤ ${planOrb()}°)</div>
       <div class="ts" style="max-height:240px;overflow:auto"><table class="tbl"><thead><tr><th>Date / Time (IST)</th><th>Planet 1</th><th>Planet 2</th><th style="text-align:right">Separation</th></tr></thead><tbody>${rows}</tbody></table></div>${D.conj.length>60?`<div style="font-size:9px;color:#3a8090;padding:4px 12px">Showing first 60 of ${D.conj.length}.</div>`:''}</div>`; }
+  let sjTable='';
+  if(kind==='lon' && D && D.sjSegments && D.sjSegments.length){
+    const DOWN=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const rows=D.sjSegments.map(sg=>{ const col=SJ_ANGLE_COL[sg.angle]||'#ffd700';
+      const wkLbl=planISO(sg.monMs).slice(5)+' → '+planISO(sg.friMs).slice(5);
+      const sup=sg.support!=null?Math.round(sg.support).toLocaleString('en-IN'):'—';
+      const res=sg.resistance!=null?Math.round(sg.resistance).toLocaleString('en-IN'):'—';
+      const wend=sg.weekend?` <span style="color:#ffb020" title="aspect fell on a weekend → following Mon-Fri used">(wknd→next wk)</span>`:'';
+      return `<tr><td style="white-space:nowrap">${planFmtIST(sg.ms).split('  ')[0]}</td><td style="color:${col};font-weight:700;white-space:nowrap">☉${sg.glyph}♃ ${sg.angle}°</td><td style="white-space:nowrap">${DOWN[sg.dow]}${wend}</td><td style="white-space:nowrap">${wkLbl}</td><td style="text-align:right;color:#39d98a">${sup}</td><td style="text-align:right;color:#ff5d6c">${res}</td><td style="text-align:center;color:#3a8090">${sg.bars||0}</td></tr>`; }).join('');
+    sjTable=`<div class="pnl" style="margin-top:10px"><div class="ph"><span class="dot"></span>☉-♃ SUN-JUPITER ASPECTS — ${D.sjSegments.length} found · Support/Resistance from the defining Mon-Fri week</div>
+      <div class="ts" style="max-height:260px;overflow:auto"><table class="tbl"><thead><tr><th>Aspect (IST)</th><th>Aspect</th><th>Day</th><th>Defining week</th><th style="text-align:right">Support</th><th style="text-align:right">Resistance</th><th style="text-align:center">Bars</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div style="font-size:9px;color:#3a8090;padding:4px 12px">Rule: aspect on a weekday → that week's Mon-Fri high/low; aspect on a weekend → the following Mon-Fri. Levels hold until the next aspect. On the chart: coloured vertical = aspect, faint band = defining week, <span style="color:#39d98a">green dashed = support</span>, <span style="color:#ff5d6c">red dashed = resistance</span>.</div></div>`;
+  }
   let raw=''; const rawOpen=!!S.planRaw; let rawBody='';
   if(rawOpen && D){ const prRows=D.ohlc.slice().reverse().map(r=>`<tr><td>${r.date}</td><td style="text-align:right">${r.o.toFixed(2)}</td><td style="text-align:right">${r.h.toFixed(2)}</td><td style="text-align:right">${r.l.toFixed(2)}</td><td style="text-align:right;color:#cde">${r.c.toFixed(2)}</td></tr>`).join('');
     let plRows=''; for(let ms=D.t1; ms>=D.t0; ms-=PLAN_DAYMS){ const J=planJDfromMs(ms); let tds=''; for(const b of D.bodies){ const v=kind==='lat'?geoLat(b,J):n360(geoLon(b,J)); const rr=(kind==='lon'&&((b==='Rahu'||b==='Ketu')||(b!=='Sun'&&b!=='Moon'&&planetSpeed(b,J)<0)))?'<span style="color:var(--bear)">℞</span>':''; tds+=`<td style="text-align:right;color:${PLAN_COL[b]}">${v.toFixed(2)}°${rr}</td>`; } plRows+=`<tr><td>${planISO(ms)}</td>${tds}</tr>`; }
@@ -5127,7 +5267,7 @@ function planChart(kind){
   const _chartBody=_MIN
     ? `<div style="padding:14px;border:1px dashed #104858;border-radius:4px;color:#3a8090;font-size:11px;text-align:center">Chart minimized — click <b style="color:#8df7ff">🗗 Restore</b> in the toolbar to expand.</div><div id="plan-svg-wrap" style="display:none"></div>`
     : `<div style="position:relative"><div id="plan-svg-wrap">${planDrawSVG(kind)}</div>
-    <div id="plan-tip" style="position:absolute;display:none;pointer-events:none;background:#02232e;border:1px solid var(--bd2);border-radius:4px;padding:5px 7px;font-size:10px;color:#cde;z-index:5;white-space:nowrap"></div></div>${conjTable}${raw}`;
+    <div id="plan-tip" style="position:absolute;display:none;pointer-events:none;background:#02232e;border:1px solid var(--bd2);border-radius:4px;padding:5px 7px;font-size:10px;color:#cde;z-index:5;white-space:nowrap"></div></div>${conjTable}${sjTable}${raw}`;
   return `<div id="plan-host" style="${_hostStyle}">${toolbar}${_chartBody}</div>`;
 }
 
@@ -5148,12 +5288,13 @@ function planControls(kind){
   const fwds=[0,30,90,180,365].map(n=>planBtn(planFwd()===n,`gs({planFwd:${n}})`,n+'d')).join('');
   const ptype=planBtn(planChartType()==='candle',"gs({planChart:'candle'})",'Candle')+planBtn(planChartType()==='line',"gs({planChart:'line'})",'Line');
   const sel=planBodies(); const chips=PLAN_ORDER.map(b=>planBtn(sel.includes(b),`planToggle('${b}')`,b,PLAN_COL[b])).join('');
-  let conjCtrl='';
+  let conjCtrl='', sjCtrl='';
   if(kind==='lon'){ const orbSel=`<select onchange="gs({planOrb:+this.value})" class="ci" style="font-size:10px;padding:2px 4px">${[3,4,6,8,10,15].map(o=>`<option value="${o}" ${planOrb()===o?'selected':''}>${o}°</option>`).join('')}</select>`;
-    conjCtrl=grp('CONJ', planBtn(S.planConj!==false,`gs({planConj:${S.planConj===false}})`,S.planConj!==false?'ON':'OFF')+orbSel); }
+    conjCtrl=grp('CONJ', planBtn(S.planConj!==false,`gs({planConj:${S.planConj===false}})`,S.planConj!==false?'ON':'OFF')+orbSel);
+    const sjOn=S.planSJ!==false; sjCtrl=grp('☉-♃ S/R', planBtn(sjOn,`gs({planSJ:${!sjOn}})`, sjOn?'ON':'OFF','#ffd700')); }
   return `<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
     ${grp('INDEX',`<select onchange="gs({planInst:this.value})" class="ci w130" style="font-size:11px">${instOpts}</select>`)}
-    ${grp('RANGE',ranges)} ${grp('FORECAST',fwds)} ${grp('PRICE',ptype)} ${conjCtrl}
+    ${grp('RANGE',ranges)} ${grp('FORECAST',fwds)} ${grp('PRICE',ptype)} ${conjCtrl} ${sjCtrl}
     <button onclick="window.PLAN.loadedKey=null;window.PLAN.status='idle';planLoad()" style="margin-left:auto;background:var(--bg3);color:var(--acc);border:1px solid var(--bd2);padding:4px 10px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:10px">↻ Reload</button>
   </div>
   <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:9px;color:#3a8090;margin-right:2px">PLANETS</span>${chips}</div>`;
@@ -5168,20 +5309,31 @@ function tPlanetLat(){ setTimeout(planLoad,30);
 function tPlanetLon(){ setTimeout(planLoad,30);
   return `<div class="pnl"><div class="ph"><span class="dot"></span>PLANET LONGITUDE — ${planInstKey()} candles vs planet ecliptic longitude</div>
     <div class="pb">${planControls('lon')}<div id="plan-metrics">${planMetrics()}</div><div id="plan-chart">${planChart('lon')}</div>
-      <div style="font-size:9px;color:#3a8090;margin-top:6px">Tropical longitude 0–360°. Solid=direct · dotted=retro · R/D=station · cyan verticals=conjunctions. Zoom: wheel/drag/＋－ · Pan: shift-drag or toggle · Reset: dbl-click · ⛶ Maximize / ▭ Minimize in toolbar. Port of planets.py.</div>
+      <div style="font-size:9px;color:#3a8090;margin-top:6px">Tropical longitude 0–360°. Solid=direct · dotted=retro · R/D=station · cyan verticals=conjunctions. Zoom: wheel/drag/＋－ · Pan: shift-drag or toggle · Reset: dbl-click · ⛶ Maximize / ▭ Minimize in toolbar. <b style="color:#ffd700">☉-♃ S/R:</b> coloured verticals = Sun-Jupiter aspects (0/45/90/135/180°); green/red dashed = Support/Resistance from the defining Mon-Fri week (toggle ☉-♃ S/R). Port of planets.py.</div>
     </div></div>`; }
 
 // ═══════════════════════════════════════════════════════════════════
 // TAB: OVERVIEW
 // ═══════════════════════════════════════════════════════════════════
 function pShort(name){ var m={Sun:'Su',Moon:'Mo',Mars:'Ma',Mercury:'Me',Jupiter:'Ju',Venus:'Ve',Saturn:'Sa',Rahu:'Ra',Ketu:'Ke',Uranus:'Ur',Neptune:'Ne',Pluto:'Pl'}; return name?(m[name]||name.slice(0,2)):'\u2014'; }
-function combustCellHTML(p, sunLon){
-  if(p.name==='Sun'||sunLon==null) return '<td style="color:var(--tx3);text-align:center">\u2014</td>';
+function combustInfo(p, sunLon){
+  if(p.name==='Sun'||sunLon==null) return null;
   var sep=Math.abs(p.lon-sunLon)%360; if(sep>180)sep=360-sep;
   var orbMap={Moon:12,Mars:17,Mercury:p.retro?12:14,Jupiter:11,Venus:p.retro?8:10,Saturn:15};
   var orb=orbMap[p.name];
-  if(orb!=null && sep<orb) return '<td style="color:var(--bear);font-weight:700;white-space:nowrap" title="Combust (asta) \u2014 within '+orb+'\u00b0 of the Sun">\u2731 '+sep.toFixed(1)+'\u00b0</td>';
-  return '<td style="color:var(--tx3);white-space:nowrap" title="separation from Sun">'+sep.toFixed(1)+'\u00b0</td>';
+  return {sep:sep, orb:orb, combust:(orb!=null && sep<orb)};
+}
+// small red "C" chip placed next to a combust planet's name (at-a-glance)
+function combustBadge(p, sunLon){
+  var ci=combustInfo(p,sunLon);
+  if(ci && ci.combust) return ' <span style="background:var(--bear);color:#fff;font-weight:800;padding:0 4px;border-radius:3px;font-size:9px;vertical-align:middle" title="Combust (asta) — '+p.name+' '+ci.sep.toFixed(1)+'° from Sun (orb '+ci.orb+'°)">C</span>';
+  return '';
+}
+function combustCellHTML(p, sunLon){
+  var ci=combustInfo(p,sunLon);
+  if(ci==null) return '<td style="color:var(--tx3);text-align:center">—</td>';
+  if(ci.combust) return '<td style="white-space:nowrap" title="Combust (asta) — '+p.name+' within '+ci.orb+'° of the Sun"><span style="background:var(--bear);color:#fff;font-weight:800;padding:0 5px;border-radius:3px;font-size:10px">C</span> <span style="color:var(--bear);font-weight:700">'+ci.sep.toFixed(1)+'°</span></td>';
+  return '<td style="color:var(--tx3);white-space:nowrap" title="separation from Sun">'+ci.sep.toFixed(1)+'°</td>';
 }
 function tOverview(){
   const D=DATA,b=D.bias;
@@ -5285,7 +5437,7 @@ function tOverview(){
       <div class="ts"><table class="tbl">
         <thead><tr><th>Planet</th><th>Sign · Deg</th><th>House</th><th>Nakshatra</th><th>Pd</th><th>Nak Lord</th><th>Sub Lord</th><th>SS Lord</th><th>R</th><th>Combust ☉</th></tr></thead>
         <tbody>${keyP.map(p=>`<tr>
-          <td style="font-weight:700;color:${pc(p.name)};white-space:nowrap">${p.abbr} <span style="color:var(--tx3);font-weight:400">${p.name}</span></td>
+          <td style="font-weight:700;color:${pc(p.name)};white-space:nowrap">${p.abbr} <span style="color:var(--tx3);font-weight:400">${p.name}</span>${combustBadge(p,_sunLon)}</td>
           <td style="font-family:monospace;color:var(--tx1);white-space:nowrap">${p.sign} ${dmsC(p.deg)}</td>
           <td style="color:var(--tx2)">H${p.h}</td>
           <td style="color:#5ac8d8">${p.nak}</td>
@@ -8570,11 +8722,41 @@ function tBhavphal(){
       <div style="font-size:9px;color:var(--tx3);padding:4px 12px">${sub}</div>
       <div class="ts"><table class="tbl"><thead><tr><th>House</th><th>Sign</th><th>Lord</th><th>Lord in</th><th>Occupants</th><th>Score</th><th>Verdict</th><th>Sutra factors</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   }
+  // -- Sun-Jupiter aspect (degree) for the daily transit chart AND the Nifty natal chart --
+  const SJ_GLY={0:'☌',45:'∠',90:'□',135:'⚼',180:'☍'};
+  function sjFold(rel){ rel=((rel%360)+360)%360; return rel>180?360-rel:rel; }
+  function sjAspectRow(arr, label, sub, withMotion){
+    const su=arr&&arr.find(p=>p.name==='Sun'), ju=arr&&arr.find(p=>p.name==='Jupiter');
+    if(!su||!ju) return `<tr><td style="font-weight:700">${label}</td><td colspan="6" style="color:var(--tx3)">Sun/Jupiter unavailable</td></tr>`;
+    const sep=sjFold(su.lon-ju.lon);
+    const TGT=[0,45,90,135,180]; let near=0,best=1e9; TGT.forEach(t=>{const o=Math.abs(sep-t); if(o<best){best=o;near=t;}});
+    const col=(typeof SJ_ANGLE_COL!=='undefined'&&SJ_ANGLE_COL[near])||'#ffd700';
+    const orbTxt = best<=1?'EXACT':best<=3?'tight':best<=6?'in orb':'wide';
+    const orbCol = best<=3?'var(--bull)':best<=6?'#7fe0b0':'var(--tx3)';
+    let motion='<span style="color:var(--tx3)">— (natal · fixed)</span>';
+    if(withMotion){ try{ const J=DATA.J; const sep1=sjFold(geoLon('Sun',J+1)-geoLon('Jupiter',J+1)); const o1=Math.abs(sep1-near);
+      motion = o1<best ? '<span style="color:var(--bull)">applying ▲</span>' : '<span style="color:var(--bear)">separating ▼</span>'; }catch(e){ motion='<span style="color:var(--tx3)">—</span>'; } }
+    return `<tr>
+      <td style="font-weight:700;color:var(--tx1)">${label}<div style="font-size:9px;color:var(--tx3);font-weight:400">${sub}</div></td>
+      <td style="color:${PC.Sun};font-family:monospace">${su.lon.toFixed(2)}°<span style="color:var(--tx3);font-size:10px"> ${su.sign}</span></td>
+      <td style="color:${PC.Jupiter};font-family:monospace">${ju.lon.toFixed(2)}°<span style="color:var(--tx3);font-size:10px"> ${ju.sign}${ju.retro?' ℞':''}</span></td>
+      <td style="font-family:monospace;font-weight:700;color:var(--tx1);font-size:13px">${sep.toFixed(2)}°</td>
+      <td style="font-weight:700;color:${col}">${near}° ${SJ_GLY[near]}</td>
+      <td style="font-family:monospace;color:${orbCol}">${best.toFixed(2)}° · ${orbTxt}</td>
+      <td>${motion}</td></tr>`;
+  }
+  const sjAspTable = `<div class="pnl"><div class="ph"><span class="dot"></span>☉–♃ SUN–JUPITER ASPECT — degree separation &amp; nearest 0 / 45 / 90 / 135 / 180° aspect</div>
+    <div style="font-size:9px;color:var(--tx3);padding:4px 12px">Geocentric Sun–Jupiter angular separation (folded to 0–180°) and the nearest tracked aspect, for today's transit chart and the Nifty natal chart. Orb = distance from the exact aspect (EXACT ≤1°, tight ≤3°, in orb ≤6°). Motion: is the transit Sun applying to or separating from the aspect. Separation is frame-independent (identical in Lahiri-sidereal &amp; tropical).</div>
+    <div class="ts"><table class="tbl"><thead><tr><th>Chart</th><th>☉ Sun</th><th>♃ Jupiter</th><th>Separation</th><th>Nearest aspect</th><th>Orb</th><th>Motion</th></tr></thead><tbody>
+      ${sjAspectRow(D.planets, 'Today (transit)', S.date, true)}
+      ${sjAspectRow(D.natal&&D.natal.planets, 'Nifty Natal', '27-Nov-1992 · 11:43 IST', false)}
+    </tbody></table></div></div>`;
   return`
 <div style="display:flex;flex-direction:column;gap:10px">
   <div class="pnl"><div class="pb" style="font-size:10px;color:var(--tx2)">
     <b style="color:var(--acc)">Bhav-Phal Sutra (bhavphal.md):</b> house lord in 6/8/12 weakens the house; in kendra(1,4,7,10)/trikona(1,5,9) it prospers; in 2/3/11 benefic. Lord combust(अस्त)/retrograde(वक्री) → reduction/delay. Lord within 5° of Rahu/Ketu → reduction. Natural malefics (Sun,Mars,Saturn,Rahu,Ketu) harm where they sit/aspect — except in upachaya 3/6/11. Market read: bull houses ▲ 1·2·5·9·11 vs bear houses ▼ 6·8·12.
   </div></div>
+  ${sjAspTable}
   ${tbl(D.bhavDay, '⌂ BHAV-PHAL — TODAY ('+S.date+') chart', 'Intraday house-strength on the day chart — drives the daily push.')}
   ${tbl(D.bhavNatal, '⌂ BHAV-PHAL — NIFTY NATAL chart', 'Structural backdrop strength of the Nifty birth chart — the long-term bias the day modulates.')}
 </div>`;
