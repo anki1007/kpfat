@@ -5242,7 +5242,7 @@ function planAttachInteract(){
   const vpos=ev=>{ const r=svg.getBoundingClientRect(); const fx=(ev.clientX-r.left)/r.width; return {fx, vbX:fx*window.PLAN.view.W, cw:r.width}; };
   const timeAt=vbX=>{ const v=window.PLAN.view; return v.vt0+((vbX-v.PADL)/v.IW)*(v.vt1-v.vt0); };
 
-  svg.onwheel=function(ev){ ev.preventDefault(); const v=window.PLAN.view; const {vbX}=vpos(ev); const ct=timeAt(vbX); const f=ev.deltaY<0?0.8:1/0.8; const rel=(ct-v.vt0)/(v.vt1-v.vt0); let span=(v.vt1-v.vt0)*f; planClampWin(ct-rel*span, ct+(1-rel)*span); planRedraw(); };
+  svg.onwheel=function(ev){ /* plain wheel = scroll the page; zoom only with Ctrl or in Pan mode so tables below stay reachable */ if(!ev.ctrlKey && !window.PLAN.panMode) return; ev.preventDefault(); const v=window.PLAN.view; const {vbX}=vpos(ev); const ct=timeAt(vbX); const f=ev.deltaY<0?0.8:1/0.8; const rel=(ct-v.vt0)/(v.vt1-v.vt0); let span=(v.vt1-v.vt0)*f; planClampWin(ct-rel*span, ct+(1-rel)*span); planRedraw(); };
 
   svg.onmousedown=function(ev){ const {vbX}=vpos(ev); _planDrag={x0:vbX, t0w:window.PLAN.win.t0, t1w:window.PLAN.win.t1, pan:(window.PLAN.panMode||ev.shiftKey), moved:false}; };
   svg.ondblclick=function(){ planResetZoom(); };
@@ -5374,7 +5374,7 @@ function planToggle(b){ let sel=planBodies(); if(sel.includes(b)) sel=sel.filter
 function tPlanetLat(){ setTimeout(planLoad,30);
   return `<div class="pnl"><div class="ph"><span class="dot"></span>PLANET LATITUDE — ${planInstKey()} candles vs planet ecliptic latitude (Shar)</div>
     <div class="pb">${planControls('lat')}<div id="plan-metrics">${planMetrics()}</div><div id="plan-chart">${planChart('lat')}</div>
-      <div style="font-size:10.5px;color:var(--tx3);margin-top:6px">Top: ${planInstKey()} OHLC. Bottom: planet ecliptic latitude (N+ / S−). Zoom: wheel / drag / ＋－ buttons · Pan: shift-drag or Pan toggle · Reset: dbl-click · ⛶ Maximize / ▭ Minimize in toolbar. Port of planet.py.</div>
+      <div style="font-size:10.5px;color:var(--tx3);margin-top:6px">Top: ${planInstKey()} OHLC. Bottom: planet ecliptic latitude (N+ / S−). Zoom: Ctrl+wheel or ＋－ buttons (plain wheel scrolls the page) · Pan: shift-drag or Pan toggle · Reset: dbl-click · ⛶ Maximize / ▭ Minimize in toolbar. Port of planet.py.</div>
     </div></div>`; }
 function tPlanetLon(){ setTimeout(planLoad,30);
   return `<div class="pnl"><div class="ph"><span class="dot"></span>PLANET LONGITUDE — ${planInstKey()} candles vs planet ecliptic longitude</div>
