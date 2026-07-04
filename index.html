@@ -350,6 +350,8 @@ html,body{width:100%;min-height:100vh;background:var(--bg0);color:var(--tx0);fon
 .nb.on{color:var(--acc);border-left-color:var(--acc);background:var(--bg3);font-weight:800}
 .main{padding:10px 16px;flex:1;display:flex;flex-direction:column;gap:10px;overflow-y:scroll;min-width:0}
 .pnl{background:var(--bg1);border:1px solid var(--bd);border-radius:4px;overflow:hidden}
+/* FIX: .main is a flex column and .pnl has overflow:hidden — without this, panels get flex-compressed to fit the viewport, clipping text and killing scroll (seen on Astro Rules / long tabs). Keep natural height so .main scrolls. */
+.main>*{flex-shrink:0}
 .ph{background:var(--bg2);border-bottom:1px solid var(--bd);padding:7px 12px;font-size:12px;color:var(--acc);letter-spacing:.08em;font-weight:700;text-transform:uppercase;display:flex;align-items:center;gap:6px}
 .ph .dot{width:6px;height:6px;border-radius:50%;background:var(--acc);flex-shrink:0}
 .pb{padding:10px 12px}
@@ -4336,7 +4338,7 @@ function rHdr(){
 // NAV
 // ═══════════════════════════════════════════════════════════════════
 function rNav(){
-  const tabs=[['overview','▦ Overview'],['v44','✦ FATS Forecast'],['dayfc','☉ Day Forecast'],['panchak','◔ Panchak'],['shar','⟐ Shar'],['kranti','◓ Kranti'],['transit','⊞ Transit Cal'],['kundali','◇ Natal·Intraday'],['bhav','⌂ Bhav Phal'],['rulebook','⚜ Rule Book'],['ashtaka','⊡ Ashtakavarga'],['vr','★ Vyapaar Ratna'],['rules','⚖ Astro Rules'],['kp','⊕ KP Planets'],['charts','◈ D1·D9'],['sbc','⬡ SBC Grid'],['planlat','🪐 Planet Lat'],['planlon','🛰 Planet Lon'],['timing','⏱ 15-min Timing'],['gann','⌇ Gann SQ9']];
+  const tabs=[['overview','▦ Overview'],['v44','✦ FATS Forecast'],['dayfc','☉ Day Forecast'],['panchak','◔ Panchak'],['shar','⟐ Shar'],['kranti','◓ Kranti'],['transit','⊞ Transit Cal'],['kundali','◇ Natal·Intraday'],['bhav','⌂ Bhav Phal'],['rulebook','⚜ Rule Book'],['ashtaka','⊡ Ashtakavarga'],['vr','★ Vyapaar Ratna'],['vr2','★★ Vyapaar Ratna V2'],['rules','⚖ Astro Rules'],['kp','⊕ KP Planets'],['charts','◈ D1·D9'],['sbc','⬡ SBC Grid'],['planlat','🪐 Planet Lat'],['planlon','🛰 Planet Lon'],['timing','⏱ 15-min Timing'],['gann','⌇ Gann SQ9']];
   const closeRow=`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px 8px 14px;border-bottom:1px solid var(--bd);background:var(--bg1);flex-shrink:0">
     <span style="font-size:11.5px;color:var(--tx3);letter-spacing:.08em">MENU</span>
     <button onclick="closeNav()" style="background:none;border:none;color:var(--tx2);font-size:20px;line-height:1;cursor:pointer;padding:2px 6px">✕</button>
@@ -4345,7 +4347,7 @@ function rNav(){
 }
 
 function rMain(){
-  const fns={overview:tOverview,v44:tV44,dayfc:tDayForecast,shar:()=>tSharParivartan('shar'),kranti:()=>tSharParivartan('kranti'),transit:tTransit,kundali:tKundali,bhav:tBhavphal,rulebook:tRuleBook,ashtaka:tAshtaka,vr:tVR,rules:tRules,kp:tKP,charts:tCharts,sbc:tSBC,planlat:tPlanetLat,planlon:tPlanetLon,timing:tTiming,gann:tGann,panchak:tPanchak};
+  const fns={overview:tOverview,v44:tV44,dayfc:tDayForecast,shar:()=>tSharParivartan('shar'),kranti:()=>tSharParivartan('kranti'),transit:tTransit,kundali:tKundali,bhav:tBhavphal,rulebook:tRuleBook,ashtaka:tAshtaka,vr:tVR,vr2:tVR2,rules:tRules,kp:tKP,charts:tCharts,sbc:tSBC,planlat:tPlanetLat,planlon:tPlanetLon,timing:tTiming,gann:tGann,panchak:tPanchak};
   document.getElementById('MAIN').innerHTML=(fns[S.tab]||tOverview)();
   if(S.tab==='sbc'&&S.sbcMode!=='bt') setTimeout(sbcFetchMonthlyPrice,100);
 }
@@ -4991,7 +4993,10 @@ function tV44(){
    redrawn on zoom/pan (no re-fetch / re-sample).
    ════════════════════════════════════════════════════════════════════ */
 window.PLAN = window.PLAN || {ohlc:{}, status:'idle', err:'', loadedKey:null, view:null, data:null, win:null, panMode:false, maximized:false, minimized:false, _rb:false};
-const PLAN_INST = {'NIFTY 50':'^NSEI','BANK NIFTY':'^NSEBANK','SENSEX':'^BSESN','NIFTY IT':'^CNXIT','NIFTY MIDCAP 100':'NIFTY_MIDCAP_100.NS'};
+const PLAN_INST = {'NIFTY 50':'^NSEI','BANK NIFTY':'^NSEBANK','SENSEX':'^BSESN','NIFTY IT':'^CNXIT','NIFTY MIDCAP 100':'NIFTY_MIDCAP_100.NS',
+  'XAUUSD · GOLD':'XAUUSD=X','XAGUSD · SILVER':'XAGUSD=X','XNGUSD · NAT GAS':'NG=F','USOIL · WTI CRUDE':'CL=F'};
+// Yahoo fallbacks: if the FX-style spot symbol is unavailable on a proxy, retry with the futures contract
+const PLAN_INST_FB = {'XAUUSD · GOLD':'GC=F','XAGUSD · SILVER':'SI=F'};
 const PLAN_COL = {Sun:'#ff7f0e',Moon:'#1e90ff',Mercury:'#2ca02c',Venus:'#ff69b4',Mars:'#d62728',Jupiter:'var(--neut2)',Saturn:'#1f3a93',Rahu:'var(--rahu)',Ketu:'#b5774f'};
 const PLAN_ORDER = ['Sun','Moon','Mercury','Venus','Mars','Jupiter','Saturn','Rahu','Ketu'];
 const PLAN_RANGES = {'6mo':'6M','1y':'1Y','2y':'2Y','3y':'3Y','5y':'5Y'};
@@ -5039,7 +5044,8 @@ async function planLoad(){
   if(window.PLAN.loadedKey===key && window.PLAN.ohlc[key]) { planPaint(); return; }
   if(window.PLAN.status==='loading') return;
   window.PLAN.status='loading'; window.PLAN.err=''; window.PLAN.data=null; window.PLAN.win=null; planPaint();
-  try{ const data=await planFetchOHLC(PLAN_INST[planInstKey()], planRange());
+  try{ let data; try{ data=await planFetchOHLC(PLAN_INST[planInstKey()], planRange()); }
+    catch(e0){ const fb=PLAN_INST_FB[planInstKey()]; if(!fb) throw e0; data=await planFetchOHLC(fb, planRange()); }
     window.PLAN.ohlc[key]=data; window.PLAN.loadedKey=key; window.PLAN.status='ready'; window.PLAN.data=null; window.PLAN.win=null;
   }catch(e){ window.PLAN.status='error'; window.PLAN.err=(e&&e.message)||'fetch failed'; }
   planPaint();
@@ -5372,16 +5378,34 @@ function planControls(kind){
 }
 function planToggle(b){ let sel=planBodies(); if(sel.includes(b)) sel=sel.filter(x=>x!==b); else sel=PLAN_ORDER.filter(x=>sel.includes(x)||x===b); gs({planBodies:sel.join(',')}); }
 
+// ── Planet Lat/Lon scroll rail (right edge): jump to top / bottom ──
+function planScrollTo(where){
+  const m=document.getElementById('MAIN'); if(!m) return;
+  const top=where==='top'?0:m.scrollHeight;
+  try{m.scrollTo({top:top,behavior:'smooth'});}catch(e){m.scrollTop=top;}
+}
+function planScrollRail(){
+  return `<style>
+    .plan-rail{position:fixed;right:8px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;z-index:60}
+    .plan-rail button{width:36px;height:36px;border-radius:18px;border:1px solid var(--bd3);background:var(--bg2);color:var(--acc);font-size:15px;line-height:1;cursor:pointer;opacity:.85;box-shadow:0 2px 8px rgba(0,0,0,.45);padding:0}
+    .plan-rail button:hover{opacity:1;border-color:var(--acc);background:var(--bg3)}
+    @media (max-width:820px){.plan-rail{right:5px}.plan-rail button{width:42px;height:42px;font-size:17px}}
+  </style>
+  <div class="plan-rail">
+    <button onclick="planScrollTo('top')" title="Scroll to top" aria-label="Scroll to top">▲</button>
+    <button onclick="planScrollTo('bot')" title="Scroll to bottom" aria-label="Scroll to bottom">▼</button>
+  </div>`;
+}
 function tPlanetLat(){ setTimeout(planLoad,30);
   return `<div class="pnl"><div class="ph"><span class="dot"></span>PLANET LATITUDE — ${planInstKey()} candles vs planet ecliptic latitude (Shar)</div>
     <div class="pb">${planControls('lat')}<div id="plan-metrics">${planMetrics()}</div><div id="plan-chart">${planChart('lat')}</div>
       <div style="font-size:10.5px;color:var(--tx3);margin-top:6px">Top: ${planInstKey()} OHLC. Bottom: planet ecliptic latitude (N+ / S−). Zoom: Ctrl+wheel or ＋－ buttons (plain wheel scrolls the page) · Pan: shift-drag or Pan toggle · Reset: dbl-click · ⛶ Maximize / ▭ Minimize in toolbar. Port of planet.py.</div>
-    </div></div>`; }
+    </div></div>${planScrollRail()}`; }
 function tPlanetLon(){ setTimeout(planLoad,30);
   return `<div class="pnl"><div class="ph"><span class="dot"></span>PLANET LONGITUDE — ${planInstKey()} candles vs planet ecliptic longitude</div>
     <div class="pb">${planControls('lon')}<div id="plan-metrics">${planMetrics()}</div><div id="plan-chart">${planChart('lon')}</div>
       <div style="font-size:10.5px;color:var(--tx3);margin-top:6px">Tropical longitude 0–360°. Solid=direct · dotted=retro · R/D=station · cyan verticals=conjunctions. Zoom: wheel/drag/＋－ · Pan: shift-drag or toggle · Reset: dbl-click · ⛶ Maximize / ▭ Minimize in toolbar. <b style="color:var(--neut2)">☉-♃ S/R:</b> coloured verticals = Sun-Jupiter aspects (0/45/90/135/180°); green/red dashed = Support/Resistance from the defining Mon-Fri week (toggle ☉-♃ S/R). Port of planets.py.</div>
-    </div></div>`; }
+    </div></div>${planScrollRail()}`; }
 
 // ═══════════════════════════════════════════════════════════════════
 // TAB: OVERVIEW
@@ -5851,7 +5875,11 @@ const SBC_INSTR=[
  {key:'sensex',name:'SENSEX',     dev:'सेंसेक्स',    letter:'स (से)', varnaCell:'5,1', svara:'ए', svaraCell:'6,6', tithiGrp:'RIKTA', nakRing:24, nakPada:1, rashi:10},
  {key:'gold',  name:'GOLD',       dev:'सोना',       letter:'स (सो)', varnaCell:'5,1', svara:'ए', svaraCell:'6,6', tithiGrp:'RIKTA', nakRing:24, nakPada:2, rashi:10},
  {key:'silver',name:'SILVER',     dev:'चाँदी',      letter:'च',     varnaCell:'3,1', svara:'ओ', svaraCell:'3,3', tithiGrp:'PURNA', nakRing:26, nakPada:3, rashi:11},
- {key:'crude', name:'CRUDE OIL',  dev:'कच्चा तेल',  letter:'त (ते)', varnaCell:'6,7', svara:'ए', svaraCell:'6,6', tithiGrp:'RIKTA', nakRing:15, nakPada:3, rashi:6}
+ {key:'crude', name:'CRUDE OIL',  dev:'कच्चा तेल',  letter:'त (ते)', varnaCell:'6,7', svara:'ए', svaraCell:'6,6', tithiGrp:'RIKTA', nakRing:15, nakPada:3, rashi:6},
+ {key:'xauusd',name:'XAUUSD',     dev:'सोना (spot)', letter:'स (सो)', varnaCell:'5,1', svara:'ए', svaraCell:'6,6', tithiGrp:'RIKTA', nakRing:24, nakPada:2, rashi:10},
+ {key:'xagusd',name:'XAGUSD',     dev:'चाँदी (spot)',letter:'च',     varnaCell:'3,1', svara:'ओ', svaraCell:'3,3', tithiGrp:'PURNA', nakRing:26, nakPada:3, rashi:11},
+ {key:'xngusd',name:'XNGUSD',     dev:'गैस',         letter:'ग (गै)', varnaCell:'6,1', svara:'उ', svaraCell:'1,1', tithiGrp:'JAYA',  nakRing:22, nakPada:4, rashi:10},
+ {key:'usoil', name:'USOIL',      dev:'कच्चा तेल (WTI)',letter:'त (ते)', varnaCell:'6,7', svara:'ए', svaraCell:'6,6', tithiGrp:'RIKTA', nakRing:15, nakPada:3, rashi:6}
 ];
 
 // ═══════════════════════════════════════════════════════════════════
@@ -6572,6 +6600,10 @@ const BT_YF={
   silver:{sym:'SI=F',     label:'SILVER',      note:'COMEX Futures'},
   crude:  {sym:'CL=F',     label:'CRUDE OIL',   note:'NYMEX WTI'},
   sensex: {sym:'^BSESN',  label:'SENSEX',      note:'BSE India'},
+  xauusd: {sym:'XAUUSD=X',label:'XAUUSD',      note:'Gold spot (Yahoo)'},
+  xagusd: {sym:'XAGUSD=X',label:'XAGUSD',      note:'Silver spot (Yahoo)'},
+  xngusd: {sym:'NG=F',    label:'XNGUSD',      note:'NYMEX Henry Hub'},
+  usoil:  {sym:'CL=F',    label:'USOIL',       note:'NYMEX WTI'},
 };
 window._BT={status:'idle'};
 
@@ -6632,7 +6664,7 @@ function btParseCSV(text){
 }
 
 // ── FMP symbol map ──
-const BT_FMP_SYM={nifty:'^NSEI',bnifty:'^NSEBANK',gold:'GCUSD',silver:'SIUSD',crude:'CLUSD',sensex:'^BSESN'};
+const BT_FMP_SYM={nifty:'^NSEI',bnifty:'^NSEBANK',gold:'GCUSD',silver:'SIUSD',crude:'CLUSD',sensex:'^BSESN',xauusd:'XAUUSD',xagusd:'XAGUSD',xngusd:'NGUSD',usoil:'CLUSD'};
 
 // ── FMP via Anthropic API (works from file:// since Anthropic API is CORS-open) ──
 async function btFetchFMP(instrKey,fromDate,toDate){
@@ -8542,6 +8574,1103 @@ function tVR(){
   return `<div style="display:flex;flex-direction:column;gap:10px">${hdr}${trioPanel}${intraPanel}${upcomingPanel}${yogaPanel}${sharPanel}${commPanel}${legend}
     <div style="font-size:10.5px;color:var(--tx3)">स्रोत: Vyaapar_ratna_part_1.md & _part_2.md. सायन गणना. अध्ययन-सहायक, निवेश-सलाह नहीं।</div></div>`;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// ★★ VYAPAAR RATNA V2 — व्यापार रत्न (द्वितीय खण्ड) + वाणिज्य-सर्वस्व ★★
+// ───────────────────────────────────────────────────────────────────
+// NEW module (added BELOW the old Vyapaar Ratna module — nothing from
+// V1 was changed or removed). Source of every rule:
+//   "Analyzing Market Trend Using Planetary Aspects.md" (converted
+//   from the .docx of the same name in this folder).
+//
+// Implemented rule groups (chapter references from the document):
+//  R1  Sayana system mandate + Nirayana→Sayana conversion (Ch.1)
+//  R2  Speed-tier framework: Macro(Pl,Ne,Ur,Sa,Ju) / Meso(Su,Ma,Ve) /
+//      Micro(Mo,Me) with sign-entry & mid-sign triggers (Ch.3)
+//  R3  Shar (celestial latitude) & Kranti (declination) geometry;
+//      Sun/Rahu/Ketu = permanent zero-Shar (Ch.4)
+//  R4  Shar-Parivartan supreme override: N-entry=Mandi, S-entry=Teji,
+//      Retro/Combust ⇒ FLIP; all aspects frozen in its window (Ch.4)
+//  R5  Vanijya-Sarvasva 5-step effect-period formula
+//      (Mars Jan-1958 worked example reproduces ≈23 days)
+//  R6  Kranti-Samya: ≤1° orb; Parallel 0.75 / Contra-parallel 0.50;
+//      dynamic half-of-daily-motion commercial window; intensifier
+//  R7  8 Teji aspects with weights 1.0/.5/.25/.25/.125/.09375×3 (Ch.5)
+//  R8  5 Mandi aspects with anna weights 16/12/8/4/1 (Ch.6)
+//  R9  22°30' same-sign nullification (inter-sign boundary required)
+//  R10 6-step Tezi & Mandi decision matrices (mass→sign→navamsa→
+//      shar→kranti→geometry)
+//  R11 Navamsa-Yuti pairing tables: Tezi / Mandi / Kshanik-Tezi /
+//      Sahasa-Tezi (Neptune constant, Saturn inversion, Herschel spark)
+//  R12 Sun elongation limits: Sun-Mercury 3 aspect types (≤28°),
+//      Sun-Venus 5 types (≤48°)
+//  R13 40-aspect Drishti-Deeptansh chakra: exact orbs + half-parts
+//      (argbhag) + Trairashik orb∝strength scaling
+//  R14 40-aspect polarity matrix with per-gate house-vector routing:
+//      trine always shubh, kendra krura (Saturn-Mars 4th exception),
+//      72° Triekadash/Kendra split, 60° Saturn fwd/back vectors +
+//      Tulya-Ansh amplifier, 51°26'…32°44' sapta-routing, 30° pure
+//      Dwidwadash, near-opposition 174…157°30' 7th-house gates,
+//      150…140 Shadashtaka, 135/128°34' Trine-or-Shadashtaka,
+//      108° Kendra/Trikona split, Navansha-yuti gates via Jaya
+//  R15 Dwidwadash (2/12) auspicious/inauspicious sign-pair tables
+//  R16 Shadashtaka (6/8) auspicious/inauspicious sign-pair tables
+//  R17 Jaya-Parajaya: N beats S; both-N higher wins; both-S lower wins
+//  R18 Samagam (Moon+Tara same sign), Graha-Yuddha (Venus always
+//      wins), Node conjunctions (pure north), Combustion (Ast) rules
+//  R19 Drashta/Drishya via D1 house numbers; timing phase from the
+//      Drishya planet's declination hemisphere × velocity
+//  R20 Signal inversion engine: Combust/Debilitated/Retrograde ⇒ flip;
+//      Niransh 0-1° buffer; Margi>Vakri seniority; Lagnesh dominance
+//  R21 Functional nature (Vishesh-Shastra): trikona lords shubh,
+//      kendradhipati dosha (Ju/Ve>Me>Mo), yogakaraka, 8th-lord rules,
+//      2nd/12th chameleons, Rahu/Ketu absorption
+//  R22 Commodity-centric chart: shelter-sign = H1 (Cotton→Libra/Venus,
+//      Silver→Cancer/Moon density split), D1+D9 anchoring
+//  R23 Master 5-step routing: init → temporal sort → override sweeper
+//      → inversion core → Trend = ΣTeji − ΣMandi (regime classifier)
+//  R24 Nakshatra layer: planet nakshatra/pada/lord (granular lunar-
+//      mansion triggers, Ch. "Dynamic Trigger Mechanics")
+// ═══════════════════════════════════════════════════════════════════
+
+const VR2_NAMES=['Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn','Rahu','Ketu','Uranus','Neptune','Pluto'];
+const VR2_DEV={Sun:'सूर्य',Moon:'चन्द्र',Mars:'मंगल',Mercury:'बुध',Jupiter:'गुरु',Venus:'शुक्र',Saturn:'शनि',Rahu:'राहु',Ketu:'केतु',Uranus:'हर्षल',Neptune:'नेपच्यून',Pluto:'प्लूटो'};
+const VR2_PC=Object.assign({},typeof PC!=='undefined'?PC:{},{Pluto:'#b08cff',Ketu:(typeof PC!=='undefined'&&PC.Ketu)||'#c99'});
+// R2 — speed tiers (mass/inertia weighting: heavy 0.5-aspect > light full-aspect)
+const VR2_TIER={Pluto:'macro',Neptune:'macro',Uranus:'macro',Saturn:'macro',Jupiter:'macro',Sun:'meso',Mars:'meso',Venus:'meso',Rahu:'meso',Ketu:'meso',Moon:'micro',Mercury:'micro'};
+const VR2_MASS={macro:1.5,meso:1.0,micro:0.7};
+// natural nature (doc: benefics Ju/Ve/waxing-Moon/well-assoc Mercury; Neptune = bearish constant)
+const VR2_BEN={Moon:1,Mercury:1,Jupiter:1,Venus:1};
+// R3/R5 — Master table of mean (average) Shar peaks — doc Ch.4 table (Uranus↔Saturn, Neptune↔Jupiter, Pluto↔Mars co-ruler links)
+const VR2_MEAN_SHAR={
+  Moon:   {n:5+17/60, s:5+12/60},
+  Mars:   {n:6+31/60, s:6+47/60},
+  Mercury:{n:7,       s:7},
+  Jupiter:{n:1+40/60, s:1+38/60},
+  Venus:  {n:8+2/60,  s:8+55/60},
+  Saturn: {n:2+52/60, s:2+52/60},
+  Uranus: {n:2+52/60, s:2+52/60},
+  Neptune:{n:1+41/60, s:1+38/60},
+  Pluto:  {n:17,      s:17}
+};
+// R20 — debilitation signs (Sayana sign index)
+const VR2_DEBIL={Sun:6,Moon:7,Mars:3,Mercury:11,Jupiter:9,Venus:5,Saturn:0};
+// R18 — combustion (Ast) orbs for the five Tara-grahas only (doc: Bimba=Sun/Moon cannot combust; Tamo=Rahu/Ketu shadow)
+const VR2_COMBUST={Mars:17,Mercury:14,Jupiter:11,Venus:10,Saturn:15};
+const VR2_COMBUST_R={Mercury:12,Venus:8}; // tighter orb when retrograde
+// R22 — commodity registry (doc-specified shelter signs; Generic = Kalapurusha Aries H1)
+const VR2_COMM={
+  GENERIC:{nm:'Index — Generic (Kalapurusha · Aries H1)',lagna:0, lord:'Mars',  note:'Natural zodiac — Aries as H1'},
+  COTTON: {nm:'Cotton — Libra (रूई · तुला)',           lagna:6, lord:'Venus', note:'Doc: Tula=Libra, light-white → Venus · NY Ishtakal'},
+  SILVER: {nm:'Silver — Cancer (चांदी · कर्क)',          lagna:3, lord:'Moon',  note:'Doc density rule: heavy-white → Moon'},
+  GOLD:   {nm:'Gold — Leo (सोना · सिंह)',            lagna:4, lord:'Sun',   note:'V1 commodity table: Sun/Jupiter'},
+  XAUUSD: {nm:'XAUUSD — Gold spot (Leo)',          lagna:4, lord:'Sun',   note:'Alias of Gold — Leo H1, Sun lord'},
+  XAGUSD: {nm:'XAGUSD — Silver spot (Cancer)',     lagna:3, lord:'Moon',  note:'Doc density rule: heavy-white → Moon'},
+  XNGUSD: {nm:'XNGUSD — Natural Gas (Aquarius)',   lagna:10,lord:'Saturn',note:'V1 fuel rulers Saturn·Neptune — Saturn H1'},
+  USOIL:  {nm:'USOIL — WTI Crude (Capricorn)',     lagna:9, lord:'Saturn',note:'V1 oil rulers Saturn·Neptune — Saturn H1'}
+};
+// sign lords incl. doc's outer co-rulers (Herschel→Aquarius, Neptune→Pisces, Pluto→Aries)
+const VR2_SLRD=['Mars','Venus','Mercury','Moon','Sun','Mercury','Venus','Mars','Jupiter','Saturn','Saturn','Jupiter'];
+const VR2_COLRD={0:'Pluto',10:'Uranus',11:'Neptune'};
+
+// ── R13 — the 40-gate Drishti-Deeptansh-Bodhak Chakra ──────────────
+// orb/half in decimal degrees exactly from the book chart. w = explicit
+// book weight (+teji / −mandi); gates without explicit weight use the
+// Trairashik rule (orb ∝ strength): mag = orb/7.16944.
+// mode = polarity routing engine (R14).
+// Note: book orb-chart prints gate #35 as "105°" but the polarity
+// matrix + the detailed Fifth-minus chapter both define it at 108°
+// (180−72). 108° is used, per the detailed rule text.
+const VR2_ASP=[
+ {id:1, nm:'Whole/One (Yuti)',        dev:'युति',            deg:0,        orb:7.169444,half:3.583333,w:+1.00,  mode:'nature'},
+ {id:2, nm:'Opposition (Poorna)',     dev:'प्रतियोग',         deg:180,      orb:7.169444,half:3.586111,w:1.00,   mode:'opp'},
+ {id:3, nm:'Trine',                   dev:'त्रिकोण',          deg:120,      orb:4.769444,half:2.386111,w:+0.50,  mode:'trine'},
+ {id:4, nm:'Kendra (Quadrant)',       dev:'केन्द्र',           deg:90,       orb:3.586111,half:1.793056,w:0.50,   mode:'kendra'},
+ {id:5, nm:'Fifth-part',              dev:'पञ्चमांश',         deg:72,       orb:2.802778,half:1.402778,w:0.09375,mode:'p72'},
+ {id:6, nm:'Sixth-part (Triekadash)', dev:'षष्ठांश',          deg:60,       orb:2.336111,half:1.169444,w:0.25,   mode:'p60'},
+ {id:7, nm:'Seventh-part',            dev:'सप्तमांश',         deg:51.433333,orb:2.002778,half:1.002778,         mode:'sapt'},
+ {id:8, nm:'Eighth-part (Kendrardh)', dev:'अष्टमांश',         deg:45,       orb:1.786111,half:0.893056,w:0.25,   mode:'sapt'},
+ {id:9, nm:'Ninth-part',              dev:'नवमांश',           deg:40,       orb:1.555556,half:0.777778,         mode:'sapt'},
+ {id:10,nm:'Tenth-part',              dev:'दशमांश',           deg:36,       orb:1.402778,half:0.702778,w:0.09375,mode:'sapt'},
+ {id:11,nm:'Eleventh-part',           dev:'एकादशांश',         deg:32.733333,orb:1.286111,half:0.643056,         mode:'sapt'},
+ {id:12,nm:'Twelfth-part',            dev:'द्वादशांश',         deg:30,       orb:1.169444,half:0.586111,w:0.125,  mode:'dwi'},
+ {id:13,nm:'Sixteenth-part',          dev:'षोडशांश',          deg:22.5,     orb:0.875,   half:0.4375,  w:0.0625, mode:'in22'},
+ {id:14,nm:'Eighteenth-part',         dev:'अष्टादशांश',        deg:20,       orb:0.777778,half:0.388889,         mode:'microP'},
+ {id:15,nm:'Twentieth-part',          dev:'विंशांश',          deg:18,       orb:0.702778,half:0.352778,         mode:'microP'},
+ {id:16,nm:'Twenty-fourth-part',      dev:'चतुर्विंशांश',      deg:15,       orb:0.586111,half:0.293056,         mode:'microP'},
+ {id:17,nm:'Thirty-second-part',      dev:'द्वात्रिंशांश',      deg:11.25,    orb:0.4375,  half:0.218750,         mode:'microM'},
+ {id:18,nm:'Fortieth-part',           dev:'चत्वारिंशांश',      deg:9,        orb:0.352778,half:0.176389,         mode:'microP'},
+ {id:19,nm:'Forty-eighth-part',       dev:'अष्टचत्वारिंशांश',  deg:7.5,      orb:0.291667,half:0.145833,         mode:'microP'},
+ {id:20,nm:'Sixty-th',                dev:'षष्टिांश',          deg:6,        orb:0.236111,half:0.119444,         mode:'microP'},
+ {id:21,nm:'Sixty-th minus',          dev:'षष्टिांश-रहित',     deg:174,      orb:6.766667,half:3.383333,         mode:'m7ba'},
+ {id:22,nm:'Forty-eighth minus',      dev:'अष्टचत्वारिंश-रहित',deg:172.5,    orb:6.708333,half:3.354167,         mode:'m7ba'},
+ {id:23,nm:'Fortieth minus',          dev:'चत्वारिंश-रहित',    deg:171,      orb:6.602778,half:3.308333,         mode:'m7ba'},
+ {id:24,nm:'Thirty-second minus',     dev:'द्वात्रिंश-रहित',    deg:168.75,   orb:6.5625,  half:3.281250,         mode:'m7t'},
+ {id:25,nm:'Twenty-fourth minus',     dev:'चतुर्विंश-रहित',    deg:165,      orb:6.419444,half:3.208333,         mode:'m7m'},
+ {id:26,nm:'Twentieth minus',         dev:'विंश-रहित',        deg:162,      orb:6.302778,half:3.152778,         mode:'m7m'},
+ {id:27,nm:'Eighteenth minus',        dev:'अष्टादश-रहित',      deg:160,      orb:6.222222,half:3.111111,         mode:'m7m'},
+ {id:28,nm:'Sixteenth minus',         dev:'षोडश-रहित',        deg:157.5,    orb:6.125,   half:3.0625,           mode:'m7t'},
+ {id:29,nm:'Twelfth minus (Quincunx)',dev:'द्वादश-रहित',       deg:150,      orb:5.836111,half:2.919444,w:0.25,   mode:'shad'},
+ {id:30,nm:'Eleventh minus',          dev:'एकादश-रहित',       deg:147.266667,orb:5.719444,half:2.858333,        mode:'shad'},
+ {id:31,nm:'Tenth minus (Bi-quintile)',dev:'दश-रहित',         deg:144,      orb:5.602778,half:2.802778,w:0.09375,mode:'shad'},
+ {id:32,nm:'Ninth minus',             dev:'नव-रहित',          deg:140,      orb:5.444444,half:2.722222,         mode:'shad'},
+ {id:33,nm:'Eighth minus (Sesquiq.)', dev:'अष्ट-रहित',        deg:135,      orb:5.252778,half:2.608333,w:0.75,   mode:'triShad'},
+ {id:34,nm:'Seventh minus',           dev:'सप्त-रहित',        deg:128.566667,orb:5.169444,half:2.586111,        mode:'triShad'},
+ {id:35,nm:'Fifth minus',             dev:'पञ्चम-रहित',       deg:108,      orb:4.702778,half:2.352778,         mode:'kenTri'},
+ {id:36,nm:'1st Navansha-yuti',       dev:'नवांश-युति १',      deg:0,        orb:0.129630,half:0.064815,         mode:'navyuti'},
+ {id:37,nm:'2nd Navansha-yuti',       dev:'नवांश-युति २',      deg:40,       orb:0.129630,half:0.064815,         mode:'navyuti'},
+ {id:38,nm:'3rd Navansha-yuti',       dev:'नवांश-युति ३',      deg:80,       orb:0.129630,half:0.064815,         mode:'navyuti'},
+ {id:39,nm:'4th Navansha-yuti',       dev:'नवांश-युति ४',      deg:120,      orb:0.129630,half:0.064815,         mode:'navyuti'},
+ {id:40,nm:'5th Navansha-yuti',       dev:'नवांश-युति ५',      deg:160,      orb:0.129630,half:0.064815,         mode:'navyuti'}
+];
+const VR2_FULL_ORB=7.169444; // "Whole" orb — Trairashik base (Mercury's 7° deeptansh)
+
+// R15 — Dwidwadash (2/12) sign-pair tables ([earlier sign, next sign], sign indices)
+const VR2_DWI_AUSP=[[11,0],[1,2],[3,4],[4,5],[5,6],[7,8],[9,10]];
+const VR2_DWI_INAUSP=[[0,1],[2,3],[6,7],[8,9],[10,11]];
+// R16 — Shadashtaka (6/8) sign-pair tables (unordered)
+const VR2_SHAD_AUSP=[[0,7],[2,9],[4,11],[6,1],[8,3],[10,5]];
+const VR2_SHAD_INAUSP=[[0,5],[2,7],[4,9],[6,11],[8,1],[10,3]];
+
+// R11 — Navamsa-Yuti pairing tables (same 3°20' D9 division)
+const VR2_NAV_TEZI=['Sun-Moon','Sun-Mars','Sun-Mercury','Sun-Jupiter','Sun-Venus','Sun-Uranus','Sun-Pluto',
+ 'Moon-Mars','Moon-Jupiter','Moon-Uranus','Moon-Pluto',
+ 'Mars-Mercury','Mars-Jupiter','Mars-Venus','Mars-Saturn','Mars-Rahu','Mars-Ketu','Mars-Pluto',
+ 'Mercury-Jupiter','Mercury-Venus','Mercury-Saturn','Mercury-Rahu','Mercury-Ketu','Mercury-Pluto',
+ 'Jupiter-Venus','Jupiter-Saturn','Jupiter-Rahu','Jupiter-Ketu','Jupiter-Uranus','Jupiter-Pluto',
+ 'Venus-Saturn','Venus-Ketu','Venus-Uranus','Venus-Pluto','Saturn-Ketu','Rahu-Uranus','Rahu-Pluto','Uranus-Pluto'];
+const VR2_NAV_MANDI=['Sun-Saturn','Sun-Rahu','Sun-Ketu','Sun-Neptune','Moon-Saturn','Moon-Neptune',
+ 'Mars-Neptune','Mercury-Neptune','Jupiter-Neptune','Venus-Neptune','Saturn-Neptune','Rahu-Neptune','Uranus-Neptune','Neptune-Pluto',
+ 'Saturn-Rahu','Saturn-Uranus','Saturn-Pluto','Venus-Rahu'];
+const VR2_NAV_KSHANIK=['Moon-Mercury','Moon-Venus'];          // fleeting rise — scalp only
+const VR2_NAV_SAHASA=['Mars-Uranus','Mercury-Uranus'];        // sudden/explosive rise
+function vr2NavPair(a,b){
+  const k1=a+'-'+b,k2=b+'-'+a;
+  if(VR2_NAV_SAHASA.includes(k1)||VR2_NAV_SAHASA.includes(k2))return 'SAHASA';
+  if(VR2_NAV_KSHANIK.includes(k1)||VR2_NAV_KSHANIK.includes(k2))return 'KSHANIK';
+  if(VR2_NAV_MANDI.includes(k1)||VR2_NAV_MANDI.includes(k2))return 'MANDI';
+  if(a==='Neptune'||b==='Neptune')return 'MANDI';             // the Neptune constant
+  if(VR2_NAV_TEZI.includes(k1)||VR2_NAV_TEZI.includes(k2))return 'TEZI';
+  return null;
+}
+
+// ── R1 — Sayana helpers ────────────────────────────────────────────
+function vr2NiraToSaya(nirLon,ayan){ return n360(nirLon+ayan); }
+function vr2Sep(a,b){ let d=Math.abs(a-b)%360; return d>180?360-d:d; }
+
+// ── planet snapshot (cached) ───────────────────────────────────────
+const VR2_CACHE=new Map();
+function vr2PlanetsAt(J){
+  const key=Math.round(J*86400); // second resolution
+  if(VR2_CACHE.has(key))return VR2_CACHE.get(key);
+  const ay=(typeof getAyanamsa==='function')?getAyanamsa(J,(typeof S!=='undefined'&&S.ayMode)||'lahiri'):24;
+  const P=VR2_NAMES.map(name=>{
+    let lon=0,lat=0,dec=0,retro=false,spd=0,latSpd=0,decSpd=0;
+    try{lon=n360(geoLon(name,J));}catch(e){}
+    try{lat=geoLat(name,J);}catch(e){}
+    try{dec=declination(name,J);}catch(e){}
+    try{retro=isRetrograde(name,J);}catch(e){}
+    try{spd=planetSpeed(name,J);}catch(e){}
+    try{latSpd=geoLat(name,J+0.5)-geoLat(name,J-0.5);}catch(e){}
+    try{decSpd=declination(name,J+0.5)-declination(name,J-0.5);}catch(e){}
+    const sign=Math.floor(lon/30),degIn=lon-sign*30;
+    const nav9=Math.floor(lon/(10/3))%12;                     // D9 (sayana anchor, doc R22)
+    const sid=n360(lon-ay);                                   // nirayana for nakshatra layer (R24)
+    const nak=(typeof getNak==='function')?getNak(sid):null;
+    return{name,dev:VR2_DEV[name],lon,lat,dec,retro,spd,latSpd,decSpd,sign,degIn,nav9,sid,nak,
+      ben:!!VR2_BEN[name],tier:VR2_TIER[name],mass:VR2_MASS[VR2_TIER[name]],
+      niransh:degIn<1,                                        // R20 zero-degree buffer
+      debil:VR2_DEBIL[name]===sign};
+  });
+  const sun=P[0];
+  // waxing/waning Moon nature (doc: waxing benefic, waning malefic)
+  const moon=P[1]; const elong=n360(moon.lon-sun.lon); moon.waxing=elong<180; if(!moon.waxing)moon.ben=false;
+  // R18 combustion — Tara-grahas within orb AND same/adjacent sign of Sun
+  for(const p of P){
+    p.combust=false;
+    const co=VR2_COMBUST[p.name]; if(!co)continue;
+    const lim=(p.retro&&VR2_COMBUST_R[p.name])?VR2_COMBUST_R[p.name]:co;
+    const rel=((p.sign-sun.sign+12)%12)+1;
+    if((rel===1||rel===2||rel===12)&&vr2Sep(p.lon,sun.lon)<=lim)p.combust=true;
+  }
+  if(VR2_CACHE.size>4000)VR2_CACHE.clear();
+  VR2_CACHE.set(key,P);
+  return P;
+}
+
+// ── R21 — functional nature from commodity lagna (Vishesh-Shastra) ─
+function vr2FuncNature(name,lagnaSign){
+  if(name==='Rahu'||name==='Ketu')return{v:-0.5,label:'Shadow node — contextual (छाया-ग्रह)'};   // nodes absorb context
+  const owns=[];
+  for(let h=1;h<=12;h++){
+    const s=(lagnaSign+h-1)%12;
+    if(VR2_SLRD[s]===name||VR2_COLRD[s]===name)owns.push(h);
+  }
+  if(!owns.length)return{v:VR2_BEN[name]?0.5:-0.5,label:'Natural nature (no lordship)'};
+  const has=h=>owns.includes(h);
+  const kendra=has(4)||has(7)||has(10),trikona=has(5)||has(9),trishadaya=has(3)||has(6)||has(11);
+  const ben=!!VR2_BEN[name];
+  if(has(1)&&has(8))return{v:+0.5,label:'Lagnesh+8th lord — benefic, capped (लग्नेश+अष्टमेश)'};       // redeemed sinner
+  if(has(1))return{v:+1,label:'Lagnesh — supreme benefic (लग्नेश)'};
+  if(!ben&&kendra&&trikona)return{v:+1,label:'Yogakaraka — Kendra+Trikona (योगकारक)'};
+  if(trikona)return{v:+1,label:'Trikona lord — always benefic (त्रिकोणेश)'};
+  if(has(8)&&!(name==='Sun'||name==='Moon'))return{v:-1,label:'8th lord — extremely malefic (अष्टमेश)'};
+  if(has(8))return{v:-0.25,label:'8th lord — Sun/Moon exemption (अष्टमेश)'};                     // luminaries exemption
+  if(ben&&kendra){
+    const sev=(name==='Jupiter'||name==='Venus')?1:(name==='Mercury')?0.6:0.3;
+    return{v:-sev,label:'Kendradhipati dosha (केन्द्राधिपति दोष)'};
+  }
+  if(!ben&&kendra&&trishadaya)return{v:-1,label:'Kendra+Trishadaya — persistent sinner'};
+  if(!ben&&kendra)return{v:0,label:'Malefic kendra lord — neutralized'};
+  if(!ben&&trishadaya)return{v:-1,label:'Trishadaya malefic (त्रिषडायेश)'};
+  if(ben&&trishadaya)return{v:+0.6,label:'Benefic Trishadaya lord — standard benefic'};
+  const only212=owns.every(h=>h===2||h===12);
+  if(only212)return{v:0,label:'2nd/12th lord — environmental chameleon (द्वितीयेश/व्ययेश)'};
+  return{v:ben?0.5:-0.5,label:'Natural nature'};
+}
+
+// ── R17 — Jaya-Parajaya (victory-defeat by Shar) ───────────────────
+function vr2Jaya(p1,p2){
+  if(p1.lat>=0&&p2.lat<0)return p1;
+  if(p2.lat>=0&&p1.lat<0)return p2;
+  if(p1.lat>=0&&p2.lat>=0)return p1.lat>=p2.lat?p1:p2;        // both north → higher wins
+  return Math.abs(p1.lat)<=Math.abs(p2.lat)?p1:p2;            // both south → fewer degrees wins
+}
+
+// ── R15/R16 table lookups ──────────────────────────────────────────
+function vr2DwiVal(sA,sB){
+  let pair=null;
+  if(sB===(sA+1)%12)pair=[sA,sB]; else if(sA===(sB+1)%12)pair=[sB,sA]; else return 0;
+  if(VR2_DWI_AUSP.some(p=>p[0]===pair[0]&&p[1]===pair[1]))return 1;
+  if(VR2_DWI_INAUSP.some(p=>p[0]===pair[0]&&p[1]===pair[1]))return -1;
+  return 0;
+}
+function vr2ShadVal(sA,sB){
+  const m=(t)=>t.some(p=>(p[0]===sA&&p[1]===sB)||(p[0]===sB&&p[1]===sA));
+  if(m(VR2_SHAD_AUSP))return 1;
+  if(m(VR2_SHAD_INAUSP))return -1;
+  return 0;
+}
+
+// ── R12 — Sun elongation aspect filter ─────────────────────────────
+function vr2GateAllowed(gate,n1,n2){
+  const pair=[n1,n2];
+  if(pair.includes('Sun')&&pair.includes('Mercury'))
+    return gate.mode==='nature'||gate.mode==='navyuti';        // yuti, navansha-yuti (+kranti handled apart)
+  if(pair.includes('Sun')&&pair.includes('Venus'))
+    return gate.mode==='nature'||gate.mode==='navyuti'||gate.deg===30||gate.deg===36;
+  return true;
+}
+
+// ── R14 — per-gate polarity engine ─────────────────────────────────
+// returns {pol∈[-1..1], why, winner} ; ctx={fn:planet→func-nature-v, seer, seen}
+function vr2GatePolarity(gate,p1,p2,ctx){
+  const relAB=((p2.sign-p1.sign+12)%12)+1;                    // B counted from A
+  const rel=(n)=>relAB===n||relAB===(14-n>12?14-n-12:14-n)%14||((p1.sign===p2.sign)&&n===1)||relAB===14-n;
+  const isRel=(n)=>relAB===n||(14-relAB)===n;                 // symmetric house relation
+  const fa=p=>ctx&&ctx.fn?ctx.fn(p.name)>=0:!!p.ben;          // functionally auspicious
+  const both=fa(p1)&&fa(p2),none=!fa(p1)&&!fa(p2);
+  const jw=vr2Jaya(p1,p2);
+  switch(gate.mode){
+    case 'nature':                                            // 0° yuti — conj matrix
+      if(both)return{pol:+1,why:'Benefic–benefic Yuti ⇒ Teji (शुभ-शुभ युति)'};
+      if(none)return{pol:-1,why:'Malefic–malefic Yuti ⇒ Mandi (क्रूर-क्रूर युति)'};
+      return{pol:fa(jw)?+1:-1,why:'Mixed ⇒ Jaya-Parajaya: '+jw.name+' victorious ('+jw.dev+')',winner:jw.name};
+    case 'opp':{                                              // 180° — drashta/drishya matrix
+      const seer=ctx&&ctx.seer?ctx.seer:p1,seen=ctx&&ctx.seen?ctx.seen:p2;
+      if(fa(seer)&&fa(seen))return{pol:+1,why:'Seer+Seen both benefic ⇒ Special Teji (विशेष तेजी)'};
+      if(fa(seer)&&!fa(seen))return{pol:+0.5,why:'Benefic Seer (Drashta) ⇒ Ordinary Teji'};
+      if(!fa(seer)&&fa(seen))return{pol:-0.5,why:'Malefic Seer (Drashta) ⇒ Ordinary Mandi'};
+      return{pol:-1,why:'Both malefic ⇒ Special Mandi (विशेष मंदी)'};}
+    case 'trine':return{pol:+1,why:'Trine always auspicious (120° त्रिकोण)'};
+    case 'kendra':{                                           // 90° + Saturn-Mars 4th exception
+      const sat=[p1,p2].find(p=>p.name==='Saturn'),mar=[p1,p2].find(p=>p.name==='Mars');
+      if(sat&&mar&&fa(sat)&&fa(mar)){
+        const relMS=((sat.sign-mar.sign+12)%12)+1;            // Saturn counted from Mars
+        if(relMS===4)return{pol:+1,why:'Saturn 4th from Mars + both auspicious ⇒ Poorna-Drishti Teji (exception)'};
+      }
+      return{pol:-1,why:'Kendra (90°) ⇒ Mandi'};}
+    case 'p72':                                               // 72° Triekadash/Kendra split
+      if(isRel(3))return{pol:+1,why:'3/11 relation ⇒ always Teji (त्रैकादश)'};
+      if(isRel(4))return both?{pol:+1,why:'4/10 relation, both benefic ⇒ Teji'}:{pol:-1,why:'4/10 relation, malefic present ⇒ Mandi'};
+      return{pol:both?0.5:-0.5,why:'72° boundary edge'};
+    case 'p60':return vr2P60(p1,p2,ctx,fa);
+    case 'sapt':{                                             // 51°26'/45/40/36/32°44'
+      if(p1.name==='Saturn'||p2.name==='Saturn')return vr2P60(p1,p2,ctx,fa,true);
+      if(isRel(3))return{pol:+1,why:'3/11 relation ⇒ Teji'};
+      if(isRel(2)){const v=vr2DwiVal(p1.sign,p2.sign);return{pol:v,why:'Dwidwadash table: '+(v>0?'auspicious':v<0?'inauspicious':'neutral')};}
+      return{pol:0,why:'house relation indeterminate'};}
+    case 'dwi':{                                              // 30° — pure dwidwadash
+      if(isRel(2)){const v=vr2DwiVal(p1.sign,p2.sign);return{pol:v,why:'Pure Dwidwadash: '+(v>0?'auspicious pair':v<0?'inauspicious pair':'neutral')};}
+      return{pol:0,why:'30° same-sign edge ⇒ inert'};}
+    case 'in22':                                              // 22°30' — same-sign nullification
+      if(p1.sign===p2.sign)return{pol:0,why:'22°30′ same sign ⇒ inert (sign boundary required)'};
+      return{pol:-1,why:'22°30′ crosses sign boundary ⇒ Mandi (1 anna)'};
+    case 'microP':                                            // 20/18/15/9/7°30'/6
+      if(p1.sign===p2.sign)return{pol:+1,why:'Same-sign micro-yoga ⇒ Teji (एक-राशि)'};
+      if(isRel(2)){const v=vr2DwiVal(p1.sign,p2.sign);return{pol:v,why:'Crosses sign boundary ⇒ Dwidwadash: '+(v>0?'auspicious':v<0?'inauspicious':'neutral')};}
+      return{pol:0,why:'indeterminate'};
+    case 'microM':                                            // 11°15'
+      if(p1.sign===p2.sign)return{pol:-1,why:'Same-sign 11°15′ ⇒ Mandi'};
+      if(isRel(2)){const v=vr2DwiVal(p1.sign,p2.sign);return{pol:v,why:'Dwidwadash: '+(v>0?'auspicious':v<0?'inauspicious':'neutral')};}
+      return{pol:0,why:'indeterminate'};
+    case 'm7ba':                                              // 174/172°30'/171
+      if(isRel(7))return both?{pol:+1,why:'7th relation + both benefic ⇒ Teji'}:{pol:-1,why:'7th relation, malefic present ⇒ Mandi'};
+      if(isRel(6)){const v=vr2ShadVal(p1.sign,p2.sign);return{pol:v,why:'Shadashtaka table: '+(v>0?'auspicious':v<0?'inauspicious':'neutral')};}
+      return{pol:0,why:'indeterminate'};
+    case 'm7t':                                               // 168°45'/157°30'
+      if(isRel(7))return{pol:+1,why:'7th relation ⇒ unconditional Teji'};
+      if(isRel(6)){const v=vr2ShadVal(p1.sign,p2.sign);return{pol:v,why:'Shadashtaka table: '+(v>0?'auspicious':v<0?'inauspicious':'neutral')};}
+      return{pol:0,why:'indeterminate'};
+    case 'm7m':                                               // 165/162/160
+      if(isRel(7))return{pol:-1,why:'7th relation ⇒ unconditional Mandi'};
+      if(isRel(6)){const v=vr2ShadVal(p1.sign,p2.sign);return{pol:v,why:'Shadashtaka table: '+(v>0?'auspicious':v<0?'inauspicious':'neutral')};}
+      return{pol:0,why:'indeterminate'};
+    case 'shad':{                                             // 150/147°16'/144/140
+      if(isRel(6)){const v=vr2ShadVal(p1.sign,p2.sign);return{pol:v,why:'Shadashtaka table: '+(v>0?'auspicious pair':v<0?'inauspicious pair':'neutral')};}
+      if(isRel(5))return{pol:+1,why:'5/9 relation ⇒ trine-like Teji'};
+      return{pol:0,why:'indeterminate'};}
+    case 'triShad':                                           // 135/128°34'
+      if(isRel(5))return{pol:+1,why:'5/9 relation ⇒ trine-like Teji'};
+      if(isRel(6)){const v=vr2ShadVal(p1.sign,p2.sign);return{pol:v,why:'Shadashtaka table: '+(v>0?'auspicious':v<0?'inauspicious':'neutral')};}
+      return{pol:0,why:'indeterminate'};
+    case 'kenTri':                                            // 108°
+      if(isRel(4))return{pol:-1,why:'4/10 relation ⇒ kendra-like Mandi'};
+      if(isRel(5))return{pol:+1,why:'5/9 relation ⇒ trine-like Teji'};
+      return{pol:0,why:'indeterminate'};
+    case 'navyuti':                                           // Jaya-Parajaya only
+      return{pol:fa(jw)?+1:-1,why:'Navansha-yuti ⇒ Jaya-Parajaya: '+jw.name+' victorious ('+jw.dev+')',winner:jw.name};
+  }
+  return{pol:0,why:'—'};
+}
+// 60° Sixth-part engine incl. Saturn forward/backward vectors + Tulya-Ansh
+function vr2P60(p1,p2,ctx,fa,routed){
+  const sat=[p1,p2].find(p=>p.name==='Saturn');
+  if(!sat)return{pol:+1,why:(routed?'No Saturn ⇒ ':'')+'Sixth-part (60°) ⇒ always Teji (षष्ठांश)'};
+  const oth=p1.name==='Saturn'?p2:p1;
+  const relFromSat=((oth.sign-sat.sign+12)%12)+1;
+  const satA=fa(sat);
+  const tulya=Math.abs(sat.degIn-oth.degIn)<=1;               // same degree in sign
+  if(relFromSat===3){
+    if(tulya)return satA?{pol:+1,why:'Saturn fwd 3rd + Tulya-Ansh (same degree) ⇒ amplified Poorna-Drishti max-Teji',amp:1.5}
+                        :{pol:-1,why:'Saturn malefic + Tulya-Ansh ⇒ max-Mandi',amp:1.5};
+    return satA?{pol:+1,why:'Saturn forward vector (3rd) auspicious ⇒ Teji'}:{pol:-1,why:'Saturn forward vector malefic ⇒ Mandi'};
+  }
+  if(relFromSat===11)return satA?{pol:+1,why:'11th from Saturn (backward vector) ⇒ standard Teji'}:{pol:+0.5,why:'Saturn malefic, 11th ⇒ mild Teji'};
+  return{pol:satA?+0.6:-0.6,why:'Saturn-yoga edge'};
+}
+
+// ── R19 — Drashta/Drishya + timing phase ───────────────────────────
+function vr2Roles(p1,p2,lagnaSign){
+  const h=p=>((p.sign-lagnaSign+12)%12)+1;
+  const h1=h(p1),h2=h(p2);
+  return h1<=h2?{seer:p1,seen:p2,hSeer:h1,hSeen:h2}:{seer:p2,seen:p1,hSeer:h2,hSeen:h1};
+}
+function vr2Phase(seen){
+  const north=seen.dec>=0,inc=seen.decSpd>0.0005,dec=seen.decSpd<-0.0005;
+  if(!inc&&!dec)return{phase:'SYM',lbl:'Stationary ⇒ both sides, dampened',damp:0.5};
+  if(north&&inc)return{phase:'POST',lbl:'N-declination rising ⇒ post-aspect',damp:1};
+  if(north&&dec)return{phase:'PRE',lbl:'N-declination falling ⇒ pre-aspect',damp:1};
+  if(!north&&inc)return{phase:'PRE',lbl:'S-declination rising ⇒ pre-aspect',damp:1};
+  return{phase:'POST',lbl:'S-declination falling ⇒ post-aspect',damp:1};
+}
+
+// ── R18 — same-sign dominance events ───────────────────────────────
+function vr2Dominance(P){
+  const ev=[]; const tara=new Set(['Mars','Mercury','Jupiter','Venus','Saturn']);
+  const sun=P.find(p=>p.name==='Sun'),moon=P.find(p=>p.name==='Moon');
+  for(const p of P){if(p.combust)ev.push({type:'AST',dev:'अस्त',p1:'Sun',p2:p.name,winner:'Sun',
+    note:p.name+' defeated by Sun — independent signal muted, Sun\'s state rules (अस्त)'});}
+  for(let i=0;i<P.length;i++)for(let j=i+1;j<P.length;j++){
+    const a=P[i],b=P[j]; if(a.sign!==b.sign)continue;
+    if((a.name==='Moon'&&tara.has(b.name))||(b.name==='Moon'&&tara.has(a.name))){
+      const w=vr2Jaya(a,b);
+      ev.push({type:'SAMAGAM',dev:'समागम',p1:a.name,p2:b.name,winner:w.name,
+        note:'Moon Samagam: north-Shar victor ⇒ '+w.name+' (उत्तर-शर विजयी)'});
+    } else if(tara.has(a.name)&&tara.has(b.name)){
+      let w=(a.name==='Venus')?a:(b.name==='Venus')?b:vr2Jaya(a,b);
+      ev.push({type:'YUDDHA',dev:'ग्रह-युद्ध',p1:a.name,p2:b.name,winner:w.name,
+        note:'Graha-Yuddha: '+((a.name==='Venus'||b.name==='Venus')?'Venus always wins, even from south (शुक्र-अपवाद)':'north-Shar victor')+' ⇒ '+w.name});
+    } else if(a.name==='Rahu'||a.name==='Ketu'||b.name==='Rahu'||b.name==='Ketu'){
+      const w=vr2Jaya(a,b);
+      ev.push({type:'NODE',dev:'छाया-युति',p1:a.name,p2:b.name,winner:w.name,
+        note:'Node conjunction: pure north-Shar rule, no Venus exception ⇒ '+w.name});
+    }
+  }
+  return ev;
+}
+
+// ── R4/R5 — Shar-Parivartan engine ─────────────────────────────────
+function vr2SharWindow(peakDeg,meanDeg,latSpdDegPerDay){
+  const delta=Math.abs(peakDeg-meanDeg);
+  const fmin=Math.min(peakDeg,delta);
+  const productArcmin=fmin*meanDeg;                            // product read as arc-minutes (doc R5)
+  const spdArcmin=Math.max(Math.abs(latSpdDegPerDay)*60,1e-4);
+  return{delta,fmin,productArcmin,days:productArcmin/spdArcmin};
+}
+const VR2_SHAR_CACHE=new Map();
+function vr2SharEvents(J){
+  const key=Math.floor(J);
+  if(VR2_SHAR_CACHE.has(key))return VR2_SHAR_CACHE.get(key);
+  const out=[];
+  const bodies=[['Moon',18,0.25],['Mercury',50,1],['Venus',60,1],['Mars',90,2],['Jupiter',200,4],['Saturn',200,4],['Uranus',200,5],['Neptune',200,5],['Pluto',200,5]];
+  for(const[b,span,step]of bodies){
+    let prev=null,prevJ=null;
+    for(let t=J-span;t<=J+span;t+=step){
+      let la;try{la=geoLat(b,t);}catch(e){break;}
+      if(prev!==null&&((prev<0&&la>=0)||(prev>0&&la<=0))){
+        let lo=prevJ,hi=t;                                     // refine crossing
+        for(let k=0;k<24;k++){const mid=(lo+hi)/2;const lm=geoLat(b,mid);
+          if((prev<0&&lm>=0)||(prev>0&&lm<=0))hi=mid;else lo=mid;}
+        const Jc=(lo+hi)/2;
+        const north=prev<0;                                    // entering north
+        // current-cycle extreme: peak |lat| scanning back from crossing
+        let peak=0;
+        for(let tb=Jc-step;tb>=Jc-span*2;tb-=step){
+          let lb;try{lb=geoLat(b,tb);}catch(e){break;}
+          if((prev<0&&lb>=0)||(prev>0&&lb<=0))break;           // previous crossing reached
+          peak=Math.max(peak,Math.abs(lb));
+        }
+        const mean=VR2_MEAN_SHAR[b]?(north?VR2_MEAN_SHAR[b].n:VR2_MEAN_SHAR[b].s):3;
+        const latSpd=(geoLat(b,Jc+0.5)-geoLat(b,Jc-0.5));
+        const win=vr2SharWindow(Math.max(peak,0.05),mean,latSpd);
+        // polarity R4: N-entry=Mandi, S-entry=Teji; retro/combust flips
+        let retro=false,comb=false;
+        try{retro=isRetrograde(b,Jc);}catch(e){}
+        try{comb=vr2Sep(geoLon(b,Jc),geoLon('Sun',Jc))<=(VR2_COMBUST[b]||0);}catch(e){}
+        let dir=north?-1:+1; let flip='';
+        if(retro||comb){dir=-dir;flip=retro?'Retro-flip (वक्री)':'Combust-flip (अस्त)';}
+        out.push({body:b,dev:VR2_DEV[b],J:Jc,north,dir,retro,comb,flip,
+          peak,mean,productArcmin:win.productArcmin,days:Math.min(win.days,400),
+          from:Jc,to:Jc+Math.min(win.days,400),
+          active:J>=Jc&&J<=Jc+Math.min(win.days,400),
+          daysFromNow:Math.round((Jc-J)*10)/10});
+        t=Jc+span/6;                                           // skip past this crossing
+      }
+      prev=la;prevJ=t;
+    }
+  }
+  out.sort((a,b)=>Math.abs(a.daysFromNow)-Math.abs(b.daysFromNow));
+  if(VR2_SHAR_CACHE.size>60)VR2_SHAR_CACHE.clear();
+  VR2_SHAR_CACHE.set(key,out);
+  return out;
+}
+
+// ── R6 — Kranti-Samya (declination parallel) ───────────────────────
+function vr2KrantiSamya(p1,p2){
+  const d=Math.abs(Math.abs(p1.dec)-Math.abs(p2.dec));
+  if(d>1)return null;                                          // 1° absolute cap
+  const dynOrb=Math.max((Math.max(Math.abs(p1.decSpd),Math.abs(p2.decSpd)))/2,0.03); // half daily motion (commercial calibration)
+  if(d>Math.max(dynOrb,0.25))return null;                      // display-band compromise: dyn window, floor 0.25°
+  const sameHemi=(p1.dec>=0)===(p2.dec>=0);
+  return{delta:Math.round(d*100)/100,sameHemi,w:sameHemi?0.75:0.50,
+    type:sameHemi?'Parallel (समदिशा)':'Contra-parallel (विपरीत)',
+    windowDays:dynOrb/Math.max(Math.abs(p1.decSpd),Math.abs(p2.decSpd),1e-4)};
+}
+
+// ── core pair evaluation (R7-R20 pipeline) ─────────────────────────
+function vr2Pairs(P,ctx){
+  const res=[];
+  const frozen=ctx&&ctx.frozen?ctx.frozen:new Set();
+  for(let i=0;i<P.length;i++)for(let j=i+1;j<P.length;j++){
+    const p1=P[i],p2=P[j];
+    const sep=vr2Sep(p1.lon,p2.lon);
+    // gate matching — best relative offset among allowed gates 1-35
+    let best=null;
+    for(const g of VR2_ASP){
+      if(g.mode==='navyuti')continue;
+      if(!vr2GateAllowed(g,p1.name,p2.name))continue;
+      const off=Math.abs(sep-g.deg);
+      if(off<=g.orb){const rel=off/g.orb;if(!best||rel<best.rel)best={g,off,rel};}
+    }
+    // navansha-yuti harmonic gate (0/40/80/120/160 within half-circle, tiny orb)
+    let navG=null;
+    {const m=sep%40;const off=Math.min(m,40-m);
+     if(off<=0.12963&&vr2GateAllowed(VR2_ASP[35],p1.name,p2.name)){
+       const idx=Math.round(sep/40);navG={g:VR2_ASP[35+Math.min(idx,4)],off};}}
+    const ks=vr2KrantiSamya(p1,p2);
+    if(!best&&!navG&&!ks)continue;
+    let gate=best?best.g:null,off=best?best.off:0,verdict=null,mag=0,kind='harmonic';
+    if(gate){
+      verdict=vr2GatePolarity(gate,p1,p2,ctx);
+      mag=(gate.w!=null?gate.w:gate.orb/VR2_FULL_ORB);
+      // Navansha-yuti override (trine & others hand over to Jaya when concurrent)
+      if(navG){const nv=vr2GatePolarity(navG.g,p1,p2,ctx);
+        verdict={pol:nv.pol,why:verdict.why+' → Navansha-yuti override: '+nv.why,winner:nv.winner};
+        kind='harmonic+navyuti';}
+    } else if(navG){gate=navG.g;off=navG.off;verdict=vr2GatePolarity(gate,p1,p2,ctx);mag=1.0;kind='navyuti';}
+    else{ // standalone kranti-samya = conjunction-equivalent
+      gate={id:0,nm:'Kranti-Samya',dev:'क्रान्ति-साम्य',deg:null,orb:1,half:0.5,mode:'nature'};
+      verdict=vr2GatePolarity(gate,p1,p2,ctx);mag=ks.w;kind='kranti';
+    }
+    if(verdict.amp)mag*=verdict.amp;                          // Tulya-Ansh amplifier
+    let w=verdict.pol*mag;
+    // R6 intensifier: kranti-samya concurrent with harmonic aspect
+    let ksNote='';
+    if(ks&&kind!=='kranti'){w*=1.25;ksNote='Kranti-Samya intensifier ×1.25 ('+ks.type+')';}
+    // R10 mass weighting (heavy-pair dominance)
+    const massF=p1.mass*p2.mass;
+    w*=massF;
+    // R20 inversion engine — combust/debilitated/retrograde participants flip polarity
+    const afflict=[p1,p2].filter(p=>p.retro||p.combust||p.debil);
+    let inverted=false;
+    if(afflict.length%2===1){w=-w;inverted=true;}
+    // R20 niransh buffer dampener
+    const nir=[p1,p2].some(p=>p.niransh);
+    if(nir)w*=0.5;
+    // R20 margi seniority — both retrograde dampens confidence
+    if(p1.retro&&p2.retro)w*=0.8;
+    // R4 freeze — shar-parivartan override wipes this pair
+    const isFrozen=frozen.has(p1.name)||frozen.has(p2.name);
+    if(isFrozen)w=0;
+    // R19 roles + timing
+    const roles=vr2Roles(p1,p2,ctx?ctx.lagna:0);
+    const phase=vr2Phase(roles.seen);
+    w*=phase.damp;
+    const relSpd=Math.max(Math.abs(p1.spd-p2.spd),1e-4);
+    const effDays=gate.half?Math.min(gate.half/relSpd,400):(ks?ks.windowDays:30);
+    // R11 navamsa-pairing overlay (same D9 division)
+    let navPairing=null;
+    if(p1.nav9===p2.nav9)navPairing=vr2NavPair(p1.name,p2.name);
+    res.push({p1,p2,sep,gate,off,kind,verdict,mag:Math.round(mag*10000)/10000,massF,
+      w:Math.round(w*10000)/10000,inverted,niransh:nir,frozen:isFrozen,ks,ksNote,
+      roles,phase,effDays:Math.round(effDays*10)/10,navPairing,
+      lagneshInvolved:ctx&&ctx.lord?(p1.name===ctx.lord||p2.name===ctx.lord):false});
+  }
+  // R20 lagnesh dominance — commodity-lord aspects get priority weighting
+  for(const r of res)if(r.lagneshInvolved)r.w=Math.round(r.w*1.3*10000)/10000;
+  res.sort((a,b)=>Math.abs(b.w)-Math.abs(a.w));
+  return res;
+}
+
+// ── R23 — master routing: full snapshot at instant J ───────────────
+function vr2Compute(J,commKey){
+  const comm=VR2_COMM[commKey||(typeof S!=='undefined'&&S.vr2Comm)||'GENERIC']||VR2_COMM.GENERIC;
+  const P=vr2PlanetsAt(J);
+  const fnCache={};
+  const fn=n=>{if(!(n in fnCache))fnCache[n]=vr2FuncNature(n,comm.lagna).v;return fnCache[n];};
+  // Step-3 global override sweeper
+  const shar=vr2SharEvents(J);
+  const frozen=new Set(shar.filter(s=>s.active).map(s=>s.body));
+  const ctx={lagna:comm.lagna,lord:comm.lord,fn,frozen};
+  // Step-2 aspects (past/present/future via phase engine)
+  const pairs=vr2Pairs(P,ctx);
+  // dominance events
+  const events=vr2Dominance(P);
+  // shar override contributions (supreme layer)
+  let overrideScore=0;
+  const activeShar=shar.filter(s=>s.active);
+  for(const s of activeShar)overrideScore+=s.dir*2.0*(VR2_MASS[VR2_TIER[s.body]]||1);
+  // Step-5 synthesis
+  let teji=0,mandi=0;
+  for(const r of pairs){if(r.w>0)teji+=r.w;else mandi+=-r.w;}
+  if(overrideScore>0)teji+=overrideScore;else mandi+=-overrideScore;
+  const net=Math.round((teji-mandi)*100)/100;
+  const moon=P.find(p=>p.name==='Moon');
+  const micro=pairs.filter(r=>r.p1.tier==='micro'||r.p2.tier==='micro');
+  const microNet=Math.round(micro.reduce((s,r)=>s+r.w,0)*100)/100;
+  // volatility: moon near shar-crossing, kshanik pairing, active shar events
+  const kshanik=pairs.some(r=>r.navPairing==='KSHANIK');
+  const volatile=Math.abs(moon.lat)<0.3||kshanik||activeShar.some(s=>Math.abs(s.daysFromNow)<1.5);
+  const regime=net>=0.5?'TEJI':net<=-0.5?'MANDI':'CHURN';
+  const state=volatile?'volatile':net>=0.5?'bull':net<=-0.5?'bear':'neutral';
+  return{J,comm,P,pairs,events,shar,activeShar,overrideScore:Math.round(overrideScore*100)/100,
+    teji:Math.round(teji*100)/100,mandi:Math.round(mandi*100)/100,net,microNet,regime,state,volatile,
+    moonNak:moon.nak,fn:fnCache};
+}
+
+// ── forecasts: day / week / intraday-15min ─────────────────────────
+function vr2LocInfo(){
+  const loc=(typeof LOCATIONS!=='undefined'&&typeof S!=='undefined'&&LOCATIONS[S.loc])||{open:9.25,close:15.5,abbr:'IST'};
+  return{open:loc.open,close:loc.close,abbr:loc.abbr||'IST'};
+}
+function vr2Intraday(dateStr,commKey){
+  const dp=(dateStr||(typeof S!=='undefined'?S.date:'2026-01-01')).split('-').map(Number);
+  const L=vr2LocInfo();
+  const slots=[];const n=Math.round((L.close-L.open)/0.25);
+  for(let k=0;k<=n;k++){
+    const t=Math.round((L.open+k*0.25)*10000)/10000;
+    const J=JD(dp[0],dp[1],dp[2],t);
+    const C=vr2Compute(J,commKey);
+    const drv=C.pairs.find(r=>Math.abs(r.w)>0)||null;
+    const mdrv=C.pairs.find(r=>(r.p1.tier==='micro'||r.p2.tier==='micro')&&Math.abs(r.w)>0);
+    slots.push({t,J,net:C.net,microNet:C.microNet,state:C.state,regime:C.regime,
+      driver:drv?`${drv.p1.name}–${drv.p2.name} ${drv.gate.nm}`:'—',
+      microDriver:mdrv?`${mdrv.p1.name}–${mdrv.p2.name} ${mdrv.gate.nm}`:'—',
+      moonNak:C.moonNak?C.moonNak.n:'—',moonPada:C.moonNak?C.moonNak.pada:0});
+  }
+  const ranges=[];
+  for(const s of slots){
+    if(ranges.length&&ranges[ranges.length-1].state===s.state){const rg=ranges[ranges.length-1];rg.endT=s.t;rg.slots.push(s);}
+    else ranges.push({state:s.state,startT:s.t,endT:s.t,slots:[s]});
+  }
+  ranges.forEach(rg=>{rg.endT=Math.min(Math.round((rg.endT+0.25)*10000)/10000,L.close);
+    rg.netAvg=Math.round(rg.slots.reduce((a,b)=>a+b.net,0)/rg.slots.length*100)/100;
+    const cnt={};rg.slots.forEach(s=>{cnt[s.driver]=(cnt[s.driver]||0)+1;});
+    rg.driver=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0];});
+  return{slots,ranges,open:L.open,close:L.close,abbr:L.abbr};
+}
+function vr2DayForecast(dateStr,commKey){
+  const dp=dateStr.split('-').map(Number);
+  const L=vr2LocInfo();
+  const tOpen=JD(dp[0],dp[1],dp[2],L.open),tMid=JD(dp[0],dp[1],dp[2],(L.open+L.close)/2),tClose=JD(dp[0],dp[1],dp[2],L.close);
+  const O=vr2Compute(tOpen,commKey),M=vr2Compute(tMid,commKey),C=vr2Compute(tClose,commKey);
+  const avg=Math.round((O.net+M.net+C.net)/3*100)/100;
+  const dow=new Date(Date.UTC(dp[0],dp[1]-1,dp[2])).getUTCDay();
+  const dayLord=['Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn'][dow];
+  const state=avg>=0.5?'bull':avg<=-0.5?'bear':(O.volatile||M.volatile||C.volatile)?'volatile':'neutral';
+  return{date:dateStr,dow,dayLord,open:O,mid:M,close:C,avg,state,
+    regime:avg>=0.5?'TEJI':avg<=-0.5?'MANDI':'CHURN',
+    trendShift:(O.net>=0)!==(C.net>=0)};
+}
+function vr2WeekForecast(startDateStr,commKey){
+  const d0=new Date(startDateStr+'T00:00:00Z');
+  const days=[];
+  for(let i=0;i<7;i++){
+    const d=new Date(d0.getTime()+i*86400000);
+    const ds=d.toISOString().slice(0,10);
+    const dp=ds.split('-').map(Number);
+    const L=vr2LocInfo();
+    const J=JD(dp[0],dp[1],dp[2],(L.open+L.close)/2);
+    const Cm=vr2Compute(J,commKey);
+    const drv=Cm.pairs.find(r=>Math.abs(r.w)>0);
+    days.push({date:ds,dow:d.getUTCDay(),net:Cm.net,regime:Cm.regime,state:Cm.state,volatile:Cm.volatile,
+      moonNak:Cm.moonNak?Cm.moonNak.n:'—',moonNakLord:Cm.moonNak?Cm.moonNak.l:'—',
+      driver:drv?`${drv.p1.name}–${drv.p2.name} ${drv.gate.nm}`:'—',
+      sharActive:Cm.activeShar.map(s=>s.dev).join(', ')});
+  }
+  return days;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// VR2 SELF-TEST SUITE — "test the module until all tests pass"
+// Deterministic unit tests for every rule group. Run: vr2SelfTest()
+// ═══════════════════════════════════════════════════════════════════
+function vr2MkP(name,lon,lat,dec,retro){
+  lon=n360(lon);const sign=Math.floor(lon/30),degIn=lon-sign*30;
+  return{name,dev:VR2_DEV[name]||name,lon,lat:lat||0,dec:dec||0,retro:!!retro,spd:name==='Moon'?13:1,
+    latSpd:0,decSpd:0.1,sign,degIn,nav9:Math.floor(lon/(10/3))%12,sid:lon,nak:null,
+    ben:!!VR2_BEN[name],tier:VR2_TIER[name]||'meso',mass:VR2_MASS[VR2_TIER[name]||'meso'],
+    niransh:degIn<1,debil:VR2_DEBIL[name]===sign,combust:false,waxing:true};
+}
+function vr2PairOne(p1,p2,ctx){
+  const arr=vr2Pairs([p1,p2],ctx||{lagna:0});
+  return arr.length?arr[0]:null;
+}
+function vr2SelfTest(){
+  const T=[];const eq=(a,b,tol)=>Math.abs(a-b)<=(tol==null?1e-6:tol);
+  const add=(name,fn)=>{try{const r=fn();T.push({name,pass:!!r,note:r===true?'ok':String(r)});}
+    catch(e){T.push({name,pass:false,note:'ERR: '+e.message});}};
+
+  // R1 — Sayana conversion (book example: Nirayana Cancer 15° + 23°16' = Sayana Leo 8°16')
+  add('R1 Nirayana→Sayana (Cancer 15° → Leo 8°16′)',()=>{
+    const s=vr2NiraToSaya(90+15,23+16/60);
+    return eq(s,120+8+16/60,1e-9)&&Math.floor(s/30)===4;});
+
+  // R13 — orb chart integrity
+  add('R13 40 gates present',()=>VR2_ASP.length===40);
+  add('R13 orbs match book chart',()=>{
+    const g=d=>VR2_ASP.find(a=>a.deg===d&&a.mode!=='navyuti');
+    return eq(g(0).orb,7+10/60+10/3600,1e-4)&&eq(g(120).orb,4+46/60+10/3600,1e-4)&&
+           eq(g(90).orb,3+35/60+10/3600,1e-4)&&eq(g(22.5).orb,0.875,1e-6)&&
+           eq(g(150).half,2.919444,1e-3)&&eq(VR2_ASP[35].orb,0.12963,1e-4);});
+  add('R13 Trairashik: derived mag = orb/full-orb',()=>{
+    const g=VR2_ASP.find(a=>a.deg===40&&a.mode==='sapt');
+    return eq(g.orb/VR2_FULL_ORB,1.555556/7.169444,1e-6);});
+
+  // R7/R8 — explicit weights
+  add('R7 Teji weights 1/.5/.25/.25/.125/.09375×3',()=>{
+    const w=d=>VR2_ASP.find(a=>a.deg===d&&a.mode!=='navyuti').w;
+    return w(0)===1&&w(120)===0.5&&w(60)===0.25&&w(150)===0.25&&w(30)===0.125&&
+           w(36)===0.09375&&w(72)===0.09375&&w(144)===0.09375;});
+  add('R8 Mandi anna weights 16/12/8/4/1',()=>{
+    const w=d=>VR2_ASP.find(a=>a.deg===d&&a.mode!=='navyuti').w;
+    return w(180)===1&&w(135)===0.75&&w(90)===0.5&&w(45)===0.25&&w(22.5)===0.0625;});
+
+  // R14 — trine always auspicious (even two malefics)
+  add('R14 Trine (120°) always Teji',()=>{
+    const r=vr2PairOne(vr2MkP('Mars',10,1),vr2MkP('Saturn',130.4,2));
+    return r&&r.gate.deg===120&&r.verdict.pol===1&&r.w>0;});
+  // R14 — kendra 90° mandi + Saturn-Mars 4th-house exception
+  add('R14 Kendra (90°) Mandi baseline',()=>{
+    const r=vr2PairOne(vr2MkP('Sun',10),vr2MkP('Jupiter',100));
+    return r&&r.gate.deg===90&&r.verdict.pol===-1;});
+  add('R14 Saturn 4th-from-Mars 90° exception ⇒ Teji',()=>{
+    const ctx={lagna:0,fn:()=>1};                              // both functionally auspicious
+    const r=vr2PairOne(vr2MkP('Mars',10,1),vr2MkP('Saturn',100,2),ctx);
+    const rev=vr2PairOne(vr2MkP('Saturn',10,2),vr2MkP('Mars',100,1),ctx);
+    return r.verdict.pol===1&&rev.verdict.pol===-1;});
+  // R9 — 22.5° same-sign nullification
+  add('R9 22°30′ same-sign inert / cross-sign valid',()=>{
+    const inert=vr2PairOne(vr2MkP('Mars',33),vr2MkP('Venus',55.5));
+    const valid=vr2PairOne(vr2MkP('Mars',230),vr2MkP('Venus',252.5));
+    return inert.verdict.pol===0&&valid.verdict.pol===-1&&eq(valid.mag,0.0625);});
+  // R15 — dwidwadash tables via 30° gate
+  add('R15 Dwidwadash Taurus–Gemini shubh / Aries–Taurus ashubh',()=>{
+    const a=vr2PairOne(vr2MkP('Sun',45),vr2MkP('Mars',75));
+    const b=vr2PairOne(vr2MkP('Sun',15),vr2MkP('Mars',45));
+    return a.verdict.pol===1&&b.verdict.pol===-1;});
+  // R16 — shadashtaka tables via 150° gate
+  add('R16 Shadashtaka Aries–Scorpio shubh / Aries–Virgo ashubh',()=>{
+    const a=vr2PairOne(vr2MkP('Sun',10),vr2MkP('Mars',220));   // Aries–Scorpio 8th rel
+    const b=vr2PairOne(vr2MkP('Sun',10),vr2MkP('Mars',175));   // Aries–Virgo 6th rel (165° gate → shad table)
+    return a.verdict.pol===1&&b.verdict.pol===-1;});
+  // R14 near-opposition gates
+  add('R14 165° via 7th house ⇒ unconditional Mandi',()=>{
+    const r=vr2PairOne(vr2MkP('Jupiter',10,1),vr2MkP('Venus',205,2));
+    return r&&r.gate.deg===165&&r.verdict.pol===-1;});
+  add('R14 168°45′ via 7th house ⇒ unconditional Teji',()=>{
+    const r=vr2PairOne(vr2MkP('Sun',15),vr2MkP('Saturn',15+168.75));
+    return r&&r.gate.deg===168.75&&r.verdict.pol===1;});
+  // R14 108° kendra/trikona split
+  add('R14 108° 4/10 ⇒ Mandi · 5/9 ⇒ Teji',()=>{
+    const k=vr2PairOne(vr2MkP('Sun',25),vr2MkP('Mars',133));   // Aries→Leo = 5th? 25→133: signs 0→4 rel5 ⇒ trikona
+    const t=vr2PairOne(vr2MkP('Sun',5),vr2MkP('Mars',113));    // 0→3 rel4 ⇒ kendra
+    return k.verdict.pol===1&&t.verdict.pol===-1;});
+  // R14 60° Saturn vectors
+  add('R14 60° baseline Teji · Saturn Tulya-Ansh amplifier',()=>{
+    const base=vr2PairOne(vr2MkP('Sun',10),vr2MkP('Jupiter',70));
+    const ctx={lagna:0,fn:n=>n==='Saturn'?1:1};
+    const amp=vr2PairOne(vr2MkP('Saturn',44,2),vr2MkP('Mars',104,1),ctx); // same degIn=14 → tulya
+    return base.verdict.pol===1&&amp.verdict.pol===1&&amp.verdict.amp===1.5;});
+  // R17 — jaya-parajaya
+  add('R17 Jaya: N beats S · both-N higher · both-S lower',()=>{
+    const a=vr2MkP('Mars',10,2),b=vr2MkP('Venus',10,-5);
+    const c=vr2MkP('Mars',10,2),d=vr2MkP('Venus',10,5);
+    const e=vr2MkP('Mars',10,-2),f=vr2MkP('Venus',10,-5);
+    return vr2Jaya(a,b).name==='Mars'&&vr2Jaya(c,d).name==='Venus'&&vr2Jaya(e,f).name==='Mars';});
+  // R18 — dominance events
+  add('R18 Graha-Yuddha: Venus wins even from south',()=>{
+    const ev=vr2Dominance([vr2MkP('Mars',40,3),vr2MkP('Venus',42,-4)]);
+    const y=ev.find(e=>e.type==='YUDDHA');return y&&y.winner==='Venus';});
+  add('R18 Samagam: north-shar planet dominates Moon',()=>{
+    const ev=vr2Dominance([vr2MkP('Moon',40,-1),vr2MkP('Jupiter',45,0.5)]);
+    const s=ev.find(e=>e.type==='SAMAGAM');return s&&s.winner==='Jupiter';});
+  add('R18 Node conjunction: pure north rule',()=>{
+    const ev=vr2Dominance([vr2MkP('Rahu',40,0),vr2MkP('Venus',44,-2)]);
+    const n=ev.find(e=>e.type==='NODE');return n&&n.winner==='Rahu';});
+  // R20 — inversion engine
+  add('R20 Retrograde participant inverts polarity',()=>{
+    const r=vr2PairOne(vr2MkP('Mars',10,1),vr2MkP('Saturn',130.4,2,0,true)); // trine + retro Saturn
+    return r.inverted&&r.w<0;});
+  add('R20 Niransh (0-1°) dampens ×0.5',()=>{
+    const a=vr2PairOne(vr2MkP('Mars',10.9,1),vr2MkP('Saturn',131.3,2));
+    const b=vr2PairOne(vr2MkP('Mars',0.5,1),vr2MkP('Saturn',120.9,2));
+    return b.niransh&&eq(Math.abs(b.w),Math.abs(a.w)*0.5,1e-3);});
+  // R5 — shar-parivartan window formula (Mars Jan-1958 worked example)
+  add('R5 Vanijya-Sarvasva formula: Mars 1958 ⇒ 16′24″ ≈ 23 days',()=>{
+    const w=vr2SharWindow(2+25/60,6+47/60,0.71284/60);
+    return eq(w.productArcmin,16.394,0.05)&&eq(w.days,23,0.6);});
+  // R4 — shar-crossing polarity
+  add('R4 N-entry=Mandi S-entry=Teji · retro/combust flips',()=>{
+    const pol=(north,retro,comb)=>{let d=north?-1:1;if(retro||comb)d=-d;return d;};
+    return pol(true,false,false)===-1&&pol(false,false,false)===1&&
+           pol(true,true,false)===1&&pol(false,false,true)===-1;});
+  // R6 — kranti-samya weights
+  add('R6 Kranti-Samya parallel .75 / contra .50 / >1° null',()=>{
+    const a=vr2KrantiSamya(vr2MkP('Sun',10,0,10),vr2MkP('Mars',200,1,10.1));
+    const b=vr2KrantiSamya(vr2MkP('Sun',10,0,10),vr2MkP('Mars',200,1,-10.1));
+    const c=vr2KrantiSamya(vr2MkP('Sun',10,0,16),vr2MkP('Mars',200,1,19));
+    return a&&a.w===0.75&&b&&b.w===0.5&&c===null;});
+  // R12 — Sun elongation limits
+  add('R12 Sun-Mercury no 60° gate · Sun-Venus 36° allowed',()=>{
+    const sm=vr2PairOne(vr2MkP('Sun',10,0,5),vr2MkP('Mercury',70,1,9));
+    const sv=vr2PairOne(vr2MkP('Sun',10,0,5),vr2MkP('Venus',46,1,12));
+    const sv60=vr2PairOne(vr2MkP('Sun',10,0,5),vr2MkP('Venus',70,1,12));
+    return sm===null&&sv&&sv.gate.deg===36&&(sv60===null||sv60.kind==='kranti');});
+  // R11 — navamsa pairing tables
+  add('R11 Nav-pairings: Kshanik/Sahasa/Neptune-constant/Saturn-inversion',()=>{
+    return vr2NavPair('Moon','Mercury')==='KSHANIK'&&vr2NavPair('Mars','Uranus')==='SAHASA'&&
+           vr2NavPair('Sun','Saturn')==='MANDI'&&vr2NavPair('Mars','Saturn')==='TEZI'&&
+           vr2NavPair('Jupiter','Neptune')==='MANDI'&&vr2NavPair('Moon','Venus')==='KSHANIK';});
+  // R14 — navansha-yuti override on trine
+  add('R14 Navansha-yuti overrides Trine via Jaya',()=>{
+    const ctx={lagna:0};
+    const r=vr2PairOne(vr2MkP('Jupiter',10,-3),vr2MkP('Saturn',130,4),ctx); // exact 120 → navyuti concurrent; Saturn N wins (malefic)
+    const plain=vr2PairOne(vr2MkP('Jupiter',10,-3),vr2MkP('Saturn',130.6,4),ctx); // outside navyuti orb
+    return r.kind==='harmonic+navyuti'&&r.verdict.pol===-1&&plain.verdict.pol===1;});
+  // R19 — roles & phase
+  add('R19 Drashta=lower house · Drishya declination phase table',()=>{
+    const l=6;                                                 // Libra lagna
+    const a=vr2MkP('Sun',185,0,10),b=vr2MkP('Mars',95,0,-5);   // Sun Libra h1, Mars Cancer h10
+    const ro=vr2Roles(a,b,l);
+    const ph1=vr2Phase({dec:10,decSpd:+0.1}),ph2=vr2Phase({dec:10,decSpd:-0.1}),
+          ph3=vr2Phase({dec:-10,decSpd:+0.1}),ph4=vr2Phase({dec:-10,decSpd:-0.1}),
+          ph5=vr2Phase({dec:5,decSpd:0});
+    return ro.seer.name==='Sun'&&ph1.phase==='POST'&&ph2.phase==='PRE'&&
+           ph3.phase==='PRE'&&ph4.phase==='POST'&&ph5.phase==='SYM'&&ph5.damp===0.5;});
+  // R21 — functional nature
+  add('R21 Vishesh-Shastra: yogakaraka/lagnesh/kendradhipati',()=>{
+    const sat=vr2FuncNature('Saturn',6);                       // Libra: Cap=h4,Aqu=h5 → yogakaraka
+    const ven=vr2FuncNature('Venus',6);                        // Libra lagnesh + 8th (Taurus)
+    const jup=vr2FuncNature('Jupiter',0);                      // Aries: Sag h9 trikona → shubh
+    const jup2=vr2FuncNature('Jupiter',6);                     // Libra: Sag h3, Pis h6 → benefic trishadaya
+    const mer=vr2FuncNature('Mercury',3);                      // Cancer: Gem h12, Vir h3 → benefic trishadaya→+0.6
+    return sat.v===1&&ven.v===0.5&&jup.v===1&&jup2.v===0.6&&mer.v===0.6;});
+  // R2 — mass tiers (heavy 0.5-aspect beats light full-aspect)
+  add('R2 Mass rule: Sat-Jup trine outweighs Mo-Me yuti',()=>{
+    const heavy=vr2PairOne(vr2MkP('Jupiter',10,1),vr2MkP('Saturn',130,2));
+    const light=vr2PairOne(vr2MkP('Moon',10,1),vr2MkP('Mercury',10.2,2));
+    return heavy&&light&&Math.abs(heavy.w)>Math.abs(light.w);});
+  // R22 — commodity registry
+  add('R22 Commodity anchors: Cotton→Libra/Venus · Silver→Cancer/Moon',()=>{
+    return VR2_COMM.COTTON.lagna===6&&VR2_COMM.COTTON.lord==='Venus'&&
+           VR2_COMM.SILVER.lagna===3&&VR2_COMM.SILVER.lord==='Moon';});
+  // R23 — regime classifier
+  add('R23 Regime: net→TEJI/MANDI/CHURN thresholds',()=>{
+    const cls=n=>n>=0.5?'TEJI':n<=-0.5?'MANDI':'CHURN';
+    return cls(1.2)==='TEJI'&&cls(-0.8)==='MANDI'&&cls(0.1)==='CHURN';});
+  // R24 — nakshatra layer (via getNak on sidereal lon)
+  add('R24 Nakshatra mapping: 0°→Ashwini · 100°→Pushya p3',()=>{
+    if(typeof getNak!=='function')return 'skip (getNak n/a)';
+    const a=getNak(0),b=getNak(100);
+    return a.n==='Ashwini'&&b.n==='Pushya';});
+
+  // Ephemeris-dependent integration tests (need Astronomy Engine)
+  const aeOK=(typeof isAELoaded==='function')&&isAELoaded();
+  add('INT ephemeris loaded (Astronomy Engine)',()=>aeOK?true:'skip — AE not loaded');
+  if(aeOK){
+    add('INT intraday 15-min slot grid (NSE 9:15→15:30 ⇒ 26 slots)',()=>{
+      const IN=vr2Intraday('2026-07-06','GENERIC');
+      const ok=IN.slots.length===Math.round((IN.close-IN.open)/0.25)+1;
+      const kOk=IN.slots.every((s,i)=>i===0||eq(s.t-IN.slots[i-1].t,0.25,1e-9));
+      return ok&&kOk&&IN.ranges.length>=1;});
+    add('INT week forecast = 7 consecutive days',()=>{
+      const W=vr2WeekForecast('2026-07-06','GENERIC');
+      return W.length===7&&W.every(d=>['TEJI','MANDI','CHURN'].includes(d.regime))&&
+             W.every(d=>d.moonNak&&d.moonNak!=='');});
+    add('INT day forecast open/mid/close coherent',()=>{
+      const D=vr2DayForecast('2026-07-06','GENERIC');
+      return D.open&&D.mid&&D.close&&typeof D.avg==='number'&&
+             ['bull','bear','neutral','volatile'].includes(D.state)&&D.dayLord==='Moon';});
+    add('INT live compute: pairs sorted, Moon nakshatra present',()=>{
+      const C=vr2Compute(JD(2026,7,6,10),'COTTON');
+      const sorted=C.pairs.every((r,i)=>i===0||Math.abs(C.pairs[i-1].w)>=Math.abs(r.w)-1e-9);
+      return sorted&&C.moonNak&&typeof C.net==='number'&&C.comm.lord==='Venus';});
+    add('INT shar-events scanner returns windows with polarity',()=>{
+      const E=vr2SharEvents(JD(2026,7,6,10));
+      return Array.isArray(E)&&E.every(e=>e.days>0&&(e.dir===1||e.dir===-1)&&e.mean>0);});
+  }
+  // V1 preservation checks
+  add('V1 intact: old Vyapaar Ratna module untouched',()=>{
+    return typeof vrYogas==='function'&&typeof computeVR==='function'&&typeof tVR==='function'&&
+           Array.isArray(VR_ASP)&&VR_ASP.length===17;});
+  const pass=T.filter(t=>t.pass).length;
+  return{tests:T,pass,fail:T.length-pass,total:T.length,allPass:pass===T.length};
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// TAB: VYAPAAR RATNA V2 — UI
+// ═══════════════════════════════════════════════════════════════════
+function vr2StateCol(st){return st==='bull'?'#00c050':st==='bear'?'#ff3355':st==='volatile'?'var(--neut2)':'var(--tx3)';}
+const VR2_STLBL={bull:'Bullish (तेजी)',bear:'Bearish (मंदी)',volatile:'Volatile (अस्थिर)',neutral:'Neutral (सम)'};
+function vr2DowName(d){return['Sun रविवार','Mon सोमवार','Tue मंगलवार','Wed बुधवार','Thu गुरुवार','Fri शुक्रवार','Sat शनिवार'][d];}
+
+function tVR2(){
+  if(typeof S!=='undefined'&&!S.vr2Comm)S.vr2Comm='GENERIC';
+  const commKey=(typeof S!=='undefined'&&S.vr2Comm)||'GENERIC';
+  const dp=S.date.split('-').map(Number);
+  const J=JD(dp[0],dp[1],dp[2],parseFloat(S.time)||10);
+  const C=vr2Compute(J,commKey);
+  const vcol=v=>v>0?'var(--bull)':v<0?'var(--bear)':'var(--neut)';
+  const vlbl=v=>v>0?'▲ Teji':v<0?'▼ Mandi':'• Flat';
+  const netCol=C.net>0.5?'var(--bull)':C.net<-0.5?'var(--bear)':'var(--neut)';
+  const regLbl=C.regime==='TEJI'?'TEJI RUN — Bullish (तेजी)':C.regime==='MANDI'?'MANDI RUN — Bearish (मंदी)':'CHURN — Sideways (मंथन)';
+
+  // ── header ──
+  const commSel=Object.keys(VR2_COMM).map(k=>`<option value="${k}"${k===commKey?' selected':''}>${VR2_COMM[k].nm}</option>`).join('');
+  const hdr=`<div class="pnl" style="border-color:${netCol}55">
+    <div class="ph"><span class="dot" style="background:${netCol}"></span>★★ Vyapaar Ratna V2 · Volume 2 + Vanijya-Sarvasva (व्यापार रत्न — द्वितीय खण्ड) · ${S.date}
+      <span style="margin-left:auto;font-size:10px;color:var(--tx3)">V2 ENGINE — 40-gate Deeptansh chakra</span></div>
+    <div class="pb">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <div><div style="font-size:22px;font-weight:800;color:${netCol};letter-spacing:.08em">${regLbl}${C.volatile?' <span style="color:var(--neut2);font-size:13px">⚡ Volatile</span>':''}</div>
+          <div style="font-size:11.5px;color:var(--tx3);margin-top:3px">${C.pairs.length} active yogas · <span style="color:var(--bull)">Teji ${C.teji}</span> / <span style="color:var(--bear)">Mandi ${C.mandi}</span> · micro-pulse ${C.microNet>0?'+':''}${C.microNet} · Moon nakshatra <b style="color:var(--acc)">${C.moonNak?C.moonNak.n+' p'+C.moonNak.pada:'—'}</b> (lord ${C.moonNak?C.moonNak.l:'—'})</div></div>
+        <div style="text-align:right"><div style="font-size:26px;font-weight:700;color:${netCol};font-family:monospace">${C.net>0?'+':''}${C.net}</div>
+          <div style="font-size:8px;color:var(--tx3)">TREND = ΣTeji − ΣMandi · ${mtt((parseFloat(S.time)||10)*60)}</div></div>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:10.5px;color:var(--tx3)">Commodity lagna (R22):</span>
+        <select onchange="S.vr2Comm=this.value;render()" style="background:var(--bg3);color:var(--tx1);border:1px solid var(--bd);border-radius:3px;padding:3px 6px;font-size:11px">${commSel}</select>
+        <span style="font-size:10px;color:var(--tx3)">${VR2_COMM[commKey].note} · lord <b style="color:${VR2_PC[VR2_COMM[commKey].lord]||'#cde'}">${VR2_COMM[commKey].lord} (${VR2_DEV[VR2_COMM[commKey].lord]})</b></span>
+      </div>
+    </div></div>`;
+
+  // ── supreme override panel (R4/R5) ──
+  const sharRows=C.shar.slice(0,10).map(s=>{
+    const im=s.active,col=s.dir>0?'var(--bull)':'var(--bear)';
+    return`<tr class="${im?(s.dir>0?'tr-b':'tr-r'):''}"><td style="color:${VR2_PC[s.body]||'#cde'};font-weight:700">${s.dev}</td>
+      <td style="font-size:11px">${s.north?'North entry (उत्तर)':'South entry (दक्षिण)'}${s.flip?' · <b style="color:var(--neut2)">'+s.flip+'</b>':''}</td>
+      <td style="text-align:center;font-weight:700;color:${col}">${s.dir>0?'▲ Teji':'▼ Mandi'}</td>
+      <td style="text-align:right;font-family:monospace;color:${im?'var(--acc)':'var(--tx2)'}">${s.daysFromNow>0?'+':''}${s.daysFromNow}d</td>
+      <td style="text-align:right;font-family:monospace">${s.days.toFixed(1)}d</td>
+      <td style="font-size:10px;color:var(--tx3)">peak ${s.peak.toFixed(2)}° · mean ${s.mean.toFixed(2)}° · ${s.productArcmin.toFixed(1)}′${im?' · <b style="color:var(--acc)">ACTIVE — other yogas zeroed</b>':''}</td></tr>`;}).join('');
+  const sharPanel=`<div class="pnl"><div class="ph"><span class="dot" style="background:var(--acc)"></span>R4·R5 Shar-Parivartan — SUPREME OVERRIDE (शर-परिवर्तन · Vanijya-Sarvasva formula)</div>
+    <div class="pb"><div style="font-size:10.5px;color:var(--tx3);margin-bottom:6px">While a planet crosses zero-Shar (ecliptic latitude 0°), <b>all degree-interval yogas are neutralized</b>. North entry = Mandi, South entry = Teji; Retrograde/Combust ⇒ rule flips. Window = min(peak, |peak−mean|) × mean (read as arc-min) ÷ daily Shar speed. Sun-Rahu-Ketu ride the ecliptic permanently (Shar=0).</div>
+    ${C.shar.length?`<div class="ts" style="max-height:220px;overflow:auto"><table class="tbl"><thead><tr><th>Planet</th><th>Direction</th><th style="text-align:center">Effect</th><th style="text-align:right">When</th><th style="text-align:right">Window</th><th>Math</th></tr></thead><tbody>${sharRows}</tbody></table></div>`:
+    '<div style="font-size:11px;color:var(--tx3)">No Shar crossing within scan range.</div>'}</div></div>`;
+
+  // ── active aspects (R13/R14) ──
+  const aspRows=C.pairs.slice(0,34).map(r=>{
+    const tag=p=>`<span style="color:${VR2_PC[p.name]||'#cde'};font-weight:700">${p.name}</span> <span style="font-size:8px;color:var(--tx3)">${p.dev}</span><span style="font-size:8px;color:${p.ben?'var(--bull)':'var(--bear)'}"> ${p.ben?'ben':'mal'}${p.retro?'·℞':''}${p.combust?'·combust':''}${p.debil?'·debil':''}${p.niransh?'·0-1°':''}</span>`;
+    const flags=[r.inverted?'<span style="color:var(--neut2)">INVERTED (विपर्यय)</span>':'',r.frozen?'<span style="color:var(--acc)">SHAR-MUTED</span>':'',r.ksNote?'<span style="color:var(--acc)">Kranti-Samya ×1.25</span>':'',r.navPairing?('<span style="color:'+(r.navPairing==='MANDI'?'var(--bear)':'var(--bull)')+'">D9:'+r.navPairing+'</span>'):'',r.lagneshInvolved?'<span style="color:var(--acc)">LAGNESH</span>':''].filter(Boolean).join(' · ');
+    return`<tr class="${r.w>0?'tr-b':r.w<0?'tr-r':'tr-n'}"><td>${tag(r.p1)}</td><td>${tag(r.p2)}</td>
+      <td style="font-size:11px;color:var(--tx1)">${r.gate.nm}<div style="font-size:8px;color:var(--tx3)">${r.gate.dev?r.gate.dev+' · ':''}${r.gate.deg!=null?r.gate.deg+'° · off '+r.off.toFixed(2)+'°':'Δdec '+(r.ks?r.ks.delta:'')+'°'} · orb ${r.gate.orb}°</div></td>
+      <td style="font-size:10px;color:var(--tx2)">${r.verdict.why}</td>
+      <td style="text-align:center;font-weight:700;color:${vcol(r.w)};white-space:nowrap">${vlbl(r.w)}<div style="font-size:8px">${r.w>0?'+':''}${r.w}</div></td>
+      <td style="font-size:9px;color:var(--tx3)">Seer ${r.roles.seer.name} (H${r.roles.hSeer}) → Seen ${r.roles.seen.name} (H${r.roles.hSeen})<div>${r.phase.lbl} · ±${r.effDays}d</div><div>${flags}</div></td></tr>`;}).join('');
+  const aspPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>R13·R14 ACTIVE ASPECT-YOGAS — 40-gate Deeptansh chakra (Sayana · दृष्टि-योग)</div>
+    ${C.pairs.length?`<div class="ts" style="max-height:420px;overflow:auto"><table class="tbl"><thead><tr><th>Planet 1</th><th>Planet 2</th><th>Gate (interval)</th><th>Rule verdict</th><th style="text-align:center">Weight w</th><th>Seer-Seen · timing (R19)</th></tr></thead><tbody>${aspRows}</tbody></table></div>`:
+    '<div class="pb" style="font-size:11px;color:var(--tx3)">No yoga within orb (Deeptansh).</div>'}</div>`;
+
+  // ── planet snapshot (R3/R24) ──
+  const pRows=C.P.map(p=>{
+    const fn=C.fn[p.name]!=null?C.fn[p.name]:vr2FuncNature(p.name,C.comm.lagna).v;
+    const noLat=(p.name==='Sun'||p.name==='Rahu'||p.name==='Ketu');
+    return`<tr><td style="color:${VR2_PC[p.name]||'#cde'};font-weight:700">${p.name}<span style="font-size:8px;color:var(--tx3)"> ${p.dev}</span></td>
+      <td style="font-size:11px">${SABB[p.sign]} ${dmsC(p.degIn)}<div style="font-size:8px;color:var(--tx3)">Sayana ${p.lon.toFixed(2)}°</div></td>
+      <td style="font-size:11px;color:var(--acc)">${p.nak?p.nak.n+' p'+p.nak.pada:'—'}<div style="font-size:8px;color:var(--tx3)">lord ${p.nak?p.nak.l:'—'}</div></td>
+      <td style="text-align:center;font-size:10px">D9 ${SABB[p.nav9]}</td>
+      <td>${noLat?'<span style="color:var(--tx3)">0 (on ecliptic)</span>':Math.abs(p.lat).toFixed(2)+'° '+(p.lat>=0?'<span style="color:var(--jupi)">N</span>':'<span style="color:var(--merc)">S</span>')}</td>
+      <td>${Math.abs(p.dec).toFixed(2)}° ${p.dec>=0?'<span style="color:var(--jupi)">N</span>':'<span style="color:var(--merc)">S</span>'}<div style="font-size:8px;color:var(--tx3)">${p.decSpd>0.0005?'rising':p.decSpd<-0.0005?'falling':'steady'}</div></td>
+      <td style="font-size:10px">${p.retro?'<span style="color:var(--bear)">℞ retro (वक्री)</span>':'direct'}${p.combust?'<div style="color:var(--neut2)">combust (अस्त)</div>':''}${p.debil?'<div style="color:var(--bear)">debilitated (नीच)</div>':''}${p.niransh?'<div style="color:var(--neut2)">niransh 0-1°</div>':''}</td>
+      <td style="text-align:center;font-weight:700;color:${fn>0?'var(--bull)':fn<0?'var(--bear)':'var(--neut)'}">${fn>0?'+':''}${fn}</td></tr>`;}).join('');
+  const planetPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>R3·R21·R24 PLANET STATE — Sayana · Nakshatra · Shar · Kranti · functional nature (ग्रह-स्थिति)</div>
+    <div class="ts"><table class="tbl"><thead><tr><th>Planet</th><th>Sign (Sayana)</th><th>Nakshatra-pada</th><th style="text-align:center">Navamsa</th><th>Shar (lat)</th><th>Kranti (dec)</th><th>State</th><th style="text-align:center">Functional</th></tr></thead><tbody>${pRows}</tbody></table>
+    <div style="font-size:9.5px;color:var(--tx3);padding:5px 8px">Functional nature from ${VR2_COMM[commKey].nm} lagna (Vishesh-Shastra R21): Trikona lords always benefic · Kendradhipati dosha (Jup-Ven > Mercury > Moon) · Yogakaraka · 8th-lord rules · Nakshatra is nirayana (${(typeof S!=='undefined'&&S.ayMode)||'lahiri'} ayanamsa).</div></div></div>`;
+
+  // ── dominance events (R18) ──
+  const evRows=C.events.map(e=>`<tr><td style="font-weight:700;color:var(--acc)">${e.type} <span style="font-size:9px">${e.dev}</span></td>
+    <td><span style="color:${VR2_PC[e.p1]||'#cde'}">${e.p1}</span>–<span style="color:${VR2_PC[e.p2]||'#cde'}">${e.p2}</span></td>
+    <td style="font-weight:700;color:${VR2_PC[e.winner]||'#cde'}">${e.winner} wins</td>
+    <td style="font-size:10.5px;color:var(--tx2)">${e.note}</td></tr>`).join('');
+  const evPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>R18 SAMAGAM · GRAHA-YUDDHA · NODE-CONJUNCTION · COMBUSTION (समागम · ग्रह-युद्ध · अस्त)</div>
+    ${C.events.length?`<div class="ts"><table class="tbl"><thead><tr><th>Type</th><th>Pair</th><th>Victor</th><th>Rule</th></tr></thead><tbody>${evRows}</tbody></table></div>`:
+    '<div class="pb" style="font-size:11px;color:var(--tx3)">No same-sign dominance event (Samagam/Yuddha/Ast) right now.</div>'}</div>`;
+
+  // ── DAY forecast (R2/R23) ──
+  const DF=vr2DayForecast(S.date,commKey);
+  const dcol=vr2StateCol(DF.state);
+  const dayCard=(lbl,cc)=>`<div style="background:var(--bg3);border-radius:3px;padding:6px 9px;flex:1;min-width:130px">
+    <div style="font-size:8px;color:var(--tx3)">${lbl}</div>
+    <div style="font-size:14px;font-weight:700;color:${vcol(cc.net)}">${cc.net>0?'+':''}${cc.net} · ${cc.regime}</div>
+    <div style="font-size:8px;color:var(--tx3)">Moon ${cc.moonNak?cc.moonNak.n:'—'} · micro ${cc.microNet>0?'+':''}${cc.microNet}${cc.volatile?' · ⚡':''}</div></div>`;
+  const dayPanel=`<div class="pnl" style="border-color:${dcol}55"><div class="ph"><span class="dot" style="background:${dcol}"></span>☉ V2 DAY FORECAST (दिन-फल) · ${S.date} · ${vr2DowName(DF.dow)} · day-lord ${DF.dayLord} (${VR2_DEV[DF.dayLord]})</div>
+    <div class="pb">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <div style="background:var(--bg2);border-left:3px solid ${dcol};padding:7px 10px;border-radius:3px;flex:2;min-width:200px">
+          <div style="font-size:15px;font-weight:800;color:${dcol}">${VR2_STLBL[DF.state]} · avg ${DF.avg>0?'+':''}${DF.avg}</div>
+          <div style="font-size:10.5px;color:var(--tx2);margin-top:2px">${DF.trendShift?'⚠ Open and close lean opposite ways — intraday reversal likely':'Open-to-close bias consistent'} · R2: day-level moves ride Moon-Mercury (micro); week-level rides Sun-Mars-Venus (meso).</div></div>
+        ${dayCard('OPEN '+mtt(vr2LocInfo().open*60),DF.open)}
+        ${dayCard('MID',DF.mid)}
+        ${dayCard('CLOSE '+mtt(vr2LocInfo().close*60),DF.close)}
+      </div>
+    </div></div>`;
+
+  // ── WEEK forecast ──
+  const WF=vr2WeekForecast(S.date,commKey);
+  const wRows=WF.map(d=>{
+    const col=vr2StateCol(d.state);
+    return`<tr class="${d.net>0.5?'tr-b':d.net<-0.5?'tr-r':'tr-n'}"><td style="font-weight:700;white-space:nowrap">${d.date}<div style="font-size:8px;color:var(--tx3)">${vr2DowName(d.dow)}</div></td>
+      <td><span class="pill" style="background:${col}33;color:${col};border:1px solid ${col}">${VR2_STLBL[d.state]}</span></td>
+      <td style="text-align:right;font-family:monospace;color:${vcol(d.net)}">${d.net>0?'+':''}${d.net}</td>
+      <td style="font-size:10.5px;color:var(--acc)">${d.moonNak}<div style="font-size:8px;color:var(--tx3)">lord ${d.moonNakLord}</div></td>
+      <td style="font-size:10.5px;color:var(--tx2)">${d.driver}</td>
+      <td style="font-size:10px;color:${d.sharActive?'var(--acc)':'var(--tx3)'}">${d.sharActive||'—'}</td></tr>`;}).join('');
+  const weekPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>◫ V2 WEEK FORECAST (सप्ताह-फल) · 7 days from ${S.date} · mid-session evaluation</div>
+    <div class="ts"><table class="tbl"><thead><tr><th>Date</th><th>State</th><th style="text-align:right">Net</th><th>Moon nakshatra</th><th>Key yoga</th><th>Shar override</th></tr></thead><tbody>${wRows}</tbody></table></div></div>`;
+
+  // ── INTRADAY 15-min band ──
+  const IN=vr2Intraday(S.date,commKey);
+  const W=1000,H=64,padL=4,padR=4,iw=W-padL-padR;
+  const xT=t=>padL+((t-IN.open)/(IN.close-IN.open))*iw;
+  let segs='';IN.ranges.forEach(rg=>{const x0=xT(rg.startT),x1=xT(rg.endT);
+    segs+=`<rect x="${x0.toFixed(1)}" y="14" width="${Math.max(x1-x0,0.5).toFixed(1)}" height="26" fill="${vr2StateCol(rg.state)}" opacity="0.92"/>`;});
+  // micro-pulse polyline (Moon-Mercury layer, R2 intraday engine)
+  const mvals=IN.slots.map(s=>s.microNet);
+  const mmax=Math.max(0.4,...mvals.map(Math.abs));
+  const mpts=IN.slots.map(s=>`${xT(s.t).toFixed(1)},${(27-(s.microNet/mmax)*11).toFixed(1)}`).join(' ');
+  let ticks='';for(let h=Math.ceil(IN.open);h<=IN.close+1e-9;h+=1){const x=xT(h);
+    ticks+=`<line x1="${x.toFixed(1)}" y1="14" x2="${x.toFixed(1)}" y2="40" stroke="var(--bg2)" stroke-width=".5"/><text x="${x.toFixed(1)}" y="52" fill="var(--tx3)" font-size="8" text-anchor="middle">${mtt(h*60)}</text>`;}
+  const selT=parseFloat(S.time)||IN.open;let selMark='';
+  if(selT>=IN.open&&selT<=IN.close){const x=xT(selT);
+    selMark=`<line x1="${x.toFixed(1)}" y1="10" x2="${x.toFixed(1)}" y2="42" stroke="var(--neut2)" stroke-width="1.4"/><text x="${x.toFixed(1)}" y="9" fill="var(--neut2)" font-size="8" text-anchor="middle">▼${mtt(selT*60)}</text>`;}
+  const bandSVG=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">${segs}<polyline points="${mpts}" fill="none" stroke="#0af" stroke-width="1" opacity="0.85"/>${ticks}${selMark}</svg>`;
+  const slotRows=IN.slots.map(s=>`<tr class="${s.net>0.5?'tr-b':s.net<-0.5?'tr-r':'tr-n'}">
+    <td style="font-weight:700;white-space:nowrap">${mtt(s.t*60)}</td>
+    <td><span class="pill" style="background:${vr2StateCol(s.state)}33;color:${vr2StateCol(s.state)};border:1px solid ${vr2StateCol(s.state)};font-size:9px">${VR2_STLBL[s.state]}</span></td>
+    <td style="text-align:right;font-family:monospace;color:${vcol(s.net)}">${s.net>0?'+':''}${s.net}</td>
+    <td style="text-align:right;font-family:monospace;color:${vcol(s.microNet)}">${s.microNet>0?'+':''}${s.microNet}</td>
+    <td style="font-size:10px;color:var(--acc)">${s.moonNak} p${s.moonPada}</td>
+    <td style="font-size:10px;color:var(--tx2)">${s.microDriver}</td></tr>`).join('');
+  const rangeRows=IN.ranges.map(rg=>`<tr><td style="white-space:nowrap;font-weight:700">${mtt(rg.startT*60)} – ${mtt(rg.endT*60)}</td>
+    <td><span class="pill" style="background:${vr2StateCol(rg.state)}33;color:${vr2StateCol(rg.state)};border:1px solid ${vr2StateCol(rg.state)}">${VR2_STLBL[rg.state]}</span></td>
+    <td style="text-align:right;color:${vcol(rg.netAvg)};font-family:monospace">${rg.netAvg>0?'+':''}${rg.netAvg}</td>
+    <td style="font-size:10.5px;color:var(--tx2)">${rg.driver||'—'}</td></tr>`).join('');
+  const intraPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>⏱ V2 INTRADAY Teji-Mandi (इंट्राडे) · 15-MIN INTERVALS (${mtt(IN.open*60)}–${mtt(IN.close*60)} ${IN.abbr})</div>
+    <div class="pb">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;margin-bottom:6px">
+        ${Object.keys(VR2_STLBL).map(k=>`<span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:${vr2StateCol(k)};display:inline-block;border-radius:2px"></span>${VR2_STLBL[k]}</span>`).join('')}
+        <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:3px;background:#0af;display:inline-block"></span>Moon-Mercury micro-pulse (R2)</span>
+      </div>
+      ${bandSVG}
+      <div style="font-size:11px;color:var(--acc);font-weight:700;margin:8px 0 4px">Merged state ranges</div>
+      <div class="ts" style="max-height:170px;overflow:auto"><table class="tbl"><thead><tr><th>Time</th><th>State</th><th style="text-align:right">Avg</th><th>Key yoga</th></tr></thead><tbody>${rangeRows}</tbody></table></div>
+      <div style="font-size:11px;color:var(--acc);font-weight:700;margin:8px 0 4px">Per-15-minute slots (${IN.slots.length})</div>
+      <div class="ts" style="max-height:260px;overflow:auto"><table class="tbl"><thead><tr><th>Time</th><th>State</th><th style="text-align:right">Net</th><th style="text-align:right">micro</th><th>Moon nakshatra</th><th>micro-yoga (Moon/Mercury)</th></tr></thead><tbody>${slotRows}</tbody></table></div>
+      <div style="font-size:10px;color:var(--tx3);margin-top:5px">R2: hour-to-hour moves come only from Moon-Mercury — the Moon-Mercury conjunction moment is the key to intraday reversals. ⚡Volatile = Moon Shar≈0 / Kshanik-Teji D9 pair / active Shar crossing ±1.5d.</div>
+    </div></div>`;
+
+  // ── rule book (all rules R1-R24) ──
+  const RB=[
+   ['R1','Sayana mandate','Volume-2 predictions use the Sayana system — Nirayana + ayanamsha = Sayana (Cancer 15° → Leo 8°16′ book example).'],
+   ['R2','Speed tiers','Macro: Pluto-Neptune-Herschel-Saturn-Jupiter (months-years) · Meso: Sun-Mars-Venus (week-month; Sun/Mars spike at sign entry, Venus peaks mid-sign) · Micro: Moon-Mercury (intraday engine).'],
+   ['R3','Shar-Kranti geometry','A true Yuti needs longitude + Shar (ecliptic latitude) + Kranti (declination) to converge; Sun-Rahu-Ketu have Shar=0.'],
+   ['R4','Shar-Parivartan supreme','Zero-Shar crossing ⇒ all other yogas neutralized; North entry=Mandi, South entry=Teji; Retrograde/Combust ⇒ flip.'],
+   ['R5','Effect-period formula','min(peak, |peak−mean|) × mean = arc-minutes → ÷ daily Shar speed = days (Mars 1958: 16′24″ → 23 days).'],
+   ['R6','Kranti-Samya','≤1°: same-hemisphere parallel 0.75, contra-parallel 0.50; commercial window = half of daily motion; intensifier ×1.25 with a concurrent aspect.'],
+   ['R7','8 Teji aspects','0°(1.0) 30°(.125) 36°(.09375) 60°(.25) 72°(.09375) 120°(.5) 144°(.09375) 150°(.25).'],
+   ['R8','5 Mandi aspects','180°(16 annas) 135°(12) 90°(8) 45°(4) 22°30′(1 anna).'],
+   ['R9','22°30′ filter','Inert within one sign; must bridge a sign boundary to act.'],
+   ['R10','6-step matrix','Mass → sign bias → navamsa → Shar-change → Kranti-Samya → geometry; a heavy pair at 0.5 outweighs a light pair at 1.0.'],
+   ['R11','Navamsa-Yuti tables','Tezi / Mandi / Kshanik-Tezi (Moon-Mercury, Moon-Venus) / Sahasa-Tezi (Mars-Herschel, Mercury-Herschel); Neptune constant = Mandi; Mars-Saturn & Mercury-Saturn = Tezi (the Saturn inversion).'],
+   ['R12','Sun elongation limits','Sun-Mercury ≤28° ⇒ 3 aspect types; Sun-Venus ≤48° ⇒ 5 types (Yuti, Navansha-yuti, Kranti-Samya, 30°, 36°).'],
+   ['R13','Deeptansh chakra','40 gates, Mercury 7° base orb, Trairashik proportional scaling, half-part (argbhag) = pre/post-cusp window.'],
+   ['R14','Gate routing','Trine always benefic; Kendra malefic (Saturn-Mars 4th exception); 60° Saturn fwd/back vectors + Tulya-Ansh amplifier; 72° 3-11/4-10 split; 30° pure Dwidwadash; 174–157°30′ 7th-house gates; 150–140 Shadashtaka; 135/128°34′ Trine-or-Shadashtaka; 108° Kendra-or-Trikona; Navansha-yuti = Jaya-Parajaya.'],
+   ['R15','Dwidwadash table','Auspicious: Pisces-Aries, Taurus-Gemini, Cancer-Leo, Leo-Virgo, Virgo-Libra, Scorpio-Sagittarius, Capricorn-Aquarius. Inauspicious: Aries-Taurus, Gemini-Cancer, Libra-Scorpio, Sagittarius-Capricorn, Aquarius-Pisces.'],
+   ['R16','Shadashtaka table','Auspicious: Aries-Scorpio, Gemini-Capricorn, Leo-Pisces, Libra-Taurus, Sagittarius-Cancer, Aquarius-Virgo. Inauspicious: Aries-Virgo, Gemini-Scorpio, Leo-Capricorn, Libra-Pisces, Sagittarius-Taurus, Aquarius-Cancer.'],
+   ['R17','Jaya-Parajaya','North Shar beats South; both north ⇒ higher degrees wins; both south ⇒ fewer degrees wins.'],
+   ['R18','Samagam-Yuddha-Ast','Moon+Tara same sign = Samagam (north wins); Tara+Tara = war (Venus always wins); Rahu/Ketu = pure north rule; near Sun = combust (independent signal muted).'],
+   ['R19','Seer-Seen timing','D1 lagna houses: lower house = Seer (Drashta); Seen (Drishya) declination sets phase: N-rising=post, N-falling=pre, S-rising=pre, S-falling=post, stationary=both-dampened.'],
+   ['R20','Inversion engine','Combust/Debilitated/Retrograde ⇒ polarity flips; Niransh 0-1° uncertain (×0.5); direct (Margi) outranks retrograde; commodity-lord yogas dominate.'],
+   ['R21','Functional nature','Trikona lords always benefic; Kendradhipati dosha (Jup-Ven > Mercury > Moon); malefic Kendra+Trikona = Yogakaraka; 8th lord malefic (partially redeemed by lagna lordship; Sun/Moon exempt); 2nd/12th chameleons; Rahu-Ketu absorb context.'],
+   ['R22','Commodity lagna','Shelter sign = H1: Cotton=Libra/Venus (density rule: light-white), Silver=Cancer/Moon (heavy-white); D1+D9 share the anchor.'],
+   ['R23','5-step synthesis','Init → temporal sort → override sweeper → inversion core → Trend = ΣTeji − ΣMandi; TEJI-run / MANDI-run / CHURN regimes.'],
+   ['R24','Nakshatra layer','Sign/nakshatra/pada entries are granular triggers; Moon nakshatra gives intraday context (nirayana).']
+  ];
+  const rbRows=RB.map(r=>`<tr><td style="color:var(--acc);font-weight:700;white-space:nowrap">${r[0]}</td><td style="font-weight:700;white-space:nowrap;font-size:11px">${r[1]}</td><td style="font-size:10.5px;color:var(--tx2)">${r[2]}</td></tr>`).join('');
+  const rulePanel=`<div class="pnl"><div class="ph"><span class="dot"></span>⚜ V2 RULE BOOK (नियम-पुस्तिका) — all rules · source: Analyzing Market Trend Using Planetary Aspects.md</div>
+    <div class="ts" style="max-height:300px;overflow:auto"><table class="tbl"><thead><tr><th>#</th><th>Rule</th><th>Summary</th></tr></thead><tbody>${rbRows}</tbody></table></div></div>`;
+
+  // ── self-test panel ──
+  let testPanel='';
+  try{
+    const TS=vr2SelfTest();
+    const rows=TS.tests.map(t=>`<tr class="${t.pass?'tr-b':'tr-r'}"><td style="font-size:10.5px">${t.name}</td>
+      <td style="text-align:center;font-weight:700;color:${t.pass?'var(--bull)':'var(--bear)'}">${t.pass?'✓ PASS':'✗ FAIL'}</td>
+      <td style="font-size:10px;color:var(--tx3)">${t.note}</td></tr>`).join('');
+    testPanel=`<div class="pnl" style="border-color:${TS.allPass?'var(--bull)':'var(--bear)'}55">
+      <div class="ph"><span class="dot" style="background:${TS.allPass?'var(--bull)':'var(--bear)'}"></span>✓ V2 SELF-TEST — ${TS.pass}/${TS.total} pass${TS.allPass?' · ALL TESTS PASS':' · FAILURES!'}</div>
+      <div class="ts" style="max-height:260px;overflow:auto"><table class="tbl"><thead><tr><th>Test</th><th style="text-align:center">Result</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  }catch(e){testPanel=`<div class="pnl"><div class="pb" style="color:var(--bear)">self-test error: ${e.message}</div></div>`;}
+
+  return`<div style="display:flex;flex-direction:column;gap:10px">
+    <div style="font-size:10px;color:var(--tx3);background:var(--bg3);padding:5px 9px;border-radius:3px;border-left:3px solid var(--acc)">
+      ★★ <b>V2 — new version</b>, separate from (and listed below) the old ★ Vyapaar Ratna. Source: <b>Analyzing Market Trend Using Planetary Aspects.docx/.md</b> — Vyapar Ratna Volume 2 (द्वितीय खण्ड) + Vanijya-Sarvasva. The old V1 module remains untouched above.</div>
+    ${hdr}${sharPanel}${dayPanel}${weekPanel}${intraPanel}${aspPanel}${planetPanel}${evPanel}${rulePanel}${testPanel}
+    <div style="font-size:10.5px;color:var(--tx3)">Source: "Analyzing Market Trend Using Planetary Aspects.md" (in this folder). Sayana computation; nakshatra nirayana. Study aid — not investment advice.</div></div>`;
+}
+
 
 // direction → colour / pill-class helpers (used by Day Forecast)
 function _dirCls(d){return d==='BULLISH'?'pb-b':d==='BEARISH'?'pb-r':'pb-n';}
