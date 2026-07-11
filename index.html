@@ -4341,7 +4341,7 @@ function rHdr(){
 // NAV
 // ═══════════════════════════════════════════════════════════════════
 function rNav(){
-  const tabs=[['overview','▦ Overview'],['v44','✦ FATS Forecast'],['dayfc','☉ Day Forecast'],['panchak','◔ Panchak'],['shar','⟐ Shar'],['kranti','◓ Kranti'],['transit','⊞ Transit Cal'],['kundali','◇ Natal·Intraday'],['bhav','⌂ Bhav Phal'],['rulebook','⚜ Rule Book'],['ashtaka','⊡ Ashtakavarga'],['vr','★ Vyapaar Ratna'],['vr2','★★ Vyapaar Ratna V2'],['rules','⚖ Astro Rules'],['kp','⊕ KP Planets'],['charts','◈ D1·D9'],['sbc','⬡ SBC Grid'],['planlat','🪐 Planet Lat'],['planlon','🛰 Planet Lon'],['timing','⏱ 15-min Timing'],['gann','⌇ Gann SQ9']];
+  const tabs=[['overview','▦ Overview'],['v44','✦ FATS Forecast'],['dayfc','☉ Day Forecast'],['panchak','◔ Panchak'],['shar','⟐ Shar'],['kranti','◓ Kranti'],['transit','⊞ Transit Cal'],['kundali','◇ Natal·Intraday'],['bhav','⌂ Bhav Phal'],['rulebook','⚜ Rule Book'],['ashtaka','⊡ Ashtakavarga'],['vr','★ Vyapaar Ratna'],['vr2','★★ Vyapaar Ratna V2'],['rules','⚖ Astro Rules'],['kp','⊕ KP Planets'],['charts','◈ D1·D9'],['sbc','⬡ SBC Grid'],['planlat','🪐 Planet Lat'],['planlon','🛰 Planet Lon'],['timing','⏱ 15-min Timing'],['gann','⌇ Gann SQ9'],['sector','◭ Sector Forecast']];
   const closeRow=`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px 8px 14px;border-bottom:1px solid var(--bd);background:var(--bg1);flex-shrink:0">
     <span style="font-size:11.5px;color:var(--tx3);letter-spacing:.08em">MENU</span>
     <button onclick="closeNav()" style="background:none;border:none;color:var(--tx2);font-size:20px;line-height:1;cursor:pointer;padding:2px 6px">✕</button>
@@ -4350,7 +4350,7 @@ function rNav(){
 }
 
 function rMain(){
-  const fns={overview:tOverview,v44:tV44,dayfc:tDayForecast,shar:()=>tSharParivartan('shar'),kranti:()=>tSharParivartan('kranti'),transit:tTransit,kundali:tKundali,bhav:tBhavphal,rulebook:tRuleBook,ashtaka:tAshtaka,vr:tVR,vr2:tVR2,rules:tRules,kp:tKP,charts:tCharts,sbc:tSBC,planlat:tPlanetLat,planlon:tPlanetLon,timing:tTiming,gann:tGann,panchak:tPanchak};
+  const fns={overview:tOverview,v44:tV44,dayfc:tDayForecast,shar:()=>tSharParivartan('shar'),kranti:()=>tSharParivartan('kranti'),transit:tTransit,kundali:tKundali,bhav:tBhavphal,rulebook:tRuleBook,ashtaka:tAshtaka,vr:tVR,vr2:tVR2,rules:tRules,kp:tKP,charts:tCharts,sbc:tSBC,planlat:tPlanetLat,planlon:tPlanetLon,timing:tTiming,gann:tGann,panchak:tPanchak,sector:tSector};
   document.getElementById('MAIN').innerHTML=(fns[S.tab]||tOverview)();
   if(S.tab==='sbc'&&S.sbcMode!=='bt') setTimeout(sbcFetchMonthlyPrice,100);
   collapsibleInit();
@@ -10537,6 +10537,286 @@ function anchorInputsUI(){
       ${idx.map(row).join('')}
     </div>
   </details>`;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// TAB: SECTOR FORECAST — planet → sector/commodity dashboard
+//   Reuses every forecasting engine already in the terminal:
+//   • Vyapaar Ratna दृष्टि-योग net per planet (vrYogas)          ← core teji/mandi
+//   • DATA.planets dignity: retrograde, combustion, shar (latitude, जय)
+//   • Nakshatra movement: Moon-nakshatra-lord + day-lord + hora-lord activation
+//   • Existing SECTOR_YOGAS pair table (Module 4) as a confirming overlay
+//   The planet→sector map below is transcribed from the classical
+//   "Planet · Sectors & Commodities" table (Vyapaar Ratna karakatva).
+// ════════════════════════════════════════════════════════════════════
+const SECTOR_PLANET_MAP = {
+  Sun:['Public Sector Enterprises','PSU Banks','Precious Stones','Gilt-Edged Securities','Rice','Honey','Aromatic Herbs','Missiles','Bakeries','Gold','Renewable / Solar Energy'],
+  Moon:['Silver','Milk & Dairy','Petroleum Shares','Hotels','Liquids','Liquor','Fishery','Navigation & Shipping','Glass','Cotton','Hydel Power','Chemicals'],
+  Mars:['War & Strife','Healthcare & Pharma','Fertilizer','Pesticide','Insecticide','Iron & Steel','Metals','Engineering & Machinery','Hydrogen Power','Defense · Cyber Security','Railways','Gold','Rice & Gram','Shipyard','Bricks','Tea / Coffee / Hard Drinks','Automobiles','Energy & Chemicals'],
+  Mercury:['Sentiments','Wheat & Grains','Silk & Cotton Textiles','Sugar','Telecommunication','Aviation','Banking & Finance','Semi-Conductor','Wind Power','Business Exports','FMCG','Logistics','Information Technology','Tours & Travels'],
+  Venus:['Cotton & Jute','Fancy Textiles','Rice & Wheat (premium)','Lesion Silk','Branded Goods','Sugar Industry','Confectionery','Pearl','Mirror & Glass','Floriculture','Copper Trade','Media','Undergarments','Perfumery','Cosmetics','Quality Fruits','Spices','Automobiles','FMCG','PSU Banks'],
+  Jupiter:['Turmeric','Tin','Rubber','Foodstuff','Silver','Zinc','Gram','Jute','Tobacco','Share Trading','Bank & Finance','Legal Sector','Cloth Mills','Luxury / High-End','Data Center','Edible Oils','Pharma'],
+  Saturn:['Coal','Lead','Copper','Oil-seeds','Wool','Iron','Leather','Jute','Barley','Mining','Farming','Cement','Real Estate','Metallurgical Products','Logistics','Shipyards','Marble Quarry','Vegetables','Heavy Commercial Vehicles'],
+  Rahu:['Media & Entertainment','Telecommunications','Information Technology','Artificial Intelligence','Electrical Goods','Drones','Logistics','Crude Oil','Pharmaceuticals','Fertilizer','Pesticide','Insecticide','Cables & Wires','Wind Power'],
+  Ketu:['Coal','Information Technology','Oil & Gas','Leather','Power','Infrastructure','Automobiles','Copper','Hydrogen Fuel','Shoe Industry'],
+  Uranus:['Electrical Goods','Aviation','Surgical Goods','Wireless & Telegraph','Aerial Navigation','High-Speed Automobiles','Railroads & Railways','PSU & PSE','Government Paper','Film Industry','Aerated Water','Bakeries','Aluminium','Missiles / Submarines / Drones'],
+  Neptune:['Raw Tea','Raw Cotton','Medicine & Drugs','Surgical Goods','Oxygen','Industrial Gas','Oil','Fishing Industry','Tobacco','Missiles'],
+  Pluto:['Robbery / Gundaism','Tin','Copper','Zinc','Watches','High-Quality Machinery','Rubber','Leather Shares']
+};
+// Curated tradeable-sector → ruling-planets (for the ranked "Sector Calls" table).
+const SECTOR_RULERS = {
+  'Banking & Finance / BFSI':['Mercury','Jupiter','Venus'],
+  'PSU Banks':['Sun','Venus'],
+  'PSU / PSE (Govt)':['Sun','Uranus'],
+  'IT / Technology':['Mercury','Rahu','Ketu','Uranus'],
+  'Semiconductors':['Mercury'],
+  'Artificial Intelligence / Drones':['Rahu','Uranus','Mars'],
+  'Telecom':['Mercury','Rahu','Uranus'],
+  'Media & Entertainment':['Venus','Rahu'],
+  'Pharma / Healthcare':['Mars','Jupiter','Neptune'],
+  'FMCG':['Mercury','Venus'],
+  'Gold':['Sun','Mars','Jupiter'],
+  'Silver':['Moon','Jupiter'],
+  'Metals · Iron & Steel':['Mars','Saturn'],
+  'Copper':['Saturn','Venus','Ketu','Pluto'],
+  'Oil & Gas / Crude':['Saturn','Neptune','Rahu','Ketu'],
+  'Power · Renewable / Solar':['Sun','Mars'],
+  'Hydel / Water Power':['Moon'],
+  'Wind Power':['Mercury','Rahu','Uranus'],
+  'Automobiles':['Mars','Venus','Saturn','Ketu','Uranus'],
+  'Defense':['Mars','Sun','Uranus'],
+  'Railways':['Mars','Uranus'],
+  'Shipping & Navigation':['Moon','Mars','Saturn'],
+  'Aviation':['Mercury','Venus','Uranus'],
+  'Realty / Real Estate':['Saturn'],
+  'Cement':['Saturn'],
+  'Mining / Coal':['Saturn','Ketu'],
+  'Infrastructure':['Ketu','Saturn'],
+  'Logistics':['Mercury','Saturn','Rahu','Ketu'],
+  'Sugar':['Venus','Moon','Jupiter'],
+  'Cotton / Textile':['Moon','Venus','Jupiter','Neptune'],
+  'Chemicals':['Moon','Mars'],
+  'Fertilizer / Pesticide':['Mars','Rahu'],
+  'Electrical Goods':['Rahu','Uranus'],
+  'Liquor / Distilleries':['Moon','Mars'],
+  'Tea / Coffee':['Mars','Neptune'],
+  'Rubber':['Jupiter','Pluto'],
+  'Luxury / Watches':['Jupiter','Venus','Pluto']
+};
+// per-planet live score from all terminal engines → {score,bias,flags,base,activ}
+function sectorPlanetScores(D){
+  const P=vrPlanetsAt(D.J); const r=vrYogas(P);
+  const dp=Object.fromEntries((D.planets||[]).map(p=>[p.name,p]));
+  const base={}; VR_NAMES.forEach(n=>base[n]=0);
+  r.yogas.forEach(y=>{ base[y.p1.name]=(base[y.p1.name]||0)+y.v; base[y.p2.name]=(base[y.p2.name]||0)+y.v; });
+  // activation set (nakshatra & timing movement)
+  const moon=dp.Moon; const nakLord=moon&&moon.nakL; const dayLord=D.dayLord;
+  const cm=parseFloat(S.time)*60; const hora=(D.phpHours||[]).find(h=>cm>=h.sm&&cm<h.em); const horaLord=hora&&hora.planet;
+  const BEN=new Set(['Moon','Mercury','Jupiter','Venus']);
+  const out={};
+  VR_NAMES.forEach(n=>{
+    const pl=dp[n]||{}; const vp=P.find(x=>x.name===n)||{};
+    let sc=base[n]||0; const flags=[];
+    // dignity tilt
+    if(BEN.has(n)){ sc+=0.3; } else if(n!=='Sun'){ sc-=0.3; }
+    // shar / latitude — उत्तर शर विजयी (north = strength)
+    if(vp.lat>0.2){ sc+=0.3; flags.push({t:'शर N',c:'var(--bull)'}); } else if(vp.lat<-0.2){ sc-=0.3; flags.push({t:'शर S',c:'var(--bear)'}); }
+    // retrograde — reversal / caution
+    if(pl.retro && n!=='Rahu' && n!=='Ketu'){ sc*=0.6; sc-=0.4; flags.push({t:'℞ वक्री',c:'var(--bear)'}); }
+    // combustion (star planets within Sun orb)
+    if(dp.Sun && n!=='Sun'){ const orb={Moon:12,Mars:17,Mercury:pl.retro?12:14,Jupiter:11,Venus:pl.retro?8:10,Saturn:15}[n];
+      if(orb!=null){ let sep=Math.abs((pl.lon||0)-(dp.Sun.lon||0))%360; if(sep>180)sep=360-sep; if(sep<orb){ sc-=0.8; flags.push({t:'अस्त C',c:'var(--bear)'}); } } }
+    // Ashtakavarga transit strength — planet's own BAV bindus in the rashi it occupies
+    let bindu=null;
+    try{ const AV=D.ashtaka; if(AV&&AV.bav&&AV.bav[n]&&AV.sign&&AV.sign[n]!=null){ bindu=AV.bav[n][AV.sign[n]];
+      sc += (bindu-4)*0.18;                    // ≥5 strong (+), ≤2 weak (−); 4 = neutral
+      flags.push({t:'AV '+bindu, c: bindu>=5?'var(--bull)':bindu<=2?'var(--bear)':'var(--tx3)'}); } }catch(e){}
+    // Vargesha year-lord — planet ruling an active year-division carries the annual sector tilt
+    let vargesha=null;
+    try{ const VG=(D.vargesha||[]).filter(v=>v.lord===n); if(VG.length){ const vb=VG.reduce((a,v)=>a+(v.bias||0),0)/VG.length;
+      sc += (vb>0?0.4:vb<0?-0.4:0); vargesha=Math.round(vb*100)/100;
+      flags.push({t:'वर्षेश', c: vb>0?'var(--bull)':vb<0?'var(--bear)':'var(--tx3)'}); } }catch(e){}
+    // nakshatra / timing activation (these planets' sectors are "in play" today)
+    let activ=0, aTags=[];
+    if(n===nakLord){ activ+=0.9; aTags.push('चन्द्र-नक्षत्र स्वामी'); }
+    if(n===dayLord){ activ+=0.6; aTags.push('वार-स्वामी'); }
+    if(n===horaLord){ activ+=0.5; aTags.push('होरा-स्वामी'); }
+    sc+= (activ>0? (sc>=0?activ:-activ) : 0);   // activation amplifies the planet's own polarity
+    const score=Math.round(sc*100)/100;
+    const bias= score>0.5?'BULL': score<-0.5?'BEAR':'NEUT';
+    out[n]={name:n,score,bias,base:Math.round((base[n]||0)*100)/100,flags,activ:Math.round(activ*100)/100,aTags,
+      retro:!!pl.retro,sign:pl.sign,house:pl.h,nak:pl.nak,bindu,vargesha};
+  });
+  return {scores:out, nakLord, dayLord, horaLord, moonNak:moon&&moon.nak};
+}
+function sectorBiasCol(b){ return b==='BULL'?'var(--bull)':b==='BEAR'?'var(--bear)':'var(--neut)'; }
+function sectorBiasLbl(b){ return b==='BULL'?'▲ तेजी':b==='BEAR'?'▼ मंदी':'• सम'; }
+// alias: ranked-sector key → Module-4 SECTOR_YOGAS key (names differ)
+const SECTOR_M4_ALIAS={
+  'Banking & Finance / BFSI':'Banking / BFSI','PSU Banks':'Banking / BFSI','IT / Technology':'IT / Tech',
+  'Gold':'Gold / Silver','Silver':'Gold / Silver','Metals · Iron & Steel':'Iron / Heavy Metals',
+  'Pharma / Healthcare':'Pharma / Aushadhi','Sugar':'Sugar / Khand','Cotton / Textile':'Cotton / Textile',
+  'Oil & Gas / Crude':'Edible Oils / Wool'};
+// ranked-sector → constituent F&O stocks (display names = PLAN_INST keys, so chips can load the chart)
+const SECTOR_STOCKS={
+  'Banking & Finance / BFSI':['HDFC Bank','ICICI Bank','Axis Bank','Kotak Bank','State Bank of India','Indusind Bank','Bajaj Finance','Bajaj Finserv','Cholamandalam Investment','Shriram Finance','SBI Cards','Jio Financial Services','L&T Finance','Muthoot Finance','Bank of Baroda','Punjab National Bank','Canara Bank','Federal Bank','IDFC First Bank','AU Small Finance Bank','RBL Bank','Bandhan Bank','Yes Bank'],
+  'PSU Banks':['State Bank of India','Bank of Baroda','Punjab National Bank','Canara Bank','Union Bank of India','Indian Bank','Bank of India'],
+  'PSU / PSE (Govt)':['Oil & Natural Gas Corporation','Coal India','NTPC','Power Grid Corporation of India','Bharat Heavy Electricals','GAIL','Bharat Electronics','Hindustan Aeronautics','Steel Authority of India','NMDC','Indian Oil Corporation','Bharat Petroleum','Hindustan Petroleum','Oil India','NHPC','IRFC','REC','Power Finance Corporation','Rail Vikas Nigam','NBCC','Container Corporation of India','Cochin Shipyard','Mazagon Dock Shipbuilders','Bharat Dynamics'],
+  'IT / Technology':['Infosys','Tata Consultancy Services','HCL Technologies','Wipro','Tech Mahindra','LTM','Coforge','Persistent Systems','Mphasis','KPIT Technologies','Tata Elxsi','Oracle Financial Services Software'],
+  'Semiconductors':['Kaynes Technology India','CG Power & Industrial Solutions','Dixon Technologies'],
+  'Artificial Intelligence / Drones':['Kaynes Technology India','Dixon Technologies','Bharat Dynamics','Hindustan Aeronautics','PG Electroplast'],
+  'Telecom':['Bharti Airtel','Vodafone Idea','Indus Towers'],
+  'Media & Entertainment':['Eternal','Nykaa','Swiggy'],
+  'Pharma / Healthcare':['Sun Pharmaceutical','Cipla','Dr Reddys Laboratories','Divis Laboratories','Aurobindo Pharma','Lupin','Torrent Pharmaceuticals','Alkem Laboratories','Mankind Pharma','Zydus Life Science','Biocon','Glenmark Pharmaceuticals','Laurus Labs','Apollo Hospitals','Max Healthcare Institute','Fortis Healthcare'],
+  'FMCG':['Hindustan Unilever','ITC','Nestle','Britannia Industries','Dabur India','Marico','Colgate Palmolive','Godrej Consumer Products','Tata Consumer Products','Varun Beverages','United Spirits','Radico Khaitan','Patanjali Foods','Godfrey Phillips','Avenue Supermarts DMart','Vishal Mega Mart','Trent'],
+  'Gold':['Titan','Kalyan Jewellers'],
+  'Silver':['Hindustan Zinc'],
+  'Metals · Iron & Steel':['Tata Steel','JSW Steel','Jindal Steel','Steel Authority of India','Hindalco Industries','NMDC','NALCO','Vedanta','APL Apollo Tubes','Hindustan Zinc'],
+  'Copper':['Hindalco Industries','Vedanta'],
+  'Oil & Gas / Crude':['Reliance Industries','Oil & Natural Gas Corporation','Indian Oil Corporation','Bharat Petroleum','Hindustan Petroleum','GAIL','Oil India','Petronet LNG'],
+  'Power · Renewable / Solar':['NTPC','Power Grid Corporation of India','Tata Power','Adani Power','Adani Green Energy','JSW Energy','NHPC','Suzlon Energy','Inox Wind','Waaree Energies','Premier Energies','Adani Energy Solutions'],
+  'Hydel / Water Power':['NHPC','Tata Power'],
+  'Wind Power':['Suzlon Energy','Inox Wind'],
+  'Automobiles':['Maruti Suzuki','Tata Motors Passenger Vehicles','Mahindra & Mahindra','Bajaj Auto','Hero Motocorp','Eicher Motors','TVS Motors','Ashok Leyland','Hyundai Motor India','Force Motors','Bosch','Samvardhana Motherson International','UNO Minda','Exide Industries','Sona BLW Precision Forgings','Bharat Forge','Tube Investment'],
+  'Defense':['Hindustan Aeronautics','Bharat Electronics','Bharat Dynamics','Mazagon Dock Shipbuilders','Cochin Shipyard','Solar Industries'],
+  'Railways':['Rail Vikas Nigam','IRFC'],
+  'Shipping & Navigation':['Cochin Shipyard','Mazagon Dock Shipbuilders','Container Corporation of India','Adani Ports & SEZ'],
+  'Aviation':['Interglobe Aviation','GMR Airports'],
+  'Realty / Real Estate':['DLF','Godrej Properties','Oberoi Realty','Prestige Estates Projects','Lodha Developers','Phoenix Mills'],
+  'Cement':['UltraTech Cement','Ambuja Cements','Shree Cement','Grasim Industries','Dalmia Bharat'],
+  'Mining / Coal':['Coal India','NMDC','NALCO','Vedanta','Hindustan Zinc'],
+  'Infrastructure':['Larsen & Toubro','GMR Airports','Adani Enterprises','Adani Ports & SEZ','NBCC'],
+  'Logistics':['Delhivery','Container Corporation of India','Adani Ports & SEZ'],
+  'Cotton / Textile':['Page Industries','Grasim Industries','Trent'],
+  'Chemicals':['Pidilite Industries','SRF','PI Industries','UPL','Solar Industries','Astral','Supreme Industries'],
+  'Fertilizer / Pesticide':['PI Industries','UPL'],
+  'Electrical Goods':['Havells','Polycab','KEI Industries','Crompton Greaves','Voltas','Blue Star','ABB','Siemens','CG Power & Industrial Solutions','GE Vernova T&D','Hitachi Energy','Amber Enterprises','Bharat Heavy Electricals'],
+  'Liquor / Distilleries':['United Spirits','Radico Khaitan'],
+  'Tea / Coffee':['Tata Consumer Products'],
+  'Luxury / Watches':['Titan','Kalyan Jewellers','Trent']
+};
+function sectorAddDays(dateStr,n){ const d=new Date(dateStr+'T00:00:00'); d.setDate(d.getDate()+n);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+// click a stock chip → load it in the ★ Vyapaar Ratna price+signal chart
+function sectorPickStock(enc){ try{ const name=decodeURIComponent(enc); gs({vrcInst:name, tab:'vr'}); }catch(e){} }
+// ranked sector rows for a given DATA snapshot (reuses every strength engine via sectorPlanetScores)
+function computeSectorRows(D){
+  const sc=sectorPlanetScores(D).scores;
+  const yogaOverlay=Object.fromEntries((D.sectorRank||[]).map(s=>[s.sector,s]));
+  const m4For=sector=>{ const k=SECTOR_M4_ALIAS[sector]; return k?yogaOverlay[k]:null; };
+  return Object.entries(SECTOR_RULERS).map(([sector,rulers])=>{
+    const parts=rulers.map(n=>({n,s:(sc[n]?sc[n].score:0)}));
+    let net=parts.reduce((a,b)=>a+b.s,0)/parts.length;
+    const ov=m4For(sector); if(ov) net+=ov.score*0.5;
+    net=Math.round(net*100)/100;
+    const drv=parts.slice().sort((a,b)=>Math.abs(b.s)-Math.abs(a.s))[0];
+    const bias= net>0.4?'BULL': net<-0.4?'BEAR':'NEUT';
+    return {sector,rulers,net,drv,bias,parts,m4:ov,sc};
+  }).sort((a,b)=>b.net-a.net);
+}
+function tSector(){
+  const D=DATA; const SP=sectorPlanetScores(D); const sc=SP.scores;
+  const PCf=(typeof PC!=='undefined')?PC:{};
+  const pcol=n=>PCf[n]||'#cde';
+  // ── ranked sector calls (Module-4 pair engine folded into the score) ──
+  const rows=computeSectorRows(D);
+  const bulls=rows.filter(r=>r.bias==='BULL'), bears=rows.filter(r=>r.bias==='BEAR');
+
+  const chip=(n)=>`<span style="color:${pcol(n)};font-weight:700">${VR_DEV[n]||n}</span>`;
+  const rulerChips=rs=>rs.map(n=>`<span title="${n} ${sc[n]?sc[n].score:0}" style="color:${pcol(n)};font-weight:700;font-size:10.5px">${VR_DEV[n]||n}${sc[n]&&sc[n].score>0.5?'▲':sc[n]&&sc[n].score<-0.5?'▼':''}</span>`).join(' · ');
+
+  // ── header / summary ──
+  const b=D.bias; const mCol=b.bias==='BULLISH'?'var(--bull)':b.bias==='BEARISH'?'var(--bear)':'var(--neut)';
+  const hdr=`<div class="pnl" style="border-color:${mCol}55"><div class="ph"><span class="dot" style="background:${mCol}"></span>◭ क्षेत्र-पूर्वानुमान · SECTOR FORECAST — ${S.date} ${mtt(parseFloat(S.time)*60)}</div>
+    <div class="pb">
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+        <div style="background:var(--bg3);border-radius:3px;padding:6px 10px"><div style="font-size:8px;color:var(--tx3)">MARKET BIAS</div><div style="font-size:15px;font-weight:800;color:${mCol}">${b.bias} ${b.score>0?'+':''}${b.score}</div></div>
+        <div style="background:var(--bg3);border-radius:3px;padding:6px 10px"><div style="font-size:8px;color:var(--tx3)">चन्द्र नक्षत्र · MOON NAK</div><div style="font-size:13px;font-weight:700;color:var(--moon)">${SP.moonNak||'—'} <span style="color:${pcol(SP.nakLord)}">(${VR_DEV[SP.nakLord]||SP.nakLord})</span></div></div>
+        <div style="background:var(--bg3);border-radius:3px;padding:6px 10px"><div style="font-size:8px;color:var(--tx3)">सक्रिय स्वामी · ACTIVATED LORDS</div><div style="font-size:12px;font-weight:700">${[['नक्षत्र',SP.nakLord],['वार',SP.dayLord],['होरा',SP.horaLord]].map(([l,n])=>`${l}: ${chip(n)}`).join(' &nbsp; ')}</div></div>
+      </div>
+      <div class="g2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="background:var(--bg2);border-left:3px solid var(--bull);border-radius:3px;padding:7px 10px"><div style="font-size:10px;color:var(--bull);font-weight:700;margin-bottom:3px">▲ शीर्ष तेजी क्षेत्र · TOP BULLISH</div>${bulls.slice(0,6).map(r=>`<div style="font-size:11.5px;color:var(--tx1);display:flex;justify-content:space-between;gap:8px"><span>${r.sector}</span><span style="font-family:monospace;color:var(--bull)">+${r.net}</span></div>`).join('')||'<div style="font-size:11px;color:var(--tx3)">none</div>'}</div>
+        <div style="background:var(--bg2);border-left:3px solid var(--bear);border-radius:3px;padding:7px 10px"><div style="font-size:10px;color:var(--bear);font-weight:700;margin-bottom:3px">▼ शीर्ष मंदी क्षेत्र · TOP BEARISH</div>${bears.slice(0,6).map(r=>`<div style="font-size:11.5px;color:var(--tx1);display:flex;justify-content:space-between;gap:8px"><span>${r.sector}</span><span style="font-family:monospace;color:var(--bear)">${r.net}</span></div>`).join('')||'<div style="font-size:11px;color:var(--tx3)">none</div>'}</div>
+      </div>
+    </div></div>`;
+
+  // ── ranked sector table ──
+  const maxAbs=Math.max(1,...rows.map(r=>Math.abs(r.net)));
+  const secRows=rows.map(r=>{ const col=sectorBiasCol(r.bias); const w=Math.round(Math.abs(r.net)/maxAbs*100);
+    const ov=r.m4; const ovTxt=ov?`<span title="Module-4 pair yoga confirms (blended into Net)" style="color:${ov.score>0?'var(--bull)':ov.score<0?'var(--bear)':'var(--tx3)'};font-size:9px">◆${ov.score>0?'+':''}${ov.score}</span>`:'';
+    return `<tr class="${r.bias==='BULL'?'tr-b':r.bias==='BEAR'?'tr-r':'tr-n'}">
+      <td style="font-weight:700;color:var(--tx1)">${r.sector} ${ovTxt}</td>
+      <td style="font-size:10.5px">${rulerChips(r.rulers)}</td>
+      <td style="min-width:90px"><div style="background:var(--bg2);height:8px;border-radius:2px;overflow:hidden;position:relative"><div style="position:absolute;${r.net>=0?'left:50%':'right:50%'};width:${w/2}%;height:100%;background:${col}"></div><div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--bd3)"></div></div></td>
+      <td style="text-align:right;font-family:monospace;color:${col};font-weight:700">${r.net>0?'+':''}${r.net}</td>
+      <td style="text-align:center;color:${col};font-weight:700;white-space:nowrap">${sectorBiasLbl(r.bias)}</td>
+      <td style="font-size:10.5px;color:var(--tx2)">${chip(r.drv.n)} ${r.drv.s>0?'+':''}${r.drv.s}</td></tr>`; }).join('');
+  const tablePanel=`<div class="pnl"><div class="ph"><span class="dot"></span>क्षेत्र रैंकिंग · SECTOR CALLS (शासक-ग्रह बल से · sorted तेजी→मंदी)</div>
+    <div class="pb"><div class="ts" style="max-height:640px;overflow:auto"><table class="tbl"><thead><tr><th>क्षेत्र · Sector</th><th>शासक ग्रह · Rulers</th><th>बल</th><th style="text-align:right">Net</th><th style="text-align:center">रुख</th><th>मुख्य चालक</th></tr></thead><tbody>${secRows}</tbody></table></div>
+    <div style="font-size:10.5px;color:var(--tx3);margin-top:6px">Net = शासक-ग्रहों के व्यापार-रत्न दृष्टि-योग बल का औसत + अष्टकवर्ग बिन्दु-बल + वर्षेश तिल्ट + नक्षत्र/वार/होरा सक्रियण। <b style="color:var(--acc)">◆</b> = Module-4 युग्म-योग पुष्टि (Net में मिश्रित)। ▲/▼ ग्रह-चिह्न = वह ग्रह अभी तेजी/मंदी में।</div></div></div>`;
+
+  // ── per-planet karakatva cards (mirrors the classical table, live-scored) ──
+  const cards=VR_NAMES.filter(n=>SECTOR_PLANET_MAP[n]).map(n=>{
+    const p=sc[n]; const col=sectorBiasCol(p.bias);
+    const flags=(p.flags||[]).map(f=>`<span style="font-size:9px;background:${f.c}22;color:${f.c};border:1px solid ${f.c}66;border-radius:3px;padding:0 4px">${f.t}</span>`).join(' ');
+    const act=(p.aTags||[]).length?`<span style="font-size:9px;background:var(--acc)22;color:var(--acc);border:1px solid var(--acc)66;border-radius:3px;padding:0 4px">◉ ${p.aTags.join(', ')}</span>`:'';
+    const items=SECTOR_PLANET_MAP[n].map(s=>`<span style="display:inline-block;font-size:10.5px;background:var(--bg2);border:1px solid var(--bd);border-radius:3px;padding:1px 6px;margin:2px 2px 0 0;color:var(--tx2)">${s}</span>`).join('');
+    return `<div class="pnl" style="border-color:${col}44">
+      <div class="ph" style="justify-content:space-between"><span style="display:flex;align-items:center;gap:6px"><span class="dot" style="background:${pcol(n)}"></span><span style="color:${pcol(n)}">${VR_DEV[n]||n} · ${n}</span></span>
+        <span style="display:flex;align-items:center;gap:6px"><span style="font-family:monospace;color:${col};font-weight:800;font-size:14px">${p.score>0?'+':''}${p.score}</span><span class="pill" style="background:${col}22;color:${col};border:1px solid ${col};font-size:10px">${sectorBiasLbl(p.bias)}</span></span></div>
+      <div class="pb">
+        <div style="font-size:10px;color:var(--tx3);margin-bottom:5px">${p.sign||'—'} · भाव ${p.house||'—'} · ${p.nak||''} &nbsp; ${flags} ${act}</div>
+        <div>${items}</div>
+      </div></div>`; }).join('');
+  const cardsPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>ग्रह-कारकत्व · PLANET → SECTOR & COMMODITY KARAKATVA (live-scored)</div>
+    <div class="pb"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:8px">${cards}</div>
+    <div style="font-size:10.5px;color:var(--tx3);margin-top:8px">प्रत्येक ग्रह का स्कोर = उसके सक्रिय दृष्टि-योगों का शुद्ध फल + शुभ/क्रूर, शर(अक्षांश), वक्री, अस्त, <b>अष्टकवर्ग बिन्दु</b> (AV), <b>वर्षेश</b>, तथा नक्षत्र/वार/होरा सक्रियण। ◉ = आज सक्रिय (नक्षत्र/वार/होरा स्वामी)। AV n = उस राशि में ग्रह के अपने BAV बिन्दु (≥5 बली, ≤2 निर्बल)। तालिका शास्त्रीय ग्रह-कारकत्व से; बल terminal इंजनों से live।</div></div></div>`;
+
+  // ── FORWARD SECTOR OUTLOOK — rerun the full engine at +7d / +15d ──
+  let fwdPanel='';
+  try{
+    const t=parseFloat(S.time)||9.25;
+    const r7=computeSectorRows(computeAll(sectorAddDays(S.date,7),t,S.ayMode));
+    const r15=computeSectorRows(computeAll(sectorAddDays(S.date,15),t,S.ayMode));
+    const m7=Object.fromEntries(r7.map(r=>[r.sector,r.net])), m15=Object.fromEntries(r15.map(r=>[r.sector,r.net]));
+    const frows=rows.map(r=>{ const d7=(m7[r.sector]!=null?m7[r.sector]:r.net), d15=(m15[r.sector]!=null?m15[r.sector]:r.net);
+      return {sector:r.sector, now:r.net, d7, d15, delta:Math.round((d15-r.net)*100)/100}; });
+    const arrow=(a,b)=>{ const d=b-a; return d>0.15?'<span style="color:var(--bull)">↗</span>':d<-0.15?'<span style="color:var(--bear)">↘</span>':'<span style="color:var(--tx3)">→</span>'; };
+    const bcls=v=>v>0.4?1:v<-0.4?-1:0;
+    const flipLbl=(now,fut)=>{ const bn=bcls(now),bf=bcls(fut); if(bn<=0&&bf>0) return ' <span style="color:var(--bull);font-weight:700;font-size:9px">→तेजी</span>'; if(bn>=0&&bf<0) return ' <span style="color:var(--bear);font-weight:700;font-size:9px">→मंदी</span>'; return ''; };
+    const turningBull=frows.filter(o=>bcls(o.now)<=0&&bcls(o.d15)>0).sort((a,b)=>b.d15-a.d15);
+    const turningBear=frows.filter(o=>bcls(o.now)>=0&&bcls(o.d15)<0).sort((a,b)=>a.d15-b.d15);
+    const frowsHTML=frows.slice().sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta)).map(o=>{
+      const col=o.d15>0.4?'var(--bull)':o.d15<-0.4?'var(--bear)':'var(--neut)';
+      return `<tr><td style="font-weight:700;color:var(--tx1)">${o.sector}${flipLbl(o.now,o.d15)}</td>
+        <td style="text-align:right;font-family:monospace">${o.now>0?'+':''}${o.now}</td><td style="text-align:center">${arrow(o.now,o.d7)}</td>
+        <td style="text-align:right;font-family:monospace">${o.d7>0?'+':''}${o.d7}</td><td style="text-align:center">${arrow(o.d7,o.d15)}</td>
+        <td style="text-align:right;font-family:monospace;color:${col};font-weight:700">${o.d15>0?'+':''}${o.d15}</td>
+        <td style="text-align:right;font-family:monospace;color:${o.delta>0?'var(--bull)':o.delta<0?'var(--bear)':'var(--tx3)'}">${o.delta>0?'+':''}${o.delta}</td></tr>`; }).join('');
+    fwdPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>आगामी क्षेत्र-दृष्टि · FORWARD SECTOR OUTLOOK (आज → +7d → +15d)</div>
+      <div class="pb">
+        <div class="g2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <div style="background:var(--bg2);border-left:3px solid var(--bull);border-radius:3px;padding:7px 10px"><div style="font-size:10px;color:var(--bull);font-weight:700;margin-bottom:3px">↗ तेजी में मुड़ते · TURNING BULLISH (by +15d)</div>${turningBull.slice(0,6).map(o=>`<div style="font-size:11.5px;display:flex;justify-content:space-between;gap:8px"><span>${o.sector}</span><span style="font-family:monospace;color:var(--bull)">${o.now>0?'+':''}${o.now}→+${o.d15}</span></div>`).join('')||'<div style="font-size:11px;color:var(--tx3)">none</div>'}</div>
+          <div style="background:var(--bg2);border-left:3px solid var(--bear);border-radius:3px;padding:7px 10px"><div style="font-size:10px;color:var(--bear);font-weight:700;margin-bottom:3px">↘ मंदी में मुड़ते · TURNING BEARISH (by +15d)</div>${turningBear.slice(0,6).map(o=>`<div style="font-size:11.5px;display:flex;justify-content:space-between;gap:8px"><span>${o.sector}</span><span style="font-family:monospace;color:var(--bear)">${o.now>0?'+':''}${o.now}→${o.d15}</span></div>`).join('')||'<div style="font-size:11px;color:var(--tx3)">none</div>'}</div>
+        </div>
+        <div class="ts" style="max-height:420px;overflow:auto"><table class="tbl"><thead><tr><th>क्षेत्र · Sector</th><th style="text-align:right">आज</th><th></th><th style="text-align:right">+7d</th><th></th><th style="text-align:right">+15d</th><th style="text-align:right">Δ15</th></tr></thead><tbody>${frowsHTML}</tbody></table></div>
+        <div style="font-size:10.5px;color:var(--tx3);margin-top:6px">प्रत्येक भावी तिथि पर वही पूर्ण इंजन (दृष्टि-योग + अष्टकवर्ग + वर्षेश + नक्षत्र/वार/होरा) ${mtt((parseFloat(S.time)||9.25)*60)} पर पुनः चलाया गया। Δ15 = +15d − आज। कैलेंडर दिन (सप्ताहांत सहित)।</div>
+      </div></div>`;
+  }catch(e){ fwdPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>FORWARD SECTOR OUTLOOK</div><div class="pb" style="color:var(--tx3);font-size:11px">Unavailable: ${e.message}</div></div>`; }
+
+  // ── TRADEABLE F&O NAMES — top sectors → constituent stocks (click to chart) ──
+  const stockChip=nm=>`<button onclick="sectorPickStock('${encodeURIComponent(nm)}')" title="Open ${nm} price + तेजी/मंदी chart" style="font-family:inherit;font-size:10px;background:var(--bg3);border:1px solid var(--bd2);color:var(--tx1);border-radius:3px;padding:1px 6px;margin:2px 2px 0 0;cursor:pointer">${nm}</button>`;
+  const wlRow=(r,col)=>{ const stks=SECTOR_STOCKS[r.sector]||[]; if(!stks.length) return '';
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--bd)"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:3px"><span style="font-weight:700;color:var(--tx1)">${r.sector}</span><span style="font-family:monospace;color:${col};font-weight:700;white-space:nowrap">${r.net>0?'+':''}${r.net} ${sectorBiasLbl(r.bias)}</span></div><div>${stks.map(stockChip).join('')}</div></div>`; };
+  const watchPanel=`<div class="pnl"><div class="ph"><span class="dot"></span>व्यापार-योग्य नाम · TRADEABLE F&amp;O NAMES (शीर्ष क्षेत्र → शेयर · क्लिक → चार्ट)</div>
+    <div class="pb"><div class="g2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><div style="font-size:10px;color:var(--bull);font-weight:700;margin-bottom:4px">▲ तेजी क्षेत्र के शेयर</div>${bulls.slice(0,6).map(r=>wlRow(r,'var(--bull)')).join('')||'<div style="font-size:11px;color:var(--tx3)">none</div>'}</div>
+      <div><div style="font-size:10px;color:var(--bear);font-weight:700;margin-bottom:4px">▼ मंदी क्षेत्र के शेयर</div>${bears.slice(0,6).map(r=>wlRow(r,'var(--bear)')).join('')||'<div style="font-size:11px;color:var(--tx3)">none</div>'}</div>
+    </div>
+    <div style="font-size:10.5px;color:var(--tx3);margin-top:6px">क्षेत्र के घटक F&amp;O शेयर। किसी नाम पर क्लिक करें → वह शेयर ★ Vyapaar Ratna चार्ट में price + तेजी/मंदी overlay के साथ खुलेगा। मैपिंग सूचक है, exhaustive नहीं।</div></div></div>`;
+
+  return `<div style="display:flex;flex-direction:column;gap:10px">${hdr}${fwdPanel}${tablePanel}${watchPanel}${cardsPanel}
+    <div style="font-size:10.5px;color:var(--tx3)">स्रोत: व्यापार-रत्न दृष्टि-योग इंजन + अष्टकवर्ग + वर्षेश + ग्रह-गरिमा + नक्षत्र-गति, terminal के मौजूदा इंजनों से संकलित। अध्ययन-सहायक, निवेश-सलाह नहीं।</div></div>`;
 }
 
 function tGann(){
