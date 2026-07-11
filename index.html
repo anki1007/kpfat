@@ -354,6 +354,9 @@ html,body{width:100%;min-height:100vh;background:var(--bg0);color:var(--tx0);fon
 .main>*{flex-shrink:0}
 .ph{background:var(--bg2);border-bottom:1px solid var(--bd);padding:7px 12px;font-size:12px;color:var(--acc);letter-spacing:.08em;font-weight:700;text-transform:uppercase;display:flex;align-items:center;gap:6px}
 .ph .dot{width:6px;height:6px;border-radius:50%;background:var(--acc);flex-shrink:0}
+.ph.co-collapsed{opacity:.72;border-bottom-color:transparent}
+.ph.co-collapsed:hover{opacity:1}
+.ph .co-caret{flex-shrink:0}
 .pb{padding:10px 12px}
 .tbl{width:100%;border-collapse:collapse}
 .tbl th{background:var(--bg3);color:var(--acc);font-size:11px;padding:7px 8px;text-align:left;border-bottom:1px solid var(--bd);letter-spacing:.05em;font-weight:700;white-space:nowrap}
@@ -4350,6 +4353,35 @@ function rMain(){
   const fns={overview:tOverview,v44:tV44,dayfc:tDayForecast,shar:()=>tSharParivartan('shar'),kranti:()=>tSharParivartan('kranti'),transit:tTransit,kundali:tKundali,bhav:tBhavphal,rulebook:tRuleBook,ashtaka:tAshtaka,vr:tVR,vr2:tVR2,rules:tRules,kp:tKP,charts:tCharts,sbc:tSBC,planlat:tPlanetLat,planlon:tPlanetLon,timing:tTiming,gann:tGann,panchak:tPanchak};
   document.getElementById('MAIN').innerHTML=(fns[S.tab]||tOverview)();
   if(S.tab==='sbc'&&S.sbcMode!=='bt') setTimeout(sbcFetchMonthlyPrice,100);
+  collapsibleInit();
+}
+
+// ── Global section collapsing ────────────────────────────────────────
+// Every panel (.pnl) gets a click-to-collapse header so long tabs can be
+// folded section-by-section. Collapsed state is remembered per tab+header
+// text in S.collapsed so it survives re-renders. Headers that already own a
+// click handler (e.g. the Planet-tab RAW DATA toggle) are left untouched.
+function collapsibleKey(txt){ return (S.tab||'')+'::'+txt.replace(/\s+/g,' ').trim().slice(0,60); }
+function collapsibleInit(){
+  const main=document.getElementById('MAIN'); if(!main) return;
+  const store=S.collapsed||(S.collapsed={});
+  main.querySelectorAll('.pnl > .ph').forEach(ph=>{
+    if(ph.dataset.coInit) return;                       // already wired this render cycle
+    if(ph.getAttribute('onclick')||ph.dataset.noco!=null) return; // respect existing toggles / opt-out
+    const body=ph.nextElementSibling;                   // the .pb (or table wrap) that follows
+    if(!body) return;
+    ph.dataset.coInit='1';
+    const label=(ph.textContent||'').trim();
+    const key=collapsibleKey(label);
+    const car=document.createElement('span'); car.className='co-caret'; car.textContent='▾';
+    car.style.cssText='margin-left:auto;font-size:11px;opacity:.7;transition:transform .15s';
+    ph.appendChild(car);
+    ph.style.cursor='pointer'; ph.title='Click to collapse / expand this section';
+    const apply=col=>{ body.style.display=col?'none':''; car.textContent=col?'▸':'▾'; ph.classList.toggle('co-collapsed',!!col); };
+    apply(!!store[key]);
+    ph.addEventListener('click',ev=>{ if(ev.target.closest('a,button,input,select'))return;
+      const col=!store[key]; store[key]=col; apply(col); });
+  });
 }
 
 
@@ -4997,6 +5029,55 @@ const PLAN_INST = {'NIFTY 50':'^NSEI','BANK NIFTY':'^NSEBANK','SENSEX':'^BSESN',
   'XAUUSD · GOLD':'XAUUSD=X','XAGUSD · SILVER':'XAGUSD=X','XNGUSD · NAT GAS':'NG=F','USOIL · WTI CRUDE':'CL=F'};
 // Yahoo fallbacks: if the FX-style spot symbol is unavailable on a proxy, retry with the futures contract
 const PLAN_INST_FB = {'XAUUSD · GOLD':'GC=F','XAGUSD · SILVER':'SI=F'};
+// ── F&O universe (from fno.csv) → Yahoo Finance tickers. NSE cash symbols use the
+//    .NS suffix; indices use their ^ / _.NS proxies. Merged into PLAN_INST below so
+//    every instrument dropdown (Planet Lat/Lon + Vyapaar Ratna charts) can select them.
+const FNO_INST = {
+  'Nifty Bank':'^NSEBANK','Finnifty':'NIFTY_FIN_SERVICE.NS','Nifty Midcap Select':'NIFTY_MID_SELECT.NS','Nifty 50':'^NSEI','Nifty Next 50':'^NSMIDCP',
+  '360 One WAM':'360ONE.NS','ABB':'ABB.NS','Aditya Birla Capital':'ABCAPITAL.NS','Adani Energy Solutions':'ADANIENSOL.NS','Adani Enterprises':'ADANIENT.NS',
+  'Adani Green Energy':'ADANIGREEN.NS','Adani Ports & SEZ':'ADANIPORTS.NS','Adani Power':'ADANIPOWER.NS','Alkem Laboratories':'ALKEM.NS','Amber Enterprises':'AMBER.NS',
+  'Ambuja Cements':'AMBUJACEM.NS','Angel One':'ANGELONE.NS','APL Apollo Tubes':'APLAPOLLO.NS','Apollo Hospitals':'APOLLOHOSP.NS','Ashok Leyland':'ASHOKLEY.NS',
+  'Asian Paints':'ASIANPAINT.NS','Astral':'ASTRAL.NS','AU Small Finance Bank':'AUBANK.NS','Aurobindo Pharma':'AUROPHARMA.NS','Axis Bank':'AXISBANK.NS',
+  'Bajaj Auto':'BAJAJ-AUTO.NS','Bajaj Finserv':'BAJAJFINSV.NS','Bajaj Holdings & Investments':'BAJAJHLDNG.NS','Bajaj Finance':'BAJFINANCE.NS','Bandhan Bank':'BANDHANBNK.NS',
+  'Bank of Baroda':'BANKBARODA.NS','Bank of India':'BANKINDIA.NS','Bharat Dynamics':'BDL.NS','Bharat Electronics':'BEL.NS','Bharat Forge':'BHARATFORG.NS',
+  'Bharti Airtel':'BHARTIARTL.NS','Bharat Heavy Electricals':'BHEL.NS','Biocon':'BIOCON.NS','Blue Star':'BLUESTARCO.NS','Bosch':'BOSCHLTD.NS',
+  'Bharat Petroleum':'BPCL.NS','Britannia Industries':'BRITANNIA.NS','BSE':'BSE.NS','CAMS':'CAMS.NS','Canara Bank':'CANBK.NS',
+  'CDSL':'CDSL.NS','CG Power & Industrial Solutions':'CGPOWER.NS','Cholamandalam Investment':'CHOLAFIN.NS','Cipla':'CIPLA.NS','Coal India':'COALINDIA.NS',
+  'Cochin Shipyard':'COCHINSHIP.NS','Coforge':'COFORGE.NS','Colgate Palmolive':'COLPAL.NS','Container Corporation of India':'CONCOR.NS','Crompton Greaves':'CROMPTON.NS',
+  'Cummins':'CUMMINSIND.NS','Dabur India':'DABUR.NS','Dalmia Bharat':'DALBHARAT.NS','Delhivery':'DELHIVERY.NS','Divis Laboratories':'DIVISLAB.NS',
+  'Dixon Technologies':'DIXON.NS','DLF':'DLF.NS','Avenue Supermarts DMart':'DMART.NS','Dr Reddys Laboratories':'DRREDDY.NS','Eicher Motors':'EICHERMOT.NS',
+  'Eternal':'ETERNAL.NS','Exide Industries':'EXIDEIND.NS','Federal Bank':'FEDERALBNK.NS','Force Motors':'FORCEMOT.NS','Fortis Healthcare':'FORTIS.NS',
+  'GAIL':'GAIL.NS','Glenmark Pharmaceuticals':'GLENMARK.NS','GMR Airports':'GMRAIRPORT.NS','Godfrey Phillips':'GODFRYPHLP.NS','Godrej Consumer Products':'GODREJCP.NS',
+  'Godrej Properties':'GODREJPROP.NS','Grasim Industries':'GRASIM.NS','GE Vernova T&D':'GVT&D.NS','Hindustan Aeronautics':'HAL.NS','Havells':'HAVELLS.NS',
+  'HCL Technologies':'HCLTECH.NS','HDFC AMC':'HDFCAMC.NS','HDFC Bank':'HDFCBANK.NS','HDFC Life Insurance':'HDFCLIFE.NS','Hero Motocorp':'HEROMOTOCO.NS',
+  'Hindalco Industries':'HINDALCO.NS','Hindustan Petroleum':'HINDPETRO.NS','Hindustan Unilever':'HINDUNILVR.NS','Hindustan Zinc':'HINDZINC.NS','Hyundai Motor India':'HYUNDAI.NS',
+  'ICICI Bank':'ICICIBANK.NS','ICICI Lombard General Insurance':'ICICIGI.NS','ICICI Prudential Life Insurance':'ICICIPRULI.NS','Vodafone Idea':'IDEA.NS','IDFC First Bank':'IDFCFIRSTB.NS',
+  'Indian Energy Exchange':'IEX.NS','Indian Hotels Company':'INDHOTEL.NS','Indian Bank':'INDIANB.NS','Interglobe Aviation':'INDIGO.NS','Indusind Bank':'INDUSINDBK.NS',
+  'Indus Towers':'INDUSTOWER.NS','Infosys':'INFY.NS','Inox Wind':'INOXWIND.NS','Indian Oil Corporation':'IOC.NS','IREDA':'IREDA.NS',
+  'IRFC':'IRFC.NS','ITC':'ITC.NS','Jindal Steel':'JINDALSTEL.NS','Jio Financial Services':'JIOFIN.NS','JSW Energy':'JSWENERGY.NS',
+  'JSW Steel':'JSWSTEEL.NS','Jubilant FoodWorks':'JUBLFOOD.NS','Kalyan Jewellers':'KALYANKJIL.NS','Kaynes Technology India':'KAYNES.NS','KEI Industries':'KEI.NS',
+  'KFin Technologies':'KFINTECH.NS','Kotak Bank':'KOTAKBANK.NS','KPIT Technologies':'KPITTECH.NS','Laurus Labs':'LAURUSLABS.NS','LIC Housing Finance':'LICHSGFIN.NS',
+  'LIC of India':'LICI.NS','Lodha Developers':'LODHA.NS','Larsen & Toubro':'LT.NS','L&T Finance':'LTF.NS','LTM':'LTIM.NS',
+  'Lupin':'LUPIN.NS','Mahindra & Mahindra':'M&M.NS','Manappuram Finance':'MANAPPURAM.NS','Mankind Pharma':'MANKIND.NS','Marico':'MARICO.NS',
+  'Maruti Suzuki':'MARUTI.NS','Max Healthcare Institute':'MAXHEALTH.NS','Mazagon Dock Shipbuilders':'MAZDOCK.NS','MCX':'MCX.NS','Max Financial Services':'MFSL.NS',
+  'Samvardhana Motherson International':'MOTHERSON.NS','Motilal Oswal Financial Services':'MOTILALOFS.NS','Mphasis':'MPHASIS.NS','Muthoot Finance':'MUTHOOTFIN.NS','Nippon Life India AMC':'NAM-INDIA.NS',
+  'NALCO':'NATIONALUM.NS','Info Edge':'NAUKRI.NS','NBCC':'NBCC.NS','Nestle':'NESTLEIND.NS','NHPC':'NHPC.NS',
+  'NMDC':'NMDC.NS','NTPC':'NTPC.NS','Nuvama Wealth Management':'NUVAMA.NS','Nykaa':'NYKAA.NS','Oberoi Realty':'OBEROIRLTY.NS',
+  'Oracle Financial Services Software':'OFSS.NS','Oil India':'OIL.NS','Oil & Natural Gas Corporation':'ONGC.NS','Page Industries':'PAGEIND.NS','Patanjali Foods':'PATANJALI.NS',
+  'One 97 Communications':'PAYTM.NS','Persistent Systems':'PERSISTENT.NS','Petronet LNG':'PETRONET.NS','Power Finance Corporation':'PFC.NS','PG Electroplast':'PGEL.NS',
+  'Phoenix Mills':'PHOENIXLTD.NS','Pidilite Industries':'PIDILITIND.NS','PI Industries':'PIIND.NS','Punjab National Bank':'PNB.NS','PNB Housing Finance':'PNBHOUSING.NS',
+  'PB FinTech':'POLICYBZR.NS','Polycab':'POLYCAB.NS','Power Grid Corporation of India':'POWERGRID.NS','Hitachi Energy':'POWERINDIA.NS','Premier Energies':'PREMIERENE.NS',
+  'Prestige Estates Projects':'PRESTIGE.NS','Radico Khaitan':'RADICO.NS','RBL Bank':'RBLBANK.NS','REC':'RECLTD.NS','Reliance Industries':'RELIANCE.NS',
+  'Rail Vikas Nigam':'RVNL.NS','Steel Authority of India':'SAIL.NS','SBI Cards':'SBICARD.NS','SBI Life Insurance':'SBILIFE.NS','State Bank of India':'SBIN.NS',
+  'Shree Cement':'SHREECEM.NS','Shriram Finance':'SHRIRAMFIN.NS','Siemens':'SIEMENS.NS','Solar Industries':'SOLARINDS.NS','Sona BLW Precision Forgings':'SONACOMS.NS',
+  'SRF':'SRF.NS','Sun Pharmaceutical':'SUNPHARMA.NS','Supreme Industries':'SUPREMEIND.NS','Suzlon Energy':'SUZLON.NS','Swiggy':'SWIGGY.NS',
+  'Tata Consumer Products':'TATACONSUM.NS','Tata Elxsi':'TATAELXSI.NS','Tata Power':'TATAPOWER.NS','Tata Steel':'TATASTEEL.NS','Tata Consultancy Services':'TCS.NS',
+  'Tech Mahindra':'TECHM.NS','Tube Investment':'TIINDIA.NS','Titan':'TITAN.NS','Tata Motors Passenger Vehicles':'TATAMOTORS.NS','Torrent Pharmaceuticals':'TORNTPHARM.NS',
+  'Trent':'TRENT.NS','TVS Motors':'TVSMOTOR.NS','UltraTech Cement':'ULTRACEMCO.NS','Union Bank of India':'UNIONBANK.NS','United Spirits':'UNITDSPR.NS',
+  'UNO Minda':'UNOMINDA.NS','UPL':'UPL.NS','Varun Beverages':'VBL.NS','Vedanta':'VEDL.NS','Vishal Mega Mart':'VMM.NS',
+  'Voltas':'VOLTAS.NS','Waaree Energies':'WAAREEENER.NS','Wipro':'WIPRO.NS','Yes Bank':'YESBANK.NS','Zydus Life Science':'ZYDUSLIFE.NS'
+};
+Object.assign(PLAN_INST, FNO_INST);  // fold the F&O list into the instrument dropdown(s)
 const PLAN_COL = {Sun:'#ff7f0e',Moon:'#1e90ff',Mercury:'#2ca02c',Venus:'#ff69b4',Mars:'#d62728',Jupiter:'var(--neut2)',Saturn:'#1f3a93',Rahu:'var(--rahu)',Ketu:'#b5774f'};
 const PLAN_ORDER = ['Sun','Moon','Mercury','Venus','Mars','Jupiter','Saturn','Rahu','Ketu'];
 const PLAN_RANGES = {'6mo':'6M','1y':'1Y','2y':'2Y','3y':'3Y','5y':'5Y'};
@@ -8456,6 +8537,115 @@ function vrIntraday(){
   return {slots,ranges,open:loc.open,close:loc.close,abbr:loc.abbr||'IST'};
 }
 
+// ════════════════════════════════════════════════════════════════════
+// VR PRICE + तेजी/मंदी SIGNAL-OVERLAY CHART  (shared by VR & VR2 tabs)
+//   Same instrument fetch + candlestick engine used by Planet Lat/Lon,
+//   but each daily candle is tinted by that day's Vyapaar Ratna दृष्टि-
+//   योग verdict (vrYogas → vrState): green=तेजी, red=मंदी, amber=अस्थिर.
+//   A signal ribbon under the price shows the day-by-day bull/bear tape.
+// ════════════════════════════════════════════════════════════════════
+window.VRC = window.VRC || {ohlc:{}, sig:{}, status:'idle', err:'', loadedKey:null, view:null};
+function vrcInstKey(){ return S.vrcInst || 'NIFTY 50'; }
+function vrcRange(){ return S.vrcRange || '1y'; }
+function vrcChartType(){ return S.vrcChart || 'candle'; }
+async function vrcLoad(){
+  const key=vrcInstKey()+'|'+vrcRange();
+  if(window.VRC.loadedKey===key && window.VRC.ohlc[key]){ vrcPaint(); return; }
+  if(window.VRC.status==='loading') return;
+  window.VRC.status='loading'; window.VRC.err=''; vrcPaint();
+  try{ let data; try{ data=await planFetchOHLC(PLAN_INST[vrcInstKey()], vrcRange()); }
+    catch(e0){ const fb=PLAN_INST_FB[vrcInstKey()]; if(!fb) throw e0; data=await planFetchOHLC(fb, vrcRange()); }
+    window.VRC.ohlc[key]=data; window.VRC.loadedKey=key; window.VRC.status='ready';
+  }catch(e){ window.VRC.status='error'; window.VRC.err=(e&&e.message)||'fetch failed'; }
+  vrcPaint();
+}
+function vrcPaint(){ if(typeof S==='undefined')return; if(S.tab!=='vr'&&S.tab!=='vr2')return;
+  const el=document.getElementById('vrc-chart'); if(el) el.innerHTML=vrcChart(); vrcAttach(); }
+// daily तेजी/मंदी verdict at a bar's date (noon IST), memoised per calendar day
+function vrcDaySig(ms){ const cache=window.VRC.sig; const ds=planISO(ms);
+  if(cache[ds]!==undefined) return cache[ds];
+  let st='neutral',net=0; try{ const J=planJDfromMs(ms+6.5*3600000); const r=vrYogas(vrPlanetsAt(J)); st=vrState(r); net=r.net; }catch(e){}
+  return cache[ds]={state:st,net:net}; }
+function vrcControls(){
+  const instOpts=Object.keys(PLAN_INST).map(k=>`<option value="${k}" ${vrcInstKey()===k?'selected':''}>${k}</option>`).join('');
+  const grp=(lab,html)=>`<div style="display:flex;gap:4px;align-items:center"><span style="font-size:10.5px;color:var(--tx3)">${lab}</span>${html}</div>`;
+  const ranges=Object.keys(PLAN_RANGES).map(k=>planBtn(vrcRange()===k,`gs({vrcRange:'${k}'});vrcLoad()`,PLAN_RANGES[k])).join('');
+  const ptype=planBtn(vrcChartType()==='candle',"gs({vrcChart:'candle'})",'Candle')+planBtn(vrcChartType()==='line',"gs({vrcChart:'line'})",'Line');
+  return `<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+    ${grp('INSTRUMENT',`<select onchange="gs({vrcInst:this.value});vrcLoad()" class="ci w130" style="font-size:11px">${instOpts}</select>`)}
+    ${grp('RANGE',ranges)} ${grp('PRICE',ptype)}
+    <button onclick="window.VRC.loadedKey=null;window.VRC.status='idle';vrcLoad()" style="margin-left:auto;background:var(--bg3);color:var(--acc);border:1px solid var(--bd2);padding:4px 10px;border-radius:3px;cursor:pointer;font-family:inherit;font-size:11.5px">↻ Reload</button>
+  </div>`;
+}
+function vrcChart(){
+  const st=window.VRC.status;
+  if(st==='loading') return `<div style="padding:26px;text-align:center;color:var(--tx3)">Loading ${vrcInstKey()} price data…</div>`;
+  if(st==='error') return `<div style="padding:18px;color:var(--bear)">Price load failed: ${window.VRC.err}. <button onclick="window.VRC.loadedKey=null;window.VRC.status='idle';vrcLoad()" style="background:var(--bg3);color:var(--acc);border:1px solid var(--bd2);padding:3px 9px;border-radius:3px;cursor:pointer">Retry</button></div>`;
+  const key=vrcInstKey()+'|'+vrcRange(); const ohlc=window.VRC.ohlc[key];
+  if(!ohlc||!ohlc.length) return `<div style="padding:18px;color:var(--tx3)">No data yet.</div>`;
+  const bars=ohlc.map(b=>({ms:b.ms,o:b.o,h:b.h,l:b.l,c:b.c,sig:vrcDaySig(b.ms)}));
+  const W=1000,padL=54,padR=14,padT=10,priceH=480,gap=16,ribH=28;
+  const ribY=padT+priceH+gap, axisY=padT+priceH, H=ribY+ribH+26;
+  const n=bars.length, plotW=W-padL-padR, bs=plotW/n, cw=Math.max(1,Math.min(9,bs*0.62));
+  let lo=Infinity,hi=-Infinity; bars.forEach(b=>{ if(b.l<lo)lo=b.l; if(b.h>hi)hi=b.h; });
+  const pad=(hi-lo)*0.04||1; lo-=pad; hi+=pad;
+  const X=i=>padL+(i+0.5)*bs, Y=p=>padT+(1-(p-lo)/(hi-lo))*priceH;
+  // grid + price axis
+  let grid=''; const gN=5; for(let g=0;g<=gN;g++){ const p=lo+(hi-lo)*g/gN, y=Y(p);
+    grid+=`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="var(--bd)" stroke-width=".5" opacity=".5"/><text x="${padL-5}" y="${(y+3).toFixed(1)}" fill="var(--tx3)" font-size="9" text-anchor="end">${p.toFixed(0)}</text>`; }
+  // date axis (~6 labels)
+  let dax=''; const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const dStep=Math.max(1,Math.floor(n/6)); for(let i=0;i<n;i+=dStep){ const d=new Date(bars[i].ms); const x=X(i);
+    dax+=`<text x="${x.toFixed(1)}" y="${(ribY+ribH+16)}" fill="var(--tx3)" font-size="9" text-anchor="middle">${MON[d.getUTCMonth()]} '${String(d.getUTCFullYear()).slice(2)}</text>`; }
+  // per-day background tint + candle + ribbon
+  let tint='',cndl='',ribbon='',lpath='';
+  bars.forEach((b,i)=>{ const x=X(i), col=VR_STCOL[b.sig.state];
+    const op = b.sig.state==='neutral'?0 : Math.min(0.16, 0.05+0.11*Math.min(1,Math.abs(b.sig.net)/3));
+    if(op>0) tint+=`<rect x="${(x-bs/2).toFixed(2)}" y="${padT}" width="${bs.toFixed(2)}" height="${priceH}" fill="${col}" opacity="${op.toFixed(3)}"/>`;
+    ribbon+=`<rect x="${(x-bs/2).toFixed(2)}" y="${ribY}" width="${bs.toFixed(2)}" height="${ribH}" fill="${col}" opacity="${b.sig.state==='neutral'?0.22:0.92}"/>`;
+    if(vrcChartType()==='candle'){ const up=b.c>=b.o, cc=up?'#00c050':'#ff3355';
+      const yo=Y(b.o),yc=Y(b.c),yh=Y(b.h),yl=Y(b.l), bt=Math.min(yo,yc), bh=Math.max(1,Math.abs(yc-yo));
+      cndl+=`<line x1="${x.toFixed(2)}" y1="${yh.toFixed(2)}" x2="${x.toFixed(2)}" y2="${yl.toFixed(2)}" stroke="${cc}" stroke-width="1"/><rect x="${(x-cw/2).toFixed(2)}" y="${bt.toFixed(2)}" width="${cw.toFixed(2)}" height="${bh.toFixed(2)}" fill="${cc}"/>`; }
+    else { lpath+=(i?'L':'M')+x.toFixed(2)+' '+Y(b.c).toFixed(2)+' '; }
+  });
+  const line=vrcChartType()==='line'?`<path d="${lpath}" fill="none" stroke="var(--acc)" stroke-width="1.3"/>`:'';
+  // selected-date marker
+  let selM=''; const selMs=planMs(S.date); const si=bars.findIndex(b=>b.ms>=selMs);
+  if(si>=0){ const x=X(si); selM=`<line x1="${x.toFixed(1)}" y1="${padT}" x2="${x.toFixed(1)}" y2="${(ribY+ribH).toFixed(1)}" stroke="var(--neut2)" stroke-width="1" stroke-dasharray="3 3"/>`; }
+  window.VRC.view={W,H,padL,bs,priceH,padT,ribY,ribH,bars,lo,hi};
+  const svg=`<svg id="vrc-svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;touch-action:pan-y">
+    ${grid}${tint}${line}${cndl}
+    <line x1="${padL}" y1="${axisY}" x2="${W-padR}" y2="${axisY}" stroke="var(--bd2)" stroke-width=".7"/>
+    <text x="${padL}" y="${(ribY-4)}" fill="var(--tx3)" font-size="9">व्यापार रत्न दैनिक संकेत · daily तेजी/मंदी tape</text>
+    ${ribbon}${selM}${dax}
+  </svg>`;
+  // counts
+  let nb=0,nr=0,nv=0; bars.forEach(b=>{ if(b.sig.state==='bull')nb++; else if(b.sig.state==='bear')nr++; else if(b.sig.state==='volatile')nv++; });
+  const legend=`<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;margin-top:6px">
+    ${Object.keys(VR_STLBL).map(k=>`<span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:${VR_STCOL[k]};display:inline-block;border-radius:2px"></span>${VR_STLBL[k]}</span>`).join('')}
+    <span style="margin-left:auto;color:var(--tx3)">${n} days · <span style="color:var(--bull)">${nb} तेजी</span> / <span style="color:var(--bear)">${nr} मंदी</span> / <span style="color:var(--neut2)">${nv} अस्थिर</span></span></div>`;
+  return `<div style="position:relative">${svg}<div id="vrc-tip" style="position:absolute;display:none;pointer-events:none;background:var(--bg2);border:1px solid var(--bd2);border-radius:4px;padding:5px 8px;font-size:11px;color:var(--tx1);z-index:5;white-space:nowrap"></div></div>${legend}`;
+}
+function vrcAttach(){ const svg=document.getElementById('vrc-svg'); const tip=document.getElementById('vrc-tip'); const v=window.VRC.view;
+  if(!svg||!tip||!v) return; const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  svg.onmousemove=function(ev){ const r=svg.getBoundingClientRect(); const sx=(ev.clientX-r.left)/r.width*v.W;
+    let i=Math.round((sx-v.padL)/v.bs-0.5); if(i<0)i=0; if(i>=v.bars.length)i=v.bars.length-1; const b=v.bars[i];
+    const d=new Date(b.ms); const stc=VR_STCOL[b.sig.state], stl=VR_STLBL[b.sig.state];
+    tip.innerHTML=`<b>${MON[d.getUTCMonth()]} ${String(d.getUTCDate()).padStart(2,'0')} ${d.getUTCFullYear()}</b>`+
+      `<br>O ${b.o.toFixed(2)}  H ${b.h.toFixed(2)}<br>L ${b.l.toFixed(2)}  C ${b.c.toFixed(2)}`+
+      `<br><span style="color:${stc}">● ${stl}</span> · फल ${b.sig.net>0?'+':''}${b.sig.net}`;
+    tip.style.display='block'; const cont=svg.parentElement.getBoundingClientRect();
+    let lx=ev.clientX-cont.left+12; if(lx>cont.width-140)lx=ev.clientX-cont.left-140;
+    tip.style.left=lx+'px'; tip.style.top=(ev.clientY-cont.top+10)+'px'; };
+  svg.onmouseleave=function(){ tip.style.display='none'; };
+}
+function vrcPanel(){ setTimeout(vrcLoad,30);
+  return `<div class="pnl"><div class="ph" data-noco><span class="dot"></span>◈ मूल्य + तेजी/मंदी चार्ट · PRICE &amp; VR-SIGNAL OVERLAY — ${vrcInstKey()}</div>
+    <div class="pb">${vrcControls()}<div id="vrc-chart">${vrcChart()}</div>
+      <div style="font-size:10.5px;color:var(--tx3);margin-top:6px">प्रत्येक कैंडल उस दिन के दृष्टि-योग निर्णय से रंगी है — <span style="color:#00c050">हरा=तेजी</span>, <span style="color:#ff3355">लाल=मंदी</span>, <span style="color:var(--neut2)">पीला=अस्थिर</span>। नीचे की पट्टी = दैनिक संकेत-टेप। धूसर धराशायी रेखा = चयनित तिथि (${S.date})। Hover for OHLC + फल. Yahoo Finance data · same engine as Planet Lat/Lon.</div>
+    </div></div>`;
+}
+
 function tVR(){
   const D=DATA, VR=computeVR(D);
   const net=VR.net, netCol=net>0.5?'var(--bull)':net<-0.5?'var(--bear)':'var(--neut)';
@@ -8571,7 +8761,7 @@ function tVR(){
       सौम्य: <span style="color:${PC.Moon}">चन्द्र</span> <span style="color:${PC.Mercury}">बुध</span> <span style="color:${PC.Jupiter}">गुरु</span> <span style="color:${PC.Venus}">शुक्र</span> · क्रूर: <span style="color:${PC.Sun}">सूर्य</span> <span style="color:${PC.Mars}">मंगल</span> <span style="color:${PC.Saturn}">शनि</span> राहु-केतु, हर्षल, प्लूटो.
     </div></div>`;
 
-  return `<div style="display:flex;flex-direction:column;gap:10px">${hdr}${trioPanel}${intraPanel}${upcomingPanel}${yogaPanel}${sharPanel}${commPanel}${legend}
+  return `<div style="display:flex;flex-direction:column;gap:10px">${hdr}${vrcPanel()}${trioPanel}${intraPanel}${upcomingPanel}${yogaPanel}${sharPanel}${commPanel}${legend}
     <div style="font-size:10.5px;color:var(--tx3)">स्रोत: Vyaapar_ratna_part_1.md & _part_2.md. सायन गणना. अध्ययन-सहायक, निवेश-सलाह नहीं।</div></div>`;
 }
 
@@ -9667,7 +9857,7 @@ function tVR2(){
   return`<div style="display:flex;flex-direction:column;gap:10px">
     <div style="font-size:10px;color:var(--tx3);background:var(--bg3);padding:5px 9px;border-radius:3px;border-left:3px solid var(--acc)">
       ★★ <b>V2 — new version</b>, separate from (and listed below) the old ★ Vyapaar Ratna. Source: <b>Analyzing Market Trend Using Planetary Aspects.docx/.md</b> — Vyapar Ratna Volume 2 (द्वितीय खण्ड) + Vanijya-Sarvasva. The old V1 module remains untouched above.</div>
-    ${hdr}${sharPanel}${dayPanel}${weekPanel}${intraPanel}${aspPanel}${planetPanel}${evPanel}${rulePanel}${testPanel}
+    ${hdr}${vrcPanel()}${sharPanel}${dayPanel}${weekPanel}${intraPanel}${aspPanel}${planetPanel}${evPanel}${rulePanel}${testPanel}
     <div style="font-size:10.5px;color:var(--tx3)">Source: "Analyzing Market Trend Using Planetary Aspects.md" (in this folder). Sayana computation; nakshatra nirayana. Study aid — not investment advice.</div></div>`;
 }
 
