@@ -5623,6 +5623,23 @@ function ovMkt(){
   const L=LOCATIONS[S.loc]||LOCATIONS['Mumbai'];
   return {tz:L.tz,open:L.open,close:L.close,label:L.mkt+' MARKET HOURS'};
 }
+const OV_CMDTY=new Set(['XAUUSD · GOLD','XAGUSD · SILVER','XNGUSD · NAT GAS','USOIL · WTI CRUDE']);
+// Instrument selection with automatic venue: picking a US index or a
+// commodity switches location to New York and session to 24H (US tz);
+// picking an NSE instrument while parked on a US city switches back to
+// Mumbai market hours.
+window.ovSelInst=function(v){
+  const upd={ovInst:v};
+  if(OV_US_MKT[v]||OV_CMDTY.has(v)){
+    const L=LOCATIONS['New York']; LAT=L.lat; LON=L.lon; IST=L.tz;
+    upd.loc='New York'; upd.session='24h';
+    if(S.loc!=='New York') upd.time='9.5'; // snap picker to 09:30 ET open
+  }else if(S.loc==='New York'||S.loc==='Chicago'){
+    const L=LOCATIONS['Mumbai']; LAT=L.lat; LON=L.lon; IST=L.tz;
+    upd.loc='Mumbai'; upd.session='mkt'; upd.time='9.25';
+  }
+  gs(upd);
+};
 function ovSessionRange(){
   if(S.session==='24h') return {startMin:0,endMin:23*60+55,is24:true,label:'24H ROUND-THE-CLOCK'};
   const mk=ovMkt();
@@ -5848,9 +5865,14 @@ function ovBiasChart(D){
   const bars=(_ov.key===PK && _ov.bars)?_ov.bars.filter(b=>b.m>=SR.startMin&&b.m<=SR.endMin+iv):null;
   let candleSvg='', priceAxis='', priceStatus='', noPriceMsg='', hitSummary='';
   if(bars && bars.length>=2){
-    const pLo=Math.min(...bars.map(b=>b.l)), pHi=Math.max(...bars.map(b=>b.h));
+    // robust scale: 1st/99th percentile of lows/highs so one bad Yahoo
+    // tick can't compress the whole chart, and every drawn coordinate is
+    // clamped into the plot so price can never spill outside the frame
+    const _lows=bars.map(b=>b.l).sort((a,b)=>a-b), _highs=bars.map(b=>b.h).sort((a,b)=>a-b);
+    const pLo=_lows[Math.floor((_lows.length-1)*0.01)], pHi=_highs[Math.ceil((_highs.length-1)*0.99)];
     const pPad=Math.max((pHi-pLo)*0.06, pHi*0.0004);
-    const yP=v=>PT+IH-((v-(pLo-pPad))/((pHi-pLo)+2*pPad))*IH;
+    const yP=v=>{ const y=PT+IH-((v-(pLo-pPad))/(((pHi-pLo)+2*pPad)||1))*IH;
+      return Math.max(PT,Math.min(PT+IH,y)); };
     const barIv=bars.length>1?Math.max(1,bars[1].m-bars[0].m):iv;
     const cw=Math.max(1.6,Math.min(11,(IW/Math.max(1,(SR.endMin-SR.startMin)/barIv))*0.62));
     candleSvg=bars.map(b=>{
@@ -5921,7 +5943,7 @@ ${bd.why}${bd.res!=null?'\nRESULT: '+(bd.res?'✓ matched':'✗ missed')+' (net 
     <div class="ph" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
       <span><span class="dot" style="background:${dayCol}"></span>◈ BIAS CHART — ${ovInstKey()} · ${SR.label} · <span style="color:${dayCol};font-weight:800">DAY: ${D.combinedLabel} ${D.combinedScore>0?'+':''}${D.combinedScore}</span>${hitSummary?' · '+hitSummary:''}</span>
       <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-        <select class="ci" style="font-size:11px;padding:2px 4px;max-width:160px" onchange="gs({ovInst:this.value})">${instSel}</select>
+        <select class="ci" style="font-size:11px;padding:2px 4px;max-width:160px" onchange="ovSelInst(this.value)">${instSel}</select>
         <select class="ci" style="font-size:11px;padding:2px 4px" onchange="gs({ovInt:this.value})">${ivSel}</select>
         <button class="ci" style="font-size:11px;padding:2px 8px;cursor:pointer" onclick="ovbcLoadPrice(true)" title="Re-fetch price">↻</button>
       </span>
