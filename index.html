@@ -5610,7 +5610,11 @@ async function ovbcLoadPrice(force){
   const iv=Math.max(1,parseInt(S.ovInt,10)||15);
   const ivStr=iv<=1?'1m':iv<=5?'5m':iv<=15?'15m':iv<=30?'30m':'60m';
   const sym=PLAN_INST[ovInstKey()]||PLAN_INST_FB[ovInstKey()]||'^NSEI';
-  const p1=Math.floor(planMs(S.date)/1000)-86400, p2=p1+3*86400;
+  // 1m payloads are huge (thousands of rows) and choke the free proxies —
+  // request a tight window around the selected day for 1m, wider otherwise
+  const _d0=Math.floor(planMs(S.date)/1000);
+  const p1=ivStr==='1m'?_d0-6*3600:_d0-86400;
+  const p2=ivStr==='1m'?_d0+30*3600:_d0+2*86400;
   const tzOff=(LOCATIONS[S.loc]||LOCATIONS['Mumbai']).tz;
   const wantDate=S.date;
   const parseBars=(j)=>{
@@ -5635,10 +5639,13 @@ async function ovbcLoadPrice(force){
     // 30s cache-buster bucket: the CORS proxies cache by full URL, which
     // otherwise keeps serving the same stale candles all session
     const target=`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?period1=${p1}&period2=${p2}&interval=${ivS}&ck=${Math.floor(Date.now()/30000)}`;
+    // direct Yahoo first (wins on localhost / CORS-relaxed setups, fails
+    // fast in normal browsers), plus every CORS proxy — all raced at once
+    const SRCS=[u=>u, ...PROXIES];
     return new Promise((resolve,reject)=>{
-      let pending=PROXIES.length, done=false, lastErr='';
-      PROXIES.forEach(px=>{
-        withTimeout(fetch(px(target),{mode:'cors',credentials:'omit',headers:{'Accept':'application/json'}}),9000)
+      let pending=SRCS.length, done=false, lastErr='';
+      SRCS.forEach(px=>{
+        withTimeout(fetch(px(target),{mode:'cors',credentials:'omit',headers:{'Accept':'application/json'}}),ivS==='1m'?15000:9000)
           .then(async r=>{
             if(!r.ok) throw new Error('HTTP '+r.status);
             let j=JSON.parse(await r.text());
@@ -5654,14 +5661,19 @@ async function ovbcLoadPrice(force){
       });
     });
   };
-  try{ window.OVBC.bars=await tryIv(ivStr); window.OVBC.status='ready'; }
-  catch(e1){
+  // Interval escalation: if the requested feed can't be fetched (1m payloads
+  // regularly choke the free proxies), degrade 1m → 5m → 60m rather than
+  // showing nothing. The note tells the user what they're actually seeing.
+  const chain=[ivStr]; if(ivStr==='1m') chain.push('5m'); if(ivStr!=='60m') chain.push('60m');
+  let ok=false;
+  for(const ivS of chain){
     try{
-      if(ivStr!=='60m'){ window.OVBC.bars=await tryIv('60m'); window.OVBC.status='ready';
-        window.OVBC.note='hourly bars shown — '+ivStr+' history unavailable for this date'; }
-      else throw e1;
-    }catch(e2){ window.OVBC.status='error'; window.OVBC.err=(e2&&e2.message)||'price unavailable'; }
+      window.OVBC.bars=await tryIv(ivS); window.OVBC.status='ready';
+      if(ivS!==ivStr) window.OVBC.note=ivS+' bars shown — '+ivStr+' feed unavailable right now (proxy limits)';
+      ok=true; break;
+    }catch(e){ window.OVBC.err=((e&&e.message)||'fetch failed'); }
   }
+  if(!ok) window.OVBC.status='error';
   if(window.OVBC.key!==ovPriceKey()) return; // selection changed mid-flight
   const el=document.getElementById('ovbcHost'); if(el&&DATA) el.innerHTML=ovBiasChart(DATA);
 }
@@ -5678,38 +5690,90 @@ window._ovbcTimer=window._ovbcTimer||setInterval(()=>{ try{
   if(m<SR.startMin-5 || m>SR.endMin+15) return;
   ovbcLoadPrice(true);
 }catch(e){} }, 60000);
+// ── Per-slot forecast bias — computed from the SLOT's own sky ─────────
+// Fixes the frozen-lagna defect: each slot's hour-lord house comes from
+// the lagna AT THAT SLOT (recomputed via ephemeris), dignity is the real
+// per-planet exalt/own/debil table, the Moon's sub-lord at the slot (KP's
+// decider) and the hora FAV/UNFAV are folded in, plus a small day-trend
+// tilt. Nothing here depends on the header TIME, so the bands are stable
+// all day and honest for forecast-vs-real backtesting.
+let _ovbcSlots={key:null,slots:null};
+function ovSlotKey(){ return [S.date,S.ayMode,S.session||'mkt',S.ovInt||'15',S.loc||'Mumbai',LAT,LON,isAELoaded()?'ae':'kep'].join('|'); }
+function ovBuildSlots(D){
+  const key=ovSlotKey();
+  if(_ovbcSlots.key===key) return _ovbcSlots.slots;
+  const SR=sessionRange();
+  const iv=Math.max(1,parseInt(S.ovInt,10)||15);
+  const dp=S.date.split('-').map(Number);
+  const wd=new Date(S.date+"T00:00:00").getDay();
+  const paksha=(D.rules&&D.rules.tithi&&D.rules.tithi.paksha)||'Shukla';
+  const dayTilt=Math.max(-1,Math.min(1,(D.combinedScore||0)/40));
+  // natural disposition (benefic + / malefic −), small weight
+  const NAT={Jupiter:0.8,Venus:0.7,Mercury:0.4,Moon:0.3,Sun:-0.2,Mars:-0.5,Saturn:-0.7,Rahu:-0.5,Ketu:-0.6,Uranus:0,Neptune:0};
+  const sunP=D.planets.find(p=>p.name==='Sun');
+  const slots=[];
+  for(let m=SR.startMin;m<=SR.endMin;m+=iv){
+    const J=JD(dp[0],dp[1],dp[2],m/60);
+    const ay=getAyanamsa(J,S.ayMode);
+    const lagS=Math.floor(n360(computeAsc(J).asc-ay)/30);
+    const mLon=n360(geoLon('Moon',J)-ay);
+    const sub=getSub(mLon).sub;
+    const HL=(D.phpHours.find(h=>m>=h.sm&&m<h.em)||{planet:D.dayLord}).planet;
+    const hp=D.planets.find(p=>p.name===HL);
+    const hlLon=HL==='Moon'?mLon:(hp?hp.lon:0);
+    const hlSign=Math.floor(n360(hlLon)/30);
+    const hlHouse=((hlSign-lagS+12)%12)+1;
+    let sc=0; const why=[];
+    // 1) hour lord's house from THIS slot's lagna
+    if([1,5,9,11].includes(hlHouse)){ sc+=2;   why.push('lord H'+hlHouse+' +2'); }
+    else if([6,8,12].includes(hlHouse)){ sc-=2; why.push('lord H'+hlHouse+' −2'); }
+    else why.push('lord H'+hlHouse);
+    // 2) real per-planet dignity (exalt/own/debil/friend/enemy)
+    const dig=signStatus(HL,hlSign).dig;
+    if(dig==='Exalted'){ sc+=1.5; why.push('exalted +1.5'); }
+    else if(dig==='Own sign'){ sc+=1.2; why.push('own sign +1.2'); }
+    else if(dig==='Debilitated'){ sc-=1.5; why.push('debilitated −1.5'); }
+    else if(dig==='Friend sign'){ sc+=0.4; why.push('friend +0.4'); }
+    else if(dig==='Enemy sign'){ sc-=0.4; why.push('enemy −0.4'); }
+    // 3) natural disposition, retro, combustion of the hour lord
+    if(NAT[HL]){ sc+=NAT[HL]; why.push('nature '+(NAT[HL]>0?'+':'')+NAT[HL]); }
+    if(hp&&hp.retro&&HL!=='Rahu'&&HL!=='Ketu'){ sc-=0.5; why.push('retro −0.5'); }
+    if(hp&&sunP&&HL!=='Sun'){ const dsep=Math.abs(((hp.lon-sunP.lon+180)%360)-180);
+      if(dsep<6){ sc-=0.5; why.push('combust −0.5'); } }
+    // 4) Moon's sub-lord at this slot (KP: the sub decides)
+    const sp=D.planets.find(p=>p.name===sub);
+    let ss=NAT[sub]||0;
+    if(sp){ const sLon=sub==='Moon'?mLon:sp.lon;
+      const sh=((Math.floor(n360(sLon)/30)-lagS+12)%12)+1;
+      if([1,5,9,11].includes(sh)) ss+=0.7; else if([6,8,12].includes(sh)) ss-=0.7; }
+    sc+=ss; why.push('sub '+sub+' '+(ss>=0?'+':'')+ss.toFixed(1));
+    // 5) hora FAV/UNFAV for the hour lord + day-trend tilt
+    const hc=horaClass(HL,wd,paksha); if(hc){ sc+=hc*0.7; why.push('hora '+(hc>0?'+0.7':'−0.7')); }
+    if(dayTilt){ sc+=dayTilt; why.push('day-trend '+(dayTilt>0?'+':'')+dayTilt.toFixed(1)); }
+    let bias,arrow;
+    if((HL==='Saturn'||HL==='Rahu')&&Math.abs(sc)<2){ bias='VOLATILE'; arrow='↕'; }
+    else if(sc>=1.5){ bias='BULLISH'; arrow='▲'; }
+    else if(sc<=-1.5){ bias='BEARISH'; arrow='▼'; }
+    else { bias='NEUTRAL'; arrow='→'; }
+    slots.push({m,ph:HL,bias,arrow,score:Math.round(sc*10)/10,why:why.join(' · '),sub});
+  }
+  _ovbcSlots={key,slots};
+  return slots;
+}
 function ovBiasChart(D){
   const SR=sessionRange();
   const iv=Math.max(1,parseInt(S.ovInt,10)||15);
-  // bias per slot straight from the planetary-hour engine — no per-slot
-  // ephemeris needed, so this renders instantly for any date/session
-  const slots=[];
-  for(let m=SR.startMin;m<=SR.endMin;m+=iv){
-    const ph=(D.phpHours.find(h=>m>=h.sm&&m<h.em)||{planet:D.dayLord}).planet;
-    slots.push({m,ph,hb:hourBias(ph,D.planets)});
-  }
-  if(slots.length<2) return '';
+  const slots=ovBuildSlots(D);
+  if(!slots || slots.length<2) return '';
   const W=1560,H=430,PLm=64,PRm=20,PT=20,PB=40,IW=W-PLm-PRm,IH=H-PT-PB;
   const x=m=>PLm+(m-SR.startMin)/Math.max(1,SR.endMin-SR.startMin)*IW;
   const BCOL={BULLISH:'var(--bull)',BEARISH:'var(--bear)',VOLATILE:'var(--sun)',NEUTRAL:'var(--tx3)'};
   const bands=[];
   for(const p of slots){
     const last=bands[bands.length-1];
-    if(last && last.bias===p.hb.bias && last.ph===p.ph) last.to=p.m+iv;
-    else bands.push({from:p.m,to:p.m+iv,bias:p.hb.bias,ph:p.ph,ind:p.hb.ind,col:BCOL[p.hb.bias]||'var(--tx3)'});
+    if(last && last.bias===p.bias && last.ph===p.ph) last.to=p.m+iv;
+    else bands.push({from:p.m,to:p.m+iv,bias:p.bias,arrow:p.arrow,ph:p.ph,score:p.score,why:p.why,col:BCOL[p.bias]||'var(--tx3)'});
   }
-  const bandRects=bands.map(bd=>{
-    const x0=x(bd.from), x1=x(Math.min(bd.to,SR.endMin));
-    return`<rect x="${x0.toFixed(1)}" y="${PT}" width="${Math.max(0.5,x1-x0).toFixed(1)}" height="${IH}" fill="${bd.col}" opacity="${bd.bias==='NEUTRAL'?0.06:0.15}">
-      <title>${mtt(bd.from)}–${mtt(Math.min(bd.to,SR.endMin))} · ${bd.ph} hour · ${bd.bias} — ${bd.ind}</title></rect>`;
-  }).join('');
-  // band labels along the top edge (planet + bias arrow, when wide enough)
-  const bandLbls=bands.map(bd=>{
-    const x0=x(bd.from), x1=x(Math.min(bd.to,SR.endMin));
-    if(x1-x0<56) return '';
-    const arrow=bd.bias==='BULLISH'?'▲':bd.bias==='BEARISH'?'▼':bd.bias==='VOLATILE'?'↕':'→';
-    return`<text x="${((x0+x1)/2).toFixed(1)}" y="${PT+15}" fill="${bd.col}" font-size="12" font-weight="700" text-anchor="middle" opacity="0.9">${arrow} ${bd.ph}</text>`;
-  }).join('');
   const span=SR.endMin-SR.startMin, step=span<=400?60:span<=800?120:180;
   let axis='';
   for(let m=Math.ceil(SR.startMin/step)*step;m<=SR.endMin;m+=step){
@@ -5723,7 +5787,7 @@ function ovBiasChart(D){
   const _ov=window.OVBC||{};
   if(_ov.key!==PK) setTimeout(ovbcLoadPrice,10);
   const bars=(_ov.key===PK && _ov.bars)?_ov.bars.filter(b=>b.m>=SR.startMin&&b.m<=SR.endMin+iv):null;
-  let candleSvg='', priceAxis='', priceStatus='', noPriceMsg='';
+  let candleSvg='', priceAxis='', priceStatus='', noPriceMsg='', hitSummary='';
   if(bars && bars.length>=2){
     const pLo=Math.min(...bars.map(b=>b.l)), pHi=Math.max(...bars.map(b=>b.h));
     const pPad=Math.max((pHi-pLo)*0.06, pHi*0.0004);
@@ -5742,6 +5806,27 @@ function ovBiasChart(D){
       priceAxis+=`<line x1="${PLm}" y1="${gy.toFixed(1)}" x2="${PLm+IW}" y2="${gy.toFixed(1)}" stroke="var(--bd)" stroke-width="0.4" stroke-dasharray="1,5"/>
         <text x="${PLm-6}" y="${(gy+4).toFixed(1)}" fill="var(--tx2)" font-size="12" text-anchor="end">${pv.toFixed(pHi>9999?0:1)}</text>`;
     }
+    // ── forecast vs real: score each completed band against the candles ──
+    // net move over the band vs a 0.08% materiality threshold; VOLATILE
+    // hits when the band's range dwarfs its net move (whipsaw)
+    const THR=0.08;
+    let scored=0,hits=0;
+    bands.forEach(bd=>{
+      const bb=bars.filter(b=>b.m>=bd.from&&b.m<bd.to);
+      bd.res=null;
+      if(bb.length<2 || bb[bb.length-1].m < bd.to-Math.max(iv,10)) return; // incomplete window
+      const o=bb[0].o, c=bb[bb.length-1].c, net=(c-o)/o*100;
+      const hi=Math.max(...bb.map(b=>b.h)), lo=Math.min(...bb.map(b=>b.l));
+      const range=(hi-lo)/o*100;
+      let hit=null;
+      if(bd.bias==='BULLISH') hit=net>THR;
+      else if(bd.bias==='BEARISH') hit=net<-THR;
+      else if(bd.bias==='NEUTRAL') hit=Math.abs(net)<=THR;
+      else if(bd.bias==='VOLATILE') hit=(range>2*Math.abs(net) && range>2*THR);
+      bd.res=hit; bd.net=net;
+      if(hit!==null){ scored++; if(hit) hits++; }
+    });
+    if(scored) hitSummary=`<span style="font-weight:800;color:${hits*2>=scored?'var(--bull)':'var(--bear)'}">FORECAST vs REAL: ${hits}/${scored} windows ✓ (${Math.round(hits*100/scored)}%)</span>`;
     const lastB=bars[bars.length-1];
     const liveTag=_ov.status==='loading'?' · <span style="color:var(--acc)">⟳ refreshing…</span>'
                  :_ov.status==='error'?' · <span style="color:var(--bear)">⚠ refresh failed — showing last data ('+_ov.err+')</span>'
@@ -5753,6 +5838,19 @@ function ovBiasChart(D){
     else if(_ov.key===PK && _ov.status==='ready'){ priceStatus='<span style="color:var(--tx3)">no bars inside the session window</span>'; noPriceMsg='no bars in session window'; }
     else { priceStatus='<span style="color:var(--acc)">⏳ loading price…</span>'; noPriceMsg='⏳ loading price…'; }
   }
+  const bandRects=bands.map(bd=>{
+    const x0=x(bd.from), x1=x(Math.min(bd.to,SR.endMin));
+    return`<rect x="${x0.toFixed(1)}" y="${PT}" width="${Math.max(0.5,x1-x0).toFixed(1)}" height="${IH}" fill="${bd.col}" opacity="${bd.bias==='NEUTRAL'?0.06:0.15}">
+      <title>${mtt(bd.from)}–${mtt(Math.min(bd.to,SR.endMin))} · ${bd.ph} hour · ${bd.bias} (score ${bd.score>0?'+':''}${bd.score})
+${bd.why}${bd.res!=null?'\nRESULT: '+(bd.res?'✓ matched':'✗ missed')+' (net '+(bd.net>0?'+':'')+bd.net.toFixed(2)+'%)':''}</title></rect>`;
+  }).join('');
+  const bandLbls=bands.map(bd=>{
+    const x0=x(bd.from), x1=x(Math.min(bd.to,SR.endMin));
+    if(x1-x0<56) return '';
+    const resTag=bd.res==null?'':bd.res?' ✓':' ✗';
+    const resCol=bd.res==null?bd.col:bd.res?'var(--bull)':'var(--bear)';
+    return`<text x="${((x0+x1)/2).toFixed(1)}" y="${PT+15}" fill="${bd.col}" font-size="12" font-weight="700" text-anchor="middle" opacity="0.9">${bd.arrow} ${bd.ph}<tspan fill="${resCol}" font-weight="800">${resTag}</tspan></text>`;
+  }).join('');
   const noPriceSvg=noPriceMsg?`<text x="${PLm+IW/2}" y="${PT+IH/2}" fill="var(--tx3)" font-size="14" text-anchor="middle">${noPriceMsg}</text>`:'';
   const dayCol=D.combinedLabel==='BULLISH'?'var(--bull)':D.combinedLabel==='BEARISH'?'var(--bear)':'var(--neut)';
   const instSel=Object.keys(PLAN_INST).map(k=>`<option value="${k}" ${ovInstKey()===k?'selected':''}>${k}</option>`).join('');
@@ -5762,7 +5860,7 @@ function ovBiasChart(D){
   return`
   <div class="pnl">
     <div class="ph" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
-      <span><span class="dot" style="background:${dayCol}"></span>◈ BIAS CHART — ${ovInstKey()} · ${SR.label} · <span style="color:${dayCol};font-weight:800">DAY: ${D.combinedLabel} ${D.combinedScore>0?'+':''}${D.combinedScore}</span></span>
+      <span><span class="dot" style="background:${dayCol}"></span>◈ BIAS CHART — ${ovInstKey()} · ${SR.label} · <span style="color:${dayCol};font-weight:800">DAY: ${D.combinedLabel} ${D.combinedScore>0?'+':''}${D.combinedScore}</span>${hitSummary?' · '+hitSummary:''}</span>
       <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <select class="ci" style="font-size:11px;padding:2px 4px;max-width:160px" onchange="gs({ovInst:this.value})">${instSel}</select>
         <select class="ci" style="font-size:11px;padding:2px 4px" onchange="gs({ovInt:this.value})">${ivSel}</select>
@@ -5782,7 +5880,7 @@ function ovBiasChart(D){
         <span style="margin-left:auto">${priceStatus}</span>
       </div>
       <div style="font-size:10px;color:var(--tx3);margin-top:4px">
-        Bands = the day's forecast bias per planetary-hour slot, aligned to the ${iv}-min timeframe (band label = hour lord). Pick any PAST date in the header to backtest: bands recompute from ephemeris for that day and the instrument's actual candles overlay them (Yahoo history: 1m ≈ 30d, 5/15/30m ≈ 60d; older dates fall back to hourly, then bands-only). Today auto-refreshes every 60s during the live session; ↻ forces an immediate re-fetch. 24H session covers US markets / commodities round the clock.
+        Bands = per-slot forecast from that slot's own sky: hour-lord house from the SLOT's lagna, real dignity (exalt/own/debil), Moon sub-lord at the slot, hora and day-trend tilt — hover a band for the full scoring. Bands are stable (they never repaint when you change the TIME picker). ✓/✗ on each completed band = forecast vs the band's actual net move (±0.08% threshold; VOLATILE ✓ = whipsaw range ≫ net). Yahoo history: 1m ≈ 30d, 5/15/30m ≈ 60d; older dates fall back to hourly, then bands-only. Today auto-refreshes every 60s; ↻ forces it. 24H session covers US markets / commodities.
       </div>
     </div>
   </div>`;
