@@ -5605,6 +5605,63 @@ let _ovbcPts={key:null,pts:null};
 function ovBiasKey(){
   return [S.date,S.ayMode,S.session||'mkt',S.ovInt||'15',S.ovPlanet||'Moon',S.loc||'Mumbai',LAT,LON,isAELoaded()?'ae':'kep'].join('|');
 }
+// ── Overview chart price layer ─────────────────────────────────────
+// Intraday OHLC of the selected instrument (same dropdown list as the
+// Planet Lat/Lon tabs) for the selected date, so the bias bands can be
+// reviewed directly against what price actually did (backtest). Yahoo
+// serves 1m ≈ last 30 days, 5m/15m/30m ≈ 60 days, 60m ≈ 2 years — for
+// older dates we degrade to hourly bars, then to astro-only.
+function ovInstKey(){ return S.ovInst||'NIFTY 50'; }
+function ovPriceKey(){ return [S.date,ovInstKey(),Math.max(1,parseInt(S.ovInt,10)||15),S.loc||'Mumbai'].join('|'); }
+window.OVBC={key:null,bars:null,status:'idle',err:'',note:''};
+async function ovbcLoadPrice(){
+  const key=ovPriceKey();
+  if(window.OVBC.key===key && window.OVBC.status!=='idle') return;
+  window.OVBC={key,bars:null,status:'loading',err:'',note:''};
+  const el0=document.getElementById('ovbcHost'); if(el0&&DATA) el0.innerHTML=ovBiasChart(DATA);
+  const iv=Math.max(1,parseInt(S.ovInt,10)||15);
+  const ivStr=iv<=1?'1m':iv<=5?'5m':iv<=15?'15m':iv<=30?'30m':'60m';
+  const sym=PLAN_INST[ovInstKey()]||PLAN_INST_FB[ovInstKey()]||'^NSEI';
+  const p1=Math.floor(planMs(S.date)/1000)-86400, p2=p1+3*86400;
+  const tzOff=(LOCATIONS[S.loc]||LOCATIONS['Mumbai']).tz;
+  const wantDate=S.date;
+  const tryIv=async(ivS)=>{
+    const target=`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?period1=${p1}&period2=${p2}&interval=${ivS}`;
+    let lastErr='';
+    for(let pi=0;pi<PROXIES.length;pi++){
+      try{
+        const r=await withTimeout(fetch(PROXIES[pi](target),{mode:'cors',credentials:'omit',headers:{'Accept':'application/json'}}));
+        if(!r.ok){lastErr='HTTP '+r.status;continue;}
+        let j=JSON.parse(await r.text());
+        if(j && typeof j.contents==='string' && !j.chart) j=JSON.parse(j.contents);
+        const res=j&&j.chart&&j.chart.result&&j.chart.result[0]; if(!res){lastErr='no result';continue;}
+        const ts=res.timestamp||[], q=res.indicators&&res.indicators.quote&&res.indicators.quote[0], out=[];
+        if(!q){lastErr='no quotes';continue;}
+        for(let i=0;i<ts.length;i++){
+          const o=q.open[i],h=q.high[i],l=q.low[i],c=q.close[i];
+          if([o,h,l,c].some(v=>v==null||!isFinite(v)||v<=0)) continue;
+          const d=new Date(ts[i]*1000+tzOff*3600000);
+          const ds=d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
+          if(ds!==wantDate) continue;
+          out.push({m:d.getUTCHours()*60+d.getUTCMinutes(),o,h,l,c});
+        }
+        if(out.length>=2) return out;
+        lastErr='no '+ivS+' bars on '+wantDate+' (weekend/holiday or beyond Yahoo history)';
+      }catch(e){ lastErr=((e&&e.message)||'err').slice(0,80); }
+    }
+    throw new Error(lastErr||'fetch failed');
+  };
+  try{ window.OVBC.bars=await tryIv(ivStr); window.OVBC.status='ready'; }
+  catch(e1){
+    try{
+      if(ivStr!=='60m'){ window.OVBC.bars=await tryIv('60m'); window.OVBC.status='ready';
+        window.OVBC.note='hourly bars shown — '+ivStr+' history unavailable for this date'; }
+      else throw e1;
+    }catch(e2){ window.OVBC.status='error'; window.OVBC.err=(e2&&e2.message)||'price unavailable'; }
+  }
+  if(window.OVBC.key!==ovPriceKey()) return; // user changed selection mid-flight
+  const el=document.getElementById('ovbcHost'); if(el&&DATA) el.innerHTML=ovBiasChart(DATA);
+}
 function ovBiasChart(D){
   const SR=sessionRange();
   const iv=Math.max(1,parseInt(S.ovInt,10)||15);
@@ -5665,6 +5722,34 @@ function ovBiasChart(D){
   const cm=parseFloat(S.time)*60;
   const nowMark=(cm>=SR.startMin&&cm<=SR.endMin)?`<line x1="${x(cm).toFixed(1)}" y1="${PT-4}" x2="${x(cm).toFixed(1)}" y2="${PT+IH}" stroke="var(--acc)" stroke-width="1.3"/><text x="${x(cm).toFixed(1)}" y="${PT-6}" fill="var(--acc)" font-size="9" text-anchor="middle">▼ ${mtt(cm)}</text>`:'';
   const zeroLat=`<line x1="${PLm}" y1="${yLat(0).toFixed(1)}" x2="${PLm+IW}" y2="${yLat(0).toFixed(1)}" stroke="var(--tx3)" stroke-width="0.5" stroke-dasharray="1,4"/>`;
+  // ── price candles of the selected instrument (async-loaded) ──
+  const PK=ovPriceKey();
+  const _ov=window.OVBC||{};
+  if(_ov.key!==PK) setTimeout(ovbcLoadPrice,10);
+  const bars=(_ov.key===PK && _ov.status==='ready' && _ov.bars)?_ov.bars.filter(b=>b.m>=SR.startMin&&b.m<=SR.endMin+iv):null;
+  let candleSvg='', priceAxis='', priceStatus='';
+  if(bars && bars.length>=2){
+    const pLo=Math.min(...bars.map(b=>b.l)), pHi=Math.max(...bars.map(b=>b.h));
+    const pPad=Math.max((pHi-pLo)*0.06, pHi*0.0004);
+    const yP=v=>PT+IH-((v-(pLo-pPad))/((pHi-pLo)+2*pPad))*IH;
+    const barIv=bars.length>1?Math.max(1,bars[1].m-bars[0].m):iv;
+    const cw=Math.max(1.2,Math.min(9,(IW/Math.max(1,(SR.endMin-SR.startMin)/barIv))*0.62));
+    candleSvg=bars.map(b=>{
+      const cx=x(b.m+barIv/2), up=b.c>=b.o, col=up?'var(--bull)':'var(--bear)';
+      const yO=yP(b.o), yC=yP(b.c), top=Math.min(yO,yC), bh=Math.max(0.8,Math.abs(yO-yC));
+      return`<line x1="${cx.toFixed(1)}" y1="${yP(b.h).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${yP(b.l).toFixed(1)}" stroke="${col}" stroke-width="0.8"/>
+        <rect x="${(cx-cw/2).toFixed(1)}" y="${top.toFixed(1)}" width="${cw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${col}" opacity="0.92"><title>${mtt(b.m)} · O ${b.o.toFixed(1)} H ${b.h.toFixed(1)} L ${b.l.toFixed(1)} C ${b.c.toFixed(1)}</title></rect>`;
+    }).join('');
+    priceAxis=`<text x="${PLm+4}" y="${PT+10}" fill="var(--tx2)" font-size="9">${pHi.toFixed(1)}</text>
+      <text x="${PLm+4}" y="${PT+IH-3}" fill="var(--tx2)" font-size="9">${pLo.toFixed(1)}</text>`;
+    priceStatus=_ov.note?`<span style="color:var(--sun)">⚠ ${_ov.note}</span>`:`<span style="color:var(--bull)">● ${bars.length} bars</span>`;
+  }
+  else if(_ov.key===PK && _ov.status==='loading') priceStatus='<span style="color:var(--acc)">⏳ fetching '+ovInstKey()+' price…</span>';
+  else if(_ov.key===PK && _ov.status==='error')   priceStatus='<span style="color:var(--bear)">price unavailable: '+_ov.err+' — astro layers still valid</span>';
+  else if(_ov.key===PK && _ov.status==='ready')   priceStatus='<span style="color:var(--tx3)">no bars in session window</span>';
+  else priceStatus='<span style="color:var(--acc)">⏳ loading price…</span>';
+  const dayCol=D.combinedLabel==='BULLISH'?'var(--bull)':D.combinedLabel==='BEARISH'?'var(--bear)':'var(--neut)';
+  const instSel=Object.keys(PLAN_INST).map(k=>`<option value="${k}" ${ovInstKey()===k?'selected':''}>${k}</option>`).join('');
   const ivSel=[1,5,15,30,60].map(o=>`<option value="${o}" ${iv===o?'selected':''}>${o} min</option>`).join('');
   const plSel=Object.keys(PC).map(p=>`<option value="${p}" ${body===p?'selected':''}>${p}</option>`).join('');
   const legend=[['BULLISH','var(--bull)'],['BEARISH','var(--bear)'],['VOLATILE','var(--sun)'],['NEUTRAL','var(--tx3)']]
@@ -5672,8 +5757,9 @@ function ovBiasChart(D){
   return`
   <div class="pnl">
     <div class="ph" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
-      <span><span class="dot"></span>◈ BIAS CHART — ${body.toUpperCase()} LONGITUDE / LATITUDE · ${SR.label} · forecast bands per ${iv}-min slot</span>
-      <span style="display:flex;gap:6px;align-items:center">
+      <span><span class="dot" style="background:${dayCol}"></span>◈ BIAS CHART — ${ovInstKey()} vs ${body.toUpperCase()} LON/LAT · ${SR.label} · <span style="color:${dayCol};font-weight:800">DAY: ${D.combinedLabel} ${D.combinedScore>0?'+':''}${D.combinedScore}</span></span>
+      <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <select class="ci" style="font-size:11px;padding:2px 4px;max-width:150px" onchange="gs({ovInst:this.value})">${instSel}</select>
         <select class="ci" style="font-size:11px;padding:2px 4px" onchange="gs({ovPlanet:this.value})">${plSel}</select>
         <select class="ci" style="font-size:11px;padding:2px 4px" onchange="gs({ovInt:this.value})">${ivSel}</select>
       </span>
@@ -5682,8 +5768,9 @@ function ovBiasChart(D){
       <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
         <rect x="${PLm}" y="${PT}" width="${IW}" height="${IH}" fill="var(--bg2)" stroke="var(--bd)"/>
         ${bandRects}${axis}${zeroLat}
-        <path d="${latPath}" fill="none" stroke="${PC.Moon}" stroke-width="1.1" stroke-dasharray="4,3" opacity="0.85"/>
-        <path d="${lonPath}" fill="none" stroke="var(--acc)" stroke-width="1.6"/>
+        <path d="${latPath}" fill="none" stroke="${PC.Moon}" stroke-width="1" stroke-dasharray="4,3" opacity="0.7"/>
+        <path d="${lonPath}" fill="none" stroke="var(--acc)" stroke-width="1.2" stroke-dasharray="7,3" opacity="0.85"/>
+        ${candleSvg}${priceAxis}
         ${nowMark}
         <text x="${PLm-6}" y="${(yLon(lonMax)+3).toFixed(1)}" fill="var(--acc)" font-size="9" text-anchor="end">${dmsC(n360(lonMax)%30)} ${SABB[Math.floor(n360(lonMax)/30)]}</text>
         <text x="${PLm-6}" y="${(yLon(lonMin)+3).toFixed(1)}" fill="var(--acc)" font-size="9" text-anchor="end">${dmsC(n360(lonMin)%30)} ${SABB[Math.floor(n360(lonMin)/30)]}</text>
@@ -5692,12 +5779,14 @@ function ovBiasChart(D){
         <text x="${PLm+IW+6}" y="${yLat(0).toFixed(1)}" fill="var(--tx3)" font-size="9">lat 0°</text>
       </svg>
       <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:10px;color:var(--tx2);margin-top:6px;align-items:center">
-        <span style="color:var(--acc);font-weight:700">— longitude (sidereal)</span>
+        <span style="font-weight:700"><span style="color:var(--bull)">▮</span><span style="color:var(--bear)">▮</span> ${ovInstKey()} ${iv}-min candles</span>
+        <span style="color:var(--acc);font-weight:700">┅ longitude (sidereal)</span>
         <span style="color:${PC.Moon};font-weight:700">┄ latitude (shar)</span>
         ${legend}
+        <span style="margin-left:auto">${priceStatus}</span>
       </div>
       <div style="font-size:10px;color:var(--tx3);margin-top:4px">
-        Bands = planetary-hour bias per slot, aligned to your ${iv}-min chart timeframe. Pick any PAST date in the header to backtest: the full engine recomputes for that day, so bands show the bias that was forecast — compare against the actual ${iv}-min candles. 24H session covers US markets / commodities round the clock.
+        Bands = planetary-hour bias per slot, aligned to the ${iv}-min timeframe. Pick any PAST date in the header to backtest: the engine recomputes that day's bias bands and overlays the instrument's actual ${iv}-min candles (Yahoo: 1m ≈ 30d, 5/15/30m ≈ 60d back; older dates fall back to hourly, then astro-only). 24H session covers US markets / commodities round the clock.
       </div>
     </div>
   </div>`;
