@@ -5602,8 +5602,11 @@ window.OVBC={key:null,bars:null,status:'idle',err:'',note:''};
 async function ovbcLoadPrice(force){
   const key=ovPriceKey();
   if(!force && window.OVBC.key===key && window.OVBC.status!=='idle') return;
-  window.OVBC={key,bars:null,status:'loading',err:'',note:''};
-  const el0=document.getElementById('ovbcHost'); if(el0&&DATA) el0.innerHTML=ovBiasChart(DATA);
+  if(window.OVBC.status==='loading' && window.OVBC.key===key) return; // already in flight
+  // keep the last candles on screen while a refresh is in flight (no blanking)
+  const prevBars=(window.OVBC.key===key && window.OVBC.bars)?window.OVBC.bars:null;
+  window.OVBC={key,bars:prevBars,status:'loading',err:'',note:''};
+  if(!prevBars){ const el0=document.getElementById('ovbcHost'); if(el0&&DATA) el0.innerHTML=ovBiasChart(DATA); }
   const iv=Math.max(1,parseInt(S.ovInt,10)||15);
   const ivStr=iv<=1?'1m':iv<=5?'5m':iv<=15?'15m':iv<=30?'30m':'60m';
   const sym=PLAN_INST[ovInstKey()]||PLAN_INST_FB[ovInstKey()]||'^NSEI';
@@ -5629,7 +5632,9 @@ async function ovbcLoadPrice(force){
   // wins. Sequential retries took up to 40s when the first proxies were
   // down; the race answers in the latency of the fastest healthy proxy.
   const tryIv=(ivS)=>{
-    const target=`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?period1=${p1}&period2=${p2}&interval=${ivS}`;
+    // 30s cache-buster bucket: the CORS proxies cache by full URL, which
+    // otherwise keeps serving the same stale candles all session
+    const target=`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?period1=${p1}&period2=${p2}&interval=${ivS}&ck=${Math.floor(Date.now()/30000)}`;
     return new Promise((resolve,reject)=>{
       let pending=PROXIES.length, done=false, lastErr='';
       PROXIES.forEach(px=>{
@@ -5660,6 +5665,19 @@ async function ovbcLoadPrice(force){
   if(window.OVBC.key!==ovPriceKey()) return; // selection changed mid-flight
   const el=document.getElementById('ovbcHost'); if(el&&DATA) el.innerHTML=ovBiasChart(DATA);
 }
+// Live auto-refresh: while viewing TODAY's overview during the active
+// session, re-fetch candles every 60s so the chart tracks the live market
+// without manual ↻. Past dates never re-fetch (data is final).
+window._ovbcTimer=window._ovbcTimer||setInterval(()=>{ try{
+  if(!DATA || (S.tab||'overview')!=='overview') return;
+  if(S.date!==todayStr()) return;
+  const SR=sessionRange();
+  const tz=(LOCATIONS[S.loc]||LOCATIONS['Mumbai']).tz;
+  const now=new Date(Date.now()+tz*3600000);
+  const m=now.getUTCHours()*60+now.getUTCMinutes();
+  if(m<SR.startMin-5 || m>SR.endMin+15) return;
+  ovbcLoadPrice(true);
+}catch(e){} }, 60000);
 function ovBiasChart(D){
   const SR=sessionRange();
   const iv=Math.max(1,parseInt(S.ovInt,10)||15);
@@ -5704,7 +5722,7 @@ function ovBiasChart(D){
   const PK=ovPriceKey();
   const _ov=window.OVBC||{};
   if(_ov.key!==PK) setTimeout(ovbcLoadPrice,10);
-  const bars=(_ov.key===PK && _ov.status==='ready' && _ov.bars)?_ov.bars.filter(b=>b.m>=SR.startMin&&b.m<=SR.endMin+iv):null;
+  const bars=(_ov.key===PK && _ov.bars)?_ov.bars.filter(b=>b.m>=SR.startMin&&b.m<=SR.endMin+iv):null;
   let candleSvg='', priceAxis='', priceStatus='', noPriceMsg='';
   if(bars && bars.length>=2){
     const pLo=Math.min(...bars.map(b=>b.l)), pHi=Math.max(...bars.map(b=>b.h));
@@ -5725,7 +5743,10 @@ function ovBiasChart(D){
         <text x="${PLm-6}" y="${(gy+4).toFixed(1)}" fill="var(--tx2)" font-size="12" text-anchor="end">${pv.toFixed(pHi>9999?0:1)}</text>`;
     }
     const lastB=bars[bars.length-1];
-    priceStatus=(_ov.note?`<span style="color:var(--sun)">⚠ ${_ov.note}</span> · `:'')+`<span style="color:var(--bull)">● ${bars.length} bars · last ${mtt(lastB.m)} @ ${lastB.c.toFixed(1)}</span>`;
+    const liveTag=_ov.status==='loading'?' · <span style="color:var(--acc)">⟳ refreshing…</span>'
+                 :_ov.status==='error'?' · <span style="color:var(--bear)">⚠ refresh failed — showing last data ('+_ov.err+')</span>'
+                 :(S.date===todayStr()?' · <span style="color:var(--acc)">LIVE · auto-refresh 60s</span>':'');
+    priceStatus=(_ov.note?`<span style="color:var(--sun)">⚠ ${_ov.note}</span> · `:'')+`<span style="color:var(--bull)">● ${bars.length} bars · last ${mtt(lastB.m)} @ ${lastB.c.toFixed(1)}</span>`+liveTag;
   }else{
     if(_ov.key===PK && _ov.status==='loading'){ priceStatus='<span style="color:var(--acc)">⏳ fetching '+ovInstKey()+' candles (proxies raced in parallel)…</span>'; noPriceMsg='⏳ fetching '+ovInstKey()+' price…'; }
     else if(_ov.key===PK && _ov.status==='error'){ priceStatus='<span style="color:var(--bear)">price unavailable: '+_ov.err+'</span>'; noPriceMsg='price unavailable — bias bands remain valid (pure ephemeris)'; }
@@ -5761,7 +5782,7 @@ function ovBiasChart(D){
         <span style="margin-left:auto">${priceStatus}</span>
       </div>
       <div style="font-size:10px;color:var(--tx3);margin-top:4px">
-        Bands = the day's forecast bias per planetary-hour slot, aligned to the ${iv}-min timeframe (band label = hour lord). Pick any PAST date in the header to backtest: bands recompute from ephemeris for that day and the instrument's actual candles overlay them (Yahoo history: 1m ≈ 30d, 5/15/30m ≈ 60d; older dates fall back to hourly, then bands-only). ↻ re-fetches live price. 24H session covers US markets / commodities round the clock.
+        Bands = the day's forecast bias per planetary-hour slot, aligned to the ${iv}-min timeframe (band label = hour lord). Pick any PAST date in the header to backtest: bands recompute from ephemeris for that day and the instrument's actual candles overlay them (Yahoo history: 1m ≈ 30d, 5/15/30m ≈ 60d; older dates fall back to hourly, then bands-only). Today auto-refreshes every 60s during the live session; ↻ forces an immediate re-fetch. 24H session covers US markets / commodities round the clock.
       </div>
     </div>
   </div>`;
