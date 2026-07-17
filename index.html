@@ -5102,6 +5102,7 @@ function tV44(){
    ════════════════════════════════════════════════════════════════════ */
 window.PLAN = window.PLAN || {ohlc:{}, status:'idle', err:'', loadedKey:null, view:null, data:null, win:null, panMode:false, maximized:false, minimized:false, _rb:false};
 const PLAN_INST = {'NIFTY 50':'^NSEI','BANK NIFTY':'^NSEBANK','SENSEX':'^BSESN','NIFTY IT':'^CNXIT','NIFTY MIDCAP 100':'NIFTY_MIDCAP_100.NS',
+  'NASDAQ':'^IXIC','SPX':'^GSPC','DOW':'^DJI',
   'XAUUSD · GOLD':'XAUUSD=X','XAGUSD · SILVER':'XAGUSD=X','XNGUSD · NAT GAS':'NG=F','USOIL · WTI CRUDE':'CL=F'};
 // Yahoo fallbacks: if the FX-style spot symbol is unavailable on a proxy, retry with the futures contract
 const PLAN_INST_FB = {'XAUUSD · GOLD':'GC=F','XAGUSD · SILVER':'SI=F'};
@@ -5597,7 +5598,35 @@ function combustCellHTML(p, sunLon){
 // bands = what was forecast, candles = what price actually did.
 // ═══════════════════════════════════════════════════════════════════
 function ovInstKey(){ return S.ovInst||'NIFTY 50'; }
-function ovPriceKey(){ return [S.date,ovInstKey(),Math.max(1,parseInt(S.ovInt,10)||15),S.loc||'Mumbai'].join('|'); }
+// ── US market timing ───────────────────────────────────────────────
+// US Eastern offset for a date (EDT −4 / EST −5): DST runs 2nd Sunday
+// of March 02:00 → 1st Sunday of November 02:00 (date-level is enough).
+function usEtTz(dateStr){
+  const d=new Date(dateStr+'T12:00:00Z'), y=d.getUTCFullYear();
+  const nthSun=(mo,n)=>{ const dow=new Date(Date.UTC(y,mo,1)).getUTCDay(); return Date.UTC(y,mo,1+((7-dow)%7)+(n-1)*7); };
+  const t=Date.UTC(y,d.getUTCMonth(),d.getUTCDate());
+  return (t>=nthSun(2,2) && t<nthSun(10,1)) ? -4 : -5;
+}
+// Instruments that trade on their own exchange clock. When one is picked
+// in the overview chart, the whole chart (axis, session, bars, bands)
+// runs on THAT market's local time instead of the selected location's.
+const OV_US_MKT={
+  'NASDAQ':ds=>({tz:usEtTz(ds),open:9.5,close:16,label:'NASDAQ MARKET HOURS (ET)'}),
+  'SPX':   ds=>({tz:usEtTz(ds),open:9.5,close:16,label:'S&P 500 MARKET HOURS (ET)'}),
+  'DOW':   ds=>({tz:usEtTz(ds),open:9.5,close:16,label:'DOW JONES MARKET HOURS (ET)'}),
+};
+function ovMkt(){
+  const us=OV_US_MKT[ovInstKey()];
+  if(us) return us(S.date);
+  const L=LOCATIONS[S.loc]||LOCATIONS['Mumbai'];
+  return {tz:L.tz,open:L.open,close:L.close,label:L.mkt+' MARKET HOURS'};
+}
+function ovSessionRange(){
+  if(S.session==='24h') return {startMin:0,endMin:23*60+55,is24:true,label:'24H ROUND-THE-CLOCK'};
+  const mk=ovMkt();
+  return {startMin:Math.round(mk.open*60),endMin:Math.round(mk.close*60),is24:false,label:mk.label};
+}
+function ovPriceKey(){ return [S.date,ovInstKey(),Math.max(1,parseInt(S.ovInt,10)||15),S.loc||'Mumbai',ovMkt().tz].join('|'); }
 window.OVBC={key:null,bars:null,status:'idle',err:'',note:''};
 async function ovbcLoadPrice(force){
   const key=ovPriceKey();
@@ -5615,7 +5644,7 @@ async function ovbcLoadPrice(force){
   const _d0=Math.floor(planMs(S.date)/1000);
   const p1=ivStr==='1m'?_d0-6*3600:_d0-86400;
   const p2=ivStr==='1m'?_d0+30*3600:_d0+2*86400;
-  const tzOff=(LOCATIONS[S.loc]||LOCATIONS['Mumbai']).tz;
+  const tzOff=ovMkt().tz; // bars in the instrument's own exchange clock
   const wantDate=S.date;
   const parseBars=(j)=>{
     const res=j&&j.chart&&j.chart.result&&j.chart.result[0]; if(!res) return null;
@@ -5682,10 +5711,12 @@ async function ovbcLoadPrice(force){
 // without manual ↻. Past dates never re-fetch (data is final).
 window._ovbcTimer=window._ovbcTimer||setInterval(()=>{ try{
   if(!DATA || (S.tab||'overview')!=='overview') return;
-  if(S.date!==todayStr()) return;
-  const SR=sessionRange();
-  const tz=(LOCATIONS[S.loc]||LOCATIONS['Mumbai']).tz;
-  const now=new Date(Date.now()+tz*3600000);
+  // live check on the INSTRUMENT's market clock (US session = IST evening)
+  const mk=ovMkt();
+  const now=new Date(Date.now()+mk.tz*3600000);
+  const mktToday=now.getUTCFullYear()+'-'+String(now.getUTCMonth()+1).padStart(2,'0')+'-'+String(now.getUTCDate()).padStart(2,'0');
+  if(S.date!==mktToday) return;
+  const SR=ovSessionRange();
   const m=now.getUTCHours()*60+now.getUTCMinutes();
   if(m<SR.startMin-5 || m>SR.endMin+15) return;
   ovbcLoadPrice(true);
@@ -5698,11 +5729,21 @@ window._ovbcTimer=window._ovbcTimer||setInterval(()=>{ try{
 // tilt. Nothing here depends on the header TIME, so the bands are stable
 // all day and honest for forecast-vs-real backtesting.
 let _ovbcSlots={key:null,slots:null};
-function ovSlotKey(){ return [S.date,S.ayMode,S.session||'mkt',S.ovInt||'15',S.loc||'Mumbai',LAT,LON,isAELoaded()?'ae':'kep'].join('|'); }
+function ovSlotKey(){ const mk=ovMkt(); return [S.date,S.ayMode,S.session||'mkt',S.ovInt||'15',S.loc||'Mumbai',LAT,LON,mk.tz,mk.open,isAELoaded()?'ae':'kep'].join('|'); }
 function ovBuildSlots(D){
   const key=ovSlotKey();
   if(_ovbcSlots.key===key) return _ovbcSlots.slots;
-  const SR=sessionRange();
+  const SR=ovSessionRange();
+  // slot minutes are in the instrument's market-local clock; shift converts
+  // them to the selected location's clock (which JD() and phpHours use)
+  const _mkShift=(IST-ovMkt().tz)*60;
+  let _phpPrev=null,_phpNext=null;
+  const lordAt=(mLoc)=>{
+    let hrs=D.phpHours, mm=mLoc;
+    if(mm>=1440){ _phpNext=_phpNext||buildPlanetHours24(dateShiftStr(S.date,1)); hrs=_phpNext; mm-=1440; }
+    else if(mm<0){ _phpPrev=_phpPrev||buildPlanetHours24(dateShiftStr(S.date,-1)); hrs=_phpPrev; mm+=1440; }
+    return (hrs.find(h=>mm>=h.sm&&mm<h.em)||{planet:D.dayLord}).planet;
+  };
   const iv=Math.max(1,parseInt(S.ovInt,10)||15);
   const dp=S.date.split('-').map(Number);
   const wd=new Date(S.date+"T00:00:00").getDay();
@@ -5713,12 +5754,12 @@ function ovBuildSlots(D){
   const sunP=D.planets.find(p=>p.name==='Sun');
   const slots=[];
   for(let m=SR.startMin;m<=SR.endMin;m+=iv){
-    const J=JD(dp[0],dp[1],dp[2],m/60);
+    const J=JD(dp[0],dp[1],dp[2],(m+_mkShift)/60);
     const ay=getAyanamsa(J,S.ayMode);
     const lagS=Math.floor(n360(computeAsc(J).asc-ay)/30);
     const mLon=n360(geoLon('Moon',J)-ay);
     const sub=getSub(mLon).sub;
-    const HL=(D.phpHours.find(h=>m>=h.sm&&m<h.em)||{planet:D.dayLord}).planet;
+    const HL=lordAt(m+_mkShift);
     const hp=D.planets.find(p=>p.name===HL);
     const hlLon=HL==='Moon'?mLon:(hp?hp.lon:0);
     const hlSign=Math.floor(n360(hlLon)/30);
@@ -5761,7 +5802,7 @@ function ovBuildSlots(D){
   return slots;
 }
 function ovBiasChart(D){
-  const SR=sessionRange();
+  const SR=ovSessionRange();
   const iv=Math.max(1,parseInt(S.ovInt,10)||15);
   const slots=ovBuildSlots(D);
   if(!slots || slots.length<2) return '';
@@ -5780,8 +5821,10 @@ function ovBiasChart(D){
     axis+=`<line x1="${x(m).toFixed(1)}" y1="${PT}" x2="${x(m).toFixed(1)}" y2="${PT+IH}" stroke="var(--bd)" stroke-width="0.5" stroke-dasharray="2,4"/>
            <text x="${x(m).toFixed(1)}" y="${PT+IH+16}" fill="var(--tx3)" font-size="12" text-anchor="middle">${mtt(m)}</text>`;
   }
-  const cm=parseFloat(S.time)*60;
-  const nowMark=(cm>=SR.startMin&&cm<=SR.endMin)?`<line x1="${x(cm).toFixed(1)}" y1="${PT-4}" x2="${x(cm).toFixed(1)}" y2="${PT+IH}" stroke="var(--acc)" stroke-width="1.3"/><text x="${x(cm).toFixed(1)}" y="${PT-6}" fill="var(--acc)" font-size="12" text-anchor="middle">▼ ${mtt(cm)}</text>`:'';
+  // now-marker: selected location time converted to the chart's market clock
+  const _cmLoc=parseFloat(S.time)*60, _mkSh=(IST-ovMkt().tz)*60;
+  const cm=[_cmLoc-_mkSh, _cmLoc-_mkSh-1440, _cmLoc-_mkSh+1440].find(v=>v>=SR.startMin&&v<=SR.endMin);
+  const nowMark=(cm!=null)?`<line x1="${x(cm).toFixed(1)}" y1="${PT-4}" x2="${x(cm).toFixed(1)}" y2="${PT+IH}" stroke="var(--acc)" stroke-width="1.3"/><text x="${x(cm).toFixed(1)}" y="${PT-6}" fill="var(--acc)" font-size="12" text-anchor="middle">▼ ${mtt(cm)}</text>`:'';
   // ── price candles (async-loaded, proxies raced in parallel) ──
   const PK=ovPriceKey();
   const _ov=window.OVBC||{};
