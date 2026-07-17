@@ -551,6 +551,50 @@ const LOCATIONS={
   'Chicago':  {lat:41.8781, lon:-87.6298, tz:-5,  abbr:'CDT', mkt:'CME/CBOT',    open:8.5,  close:15,
                deshPanchak:{letter:'श≡स', varnaCell:'5,1', svara:'ए', svaraCell:'6,6', tithiGrp:'RIKTA', nakRing:24, nakPada:1, rashi:10}},
 };
+// ── SESSION RANGE ─────────────────────────────────────────────────
+// 'mkt'  → exchange hours of the selected location (NSE 09:15–15:30,
+//          NYSE 09:30–16:00, CME 08:30–15:00, …)
+// '24h'  → round-the-clock 00:00–23:55 (US markets / commodities /
+//          crypto / GIFT-Nifty style continuous forecasting).
+// Every intraday engine (15-min slots, 5-min lagna grid, header time
+// picker, planetary-hour schedule, overview bias chart) reads this.
+function sessionRange(){
+  const L=LOCATIONS[(typeof S!=='undefined'&&S.loc)||'Mumbai']||LOCATIONS['Mumbai'];
+  if(typeof S!=='undefined' && S.session==='24h')
+    return {startMin:0, endMin:23*60+55, is24:true, label:'24H ROUND-THE-CLOCK'};
+  return {startMin:Math.round(L.open*60), endMin:Math.round(L.close*60), is24:false, label:L.mkt+' MARKET HOURS'};
+}
+function dateShiftStr(dateStr, days){
+  const d=new Date(dateStr+"T12:00:00"); d.setDate(d.getDate()+days);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+// Full 24-hour Chaldean planetary hours covering 00:00–24:00 local.
+// Classical rule: 12 unequal day-hours sunrise→sunset (each (set−rise)/12),
+// then 12 night-hours sunset→next sunrise, sequence continuing in Chaldean
+// order from the day lord. Minutes before today's sunrise belong to the
+// PREVIOUS day's night hours, which are computed from the previous date's
+// own sunrise/sunset and day lord — so the pre-dawn lords are correct.
+function buildPlanetHours24(dateStr){
+  const seq=(dStr,off)=>{
+    const sr=sunriseSunset(dStr);
+    const dl=(sr.set-sr.rise)/12, nl=(1440-(sr.set-sr.rise))/12;
+    const st=CHALD.indexOf(DAY_LORDS[new Date(dStr+"T00:00:00").getDay()]);
+    const out=[];
+    for(let i=0;i<12;i++) out.push({planet:CHALD[(st+i)%7],   sm:off+sr.rise+i*dl, em:off+sr.rise+(i+1)*dl, seg:'☀'});
+    for(let i=0;i<12;i++) out.push({planet:CHALD[(st+12+i)%7],sm:off+sr.set +i*nl, em:off+sr.set +(i+1)*nl, seg:'☾'});
+    return out;
+  };
+  const hrs=[...seq(dateShiftStr(dateStr,-1),-1440), ...seq(dateStr,0), ...seq(dateShiftStr(dateStr,1),1440)]
+    .filter(h=>h.em>0 && h.sm<1440)
+    .map(h=>({planet:h.planet, seg:h.seg, sm:Math.max(0,h.sm), em:Math.min(1440,h.em)}))
+    .sort((a,b)=>a.sm-b.sm);
+  // Stitch seams: consecutive days' sunrise drift by ~1-2 min, so the previous
+  // night's 12th hour may not end exactly at today's sunrise. Snap each hour's
+  // end to the next hour's start so every minute 00:00-24:00 resolves to a lord.
+  for(let i=0;i<hrs.length-1;i++) hrs[i].em=hrs[i+1].sm;
+  if(hrs.length){ hrs[0].sm=0; hrs[hrs.length-1].em=1440; }
+  return hrs;
+}
 const SIGNS=['Aries','Taurus','Gemini','Cancer','Leo','Virgo','Libra','Scorpio','Sagittarius','Capricorn','Aquarius','Pisces'];
 const SABB=['Ar','Ta','Ge','Ca','Le','Vi','Li','Sc','Sa','Cp','Aq','Pi'];
 const SLRD=['Mars','Venus','Mercury','Moon','Sun','Mercury','Venus','Mars','Jupiter','Saturn','Saturn','Jupiter'];
@@ -2058,9 +2102,25 @@ function computeBias(planets){
     if(Venus.s===5)add('Venus debilitated Virgo',12,-1);
   }
   if(Rahu&&[5,11].includes(Rahu.h))add('Rahu in 5/11H gains',8,1);
+  // ── Nakshatra-swami & Rashi-swami of the Moon (KP: the nak lord rules
+  //    the result; the rashi lord colours it). Their own dignity/house
+  //    condition feeds the day bias — previously ignored by this signal.
+  if(Moon){
+    const nakSw = Moon.nakL || (NAKS[Math.floor(n360(Moon.lon)/NAK_SPAN)%27]||{}).l;
+    const rasSw = SLRD[(Moon.s!=null?Moon.s:Math.floor(n360(Moon.lon)/30))%12];
+    const lordF=(lord,label,w)=>{
+      if(!lord)return;
+      const hb=hourBias(lord,planets);
+      if(hb.bias==='BULLISH')      add(label+' '+lord+' well-placed',w,1);
+      else if(hb.bias==='BEARISH') add(label+' '+lord+' afflicted',w,-1);
+      else if(hb.bias==='VOLATILE')add(label+' '+lord+' volatile — whipsaw risk',Math.max(1,Math.round(w/2)),-1);
+    };
+    lordF(nakSw,'Nak-swami (Moon nak lord)',10);
+    lordF(rasSw,'Rashi-swami (Moon sign lord)',8);
+  }
   const norm=Math.max(-100,Math.min(100,sc*0.8));
   const bias=norm>15?'BULLISH':norm<-15?'BEARISH':'NEUTRAL';
-  return{score:Math.round(norm),bias,F:F.slice(0,10)};
+  return{score:Math.round(norm),bias,F:F.slice(0,12)};
 }
 
 function hourBias(planet,planets){
@@ -3292,8 +3352,9 @@ function buildSharTable(fromStr, toStr, ayMode){
 
 function build5minSlots(dateStr, ayMode){
   const dp=dateStr.split('-').map(Number);
+  const SR=sessionRange();
   const slots=[]; let prevLag=null, prevNak=null;
-  for(let min=9*60+15; min<=15*60+30; min+=5){
+  for(let min=SR.startMin; min<=SR.endMin; min+=5){
     const J=JD(dp[0],dp[1],dp[2], min/60);
     const ay=getAyanamsa(J,ayMode);
     const ascSid=n360(computeAsc(J).asc-ay);
@@ -3973,7 +4034,13 @@ function buildIndexForecast(D){
   };
 }
 
+// Memo: render() calls computeAll on EVERY state change (even a chart
+// dropdown), and the engine runs multi-day ephemeris scans. Same inputs
+// → return the previous result instantly instead of recomputing.
+let _computeAllMemo={key:null,val:null};
 function computeAll(dateStr,timeIST,ayMode){
+  const _memoKey=[dateStr,timeIST,ayMode,(typeof S!=='undefined'&&S.session)||'mkt',(typeof S!=='undefined'&&S.loc)||'Mumbai',LAT,LON,isAELoaded()?'ae':'kep'].join('|');
+  if(_computeAllMemo.key===_memoKey) return _computeAllMemo.val;
   const dp=dateStr.split('-').map(Number);
   const J=JD(dp[0],dp[1],dp[2],timeIST);
   const ay=getAyanamsa(J,ayMode);
@@ -4032,17 +4099,14 @@ function computeAll(dateStr,timeIST,ayMode){
   const rp=[dayLord,moon?.nakL,moon?.sub,ascSub.nakL,ascSub.sub].filter(Boolean);
 
   const{rise:rMin,set:sMin,hl:hlMin}=sunriseSunset(dateStr);
-  const chaldStart=CHALD.indexOf(dayLord);
+  // Full 24h Chaldean day+night planetary hours (00:00–24:00) — pre-dawn
+  // minutes carry the previous day's night lords, so every slot round the
+  // clock resolves to a correct hour lord.
+  const phpHours=buildPlanetHours24(dateStr);
 
-  const phpHours=[];
-  for(let i=0;i<25;i++){
-    const sm=rMin+i*hlMin,em=sm+hlMin;
-    if(sm>sMin+90)break;
-    phpHours.push({planet:CHALD[(chaldStart+i)%7],sm,em});
-  }
-
+  const SR=sessionRange();
   const slots=[];
-  for(let min=9*60+15;min<=15*60+31;min+=15){
+  for(let min=SR.startMin;min<=SR.endMin;min+=15){
     const slotIST = min/60;
     const Jslot = JD(dp[0],dp[1],dp[2],slotIST);
     const aySlot = getAyanamsa(Jslot,ayMode);
@@ -4125,7 +4189,7 @@ function computeAll(dateStr,timeIST,ayMode){
   }catch(e){ sbcVedha=null; }
   const astroDF = buildIndexForecast({planets, aspects, rules, forecast, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, combinedScore, sharCrossings, ruleX, sbcVedha});
 
-  return{J,ay,ayMode,ascSid,ascSign,ascSub,ascNak,mcSid,planets,dayLord,moon,rp,
+  const _ret={J,ay,ayMode,ascSid,ascSign,ascSub,ascNak,mcSid,planets,dayLord,moon,rp,
     rMin,sMin,hlMin,phpHours,slots,bias,dateStr,timeIST,
     ephSrc:ephemerisStatus(),
     // v4 fields
@@ -4138,6 +4202,8 @@ function computeAll(dateStr,timeIST,ayMode){
     forecast, forecastDirScore,
     combinedScore, combinedLabel,
     natal, bhadra, sbc, declShifts, bhavDay, bhavNatal, natalTransit, slots5, astroDF, ruleX, sbcVedha};
+  _computeAllMemo={key:_memoKey,val:_ret};
+  return _ret;
 }
 
 function mtt(m){let h=Math.floor(m/60),mn=Math.floor(m%60);return`${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}`;}
@@ -4210,6 +4276,7 @@ let S={date:todayStr(),time:nowTimeIST(),
        dowPDH:'',dowPDL:'',dowPWH:'',dowPWL:'',dowPMH:'',dowPML:'',
        spxPDH:'',spxPDL:'',spxPWH:'',spxPWL:'',spxPMH:'',spxPML:'',
        tab:'overview',ayMode:'lahiri',gannAnchor:'open',loc:'Mumbai',
+       session:'mkt',ovInt:'15',ovPlanet:'Moon',
        spFrom:'',spTo:'',time5:'',calYear:0,calMonth:0};
 let DATA=null;
 let PS={state:'idle',src:'',ts:'',
@@ -4297,7 +4364,10 @@ function rHdr(){
   const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const mons=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const _loc = LOCATIONS[S.loc] || LOCATIONS['Mumbai'];
-  const times=(()=>{ const out=[]; const n=Math.round((_loc.close-_loc.open)/0.25); for(let i=0;i<=n;i++){ const h=Math.round((_loc.open+i*0.25)*100)/100; out.push([String(h), mtt(Math.round(h*60))]); } return out; })();
+  // Time picker: 5-min steps across the active session — market hours,
+  // or 00:00→23:55 when SESSION = 24H (US markets / commodities / crypto).
+  const _SR=sessionRange();
+  const times=(()=>{ const out=[]; for(let m=_SR.startMin;m<=_SR.endMin;m+=5){ out.push([String(Math.round(m/60*1e6)/1e6), mtt(m)]); } return out; })();
   const ayLabel = ayanamsaLabel(S.ayMode);
   document.getElementById('HDR').innerHTML=`
 <header class="hdr">
@@ -4314,7 +4384,13 @@ function rHdr(){
       <div class="cg"><span class="cl">DATE</span><input type="date" id="iD" value="${S.date}" class="ci w130"></div>
       <div class="cg"><span class="cl">TIME (${_loc.abbr})</span>
         <select id="iT" class="ci">
-          ${times.map(([v,l])=>`<option value="${v}" ${S.time===v?'selected':''}>${l}</option>`).join('')}
+          ${times.map(([v,l])=>`<option value="${v}" ${Math.abs(parseFloat(S.time)-parseFloat(v))<0.004?'selected':''}>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div class="cg"><span class="cl">SESSION</span>
+        <select id="iSES" class="ci w130">
+          <option value="mkt" ${(S.session||'mkt')==='mkt'?'selected':''}>Market hours (${mtt(Math.round(_loc.open*60))}–${mtt(Math.round(_loc.close*60))})</option>
+          <option value="24h" ${S.session==='24h'?'selected':''}>24H round-the-clock</option>
         </select>
       </div>
       <div class="cg"><span class="cl">LOCATION</span>
@@ -5511,6 +5587,121 @@ function combustCellHTML(p, sunLon){
   if(ci.combust) return '<td style="white-space:nowrap" title="Combust (asta) — '+p.name+' within '+ci.orb+'° of the Sun"><span style="background:var(--bear);color:#fff;font-weight:800;padding:0 5px;border-radius:3px;font-size:11.5px">C</span> <span style="color:var(--bear);font-weight:700">'+ci.sep.toFixed(1)+'°</span></td>';
   return '<td style="color:var(--tx3);white-space:nowrap" title="separation from Sun">'+ci.sep.toFixed(1)+'°</td>';
 }
+// ═══════════════════════════════════════════════════════════════════
+// OVERVIEW BIAS CHART — planet longitude + latitude curves over the
+// active session, with the forecast bias (bullish/bearish/neutral/
+// volatile) painted as background bands per time-slot. The interval
+// selector (1/5/15/30/60 min) aligns bands to the chart timeframe you
+// trade. Selecting a past date in the header recomputes the whole
+// engine for that day, so the bands show what WAS forecast — overlay
+// against actual candles to backtest.
+// ═══════════════════════════════════════════════════════════════════
+// Ephemeris points cache — the lon/lat/hour-lord samples depend only on
+// (date, ayanamsa, session, interval, planet, location), NOT on the
+// selected time, so they survive time-scrubbing and re-renders. The bias
+// bands (hourBias of D.planets at the selected moment) are recomputed
+// cheaply from the cached points on every call.
+let _ovbcPts={key:null,pts:null};
+function ovBiasKey(){
+  return [S.date,S.ayMode,S.session||'mkt',S.ovInt||'15',S.ovPlanet||'Moon',S.loc||'Mumbai',LAT,LON,isAELoaded()?'ae':'kep'].join('|');
+}
+function ovBiasChart(D){
+  const SR=sessionRange();
+  const iv=Math.max(1,parseInt(S.ovInt,10)||15);
+  const body=PC[S.ovPlanet]?S.ovPlanet:'Moon';
+  const dp=S.date.split('-').map(Number);
+  const _key=ovBiasKey();
+  let pts;
+  if(_ovbcPts.key===_key){ pts=_ovbcPts.pts; }
+  else{
+    pts=[];
+    for(let m=SR.startMin;m<=SR.endMin;m+=iv){
+      const J=JD(dp[0],dp[1],dp[2],m/60);
+      const ay=getAyanamsa(J,S.ayMode);
+      let tl; try{ tl=body==='Rahu'?rahuLon(J):body==='Ketu'?n360(rahuLon(J)+180):geoLon(body,J); }catch(e){ tl=0; }
+      let lt; try{ lt=geoLat(body,J); }catch(e){ lt=0; }
+      const ph=(D.phpHours.find(h=>m>=h.sm&&m<h.em)||{planet:D.dayLord}).planet;
+      pts.push({m,lon:n360(tl-ay),lat:lt,ph});
+    }
+    // unwrap longitude across the 360°→0° boundary so the curve is continuous
+    for(let i=1;i<pts.length;i++){
+      while(pts[i].lon-pts[i-1].lon> 180)pts[i].lon-=360;
+      while(pts[i].lon-pts[i-1].lon<-180)pts[i].lon+=360;
+    }
+    _ovbcPts={key:_key,pts};
+  }
+  if(pts.length<2) return '';
+  // bias per slot from the (cheap) hour-lord condition at the selected moment
+  pts=pts.map(p=>({...p,hb:hourBias(p.ph,D.planets)}));
+  const W=980,H=260,PLm=52,PRm=52,PT=16,PB=34,IW=W-PLm-PRm,IH=H-PT-PB;
+  const x=m=>PLm+(m-SR.startMin)/Math.max(1,SR.endMin-SR.startMin)*IW;
+  const lonMin=Math.min(...pts.map(p=>p.lon)), lonMax=Math.max(...pts.map(p=>p.lon));
+  const lonPad=Math.max(0.05,(lonMax-lonMin)*0.08);
+  const yLon=v=>PT+IH-( (v-(lonMin-lonPad))/((lonMax-lonMin)+2*lonPad) )*IH;
+  const latAbs=Math.max(0.5,...pts.map(p=>Math.abs(p.lat)));
+  const yLat=v=>PT+IH/2 - (v/latAbs)*(IH/2*0.9);
+  const BCOL={BULLISH:'var(--bull)',BEARISH:'var(--bear)',VOLATILE:'var(--sun)',NEUTRAL:'var(--tx3)'};
+  // merge consecutive same-bias slots into single bands
+  const bands=[];
+  for(const p of pts){
+    const last=bands[bands.length-1];
+    if(last && last.bias===p.hb.bias && last.ph===p.ph) last.to=p.m+iv;
+    else bands.push({from:p.m,to:p.m+iv,bias:p.hb.bias,ph:p.ph,col:BCOL[p.hb.bias]||'var(--tx3)'});
+  }
+  const bandRects=bands.map(bd=>{
+    const x0=x(bd.from), x1=x(Math.min(bd.to,SR.endMin));
+    return`<rect x="${x0.toFixed(1)}" y="${PT}" width="${Math.max(0.5,x1-x0).toFixed(1)}" height="${IH}" fill="${bd.col}" opacity="${bd.bias==='NEUTRAL'?0.05:0.14}">
+      <title>${mtt(bd.from)}–${mtt(Math.min(bd.to,SR.endMin))} · ${bd.ph} hour · ${bd.bias}</title></rect>`;
+  }).join('');
+  // time axis labels
+  const span=SR.endMin-SR.startMin, step=span<=400?60:span<=800?120:180;
+  let axis='';
+  for(let m=Math.ceil(SR.startMin/step)*step;m<=SR.endMin;m+=step){
+    axis+=`<line x1="${x(m).toFixed(1)}" y1="${PT}" x2="${x(m).toFixed(1)}" y2="${PT+IH}" stroke="var(--bd)" stroke-width="0.5" stroke-dasharray="2,4"/>
+           <text x="${x(m).toFixed(1)}" y="${PT+IH+14}" fill="var(--tx3)" font-size="9" text-anchor="middle">${mtt(m)}</text>`;
+  }
+  const lonPath=pts.map((p,i)=>(i?'L':'M')+x(p.m).toFixed(1)+','+yLon(p.lon).toFixed(1)).join(' ');
+  const latPath=pts.map((p,i)=>(i?'L':'M')+x(p.m).toFixed(1)+','+yLat(p.lat).toFixed(1)).join(' ');
+  const cm=parseFloat(S.time)*60;
+  const nowMark=(cm>=SR.startMin&&cm<=SR.endMin)?`<line x1="${x(cm).toFixed(1)}" y1="${PT-4}" x2="${x(cm).toFixed(1)}" y2="${PT+IH}" stroke="var(--acc)" stroke-width="1.3"/><text x="${x(cm).toFixed(1)}" y="${PT-6}" fill="var(--acc)" font-size="9" text-anchor="middle">▼ ${mtt(cm)}</text>`:'';
+  const zeroLat=`<line x1="${PLm}" y1="${yLat(0).toFixed(1)}" x2="${PLm+IW}" y2="${yLat(0).toFixed(1)}" stroke="var(--tx3)" stroke-width="0.5" stroke-dasharray="1,4"/>`;
+  const ivSel=[1,5,15,30,60].map(o=>`<option value="${o}" ${iv===o?'selected':''}>${o} min</option>`).join('');
+  const plSel=Object.keys(PC).map(p=>`<option value="${p}" ${body===p?'selected':''}>${p}</option>`).join('');
+  const legend=[['BULLISH','var(--bull)'],['BEARISH','var(--bear)'],['VOLATILE','var(--sun)'],['NEUTRAL','var(--tx3)']]
+    .map(([l,c])=>`<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:${c};opacity:.55;border-radius:2px;display:inline-block"></span>${l}</span>`).join(' ');
+  return`
+  <div class="pnl">
+    <div class="ph" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
+      <span><span class="dot"></span>◈ BIAS CHART — ${body.toUpperCase()} LONGITUDE / LATITUDE · ${SR.label} · forecast bands per ${iv}-min slot</span>
+      <span style="display:flex;gap:6px;align-items:center">
+        <select class="ci" style="font-size:11px;padding:2px 4px" onchange="gs({ovPlanet:this.value})">${plSel}</select>
+        <select class="ci" style="font-size:11px;padding:2px 4px" onchange="gs({ovInt:this.value})">${ivSel}</select>
+      </span>
+    </div>
+    <div class="pb">
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
+        <rect x="${PLm}" y="${PT}" width="${IW}" height="${IH}" fill="var(--bg2)" stroke="var(--bd)"/>
+        ${bandRects}${axis}${zeroLat}
+        <path d="${latPath}" fill="none" stroke="${PC.Moon}" stroke-width="1.1" stroke-dasharray="4,3" opacity="0.85"/>
+        <path d="${lonPath}" fill="none" stroke="var(--acc)" stroke-width="1.6"/>
+        ${nowMark}
+        <text x="${PLm-6}" y="${(yLon(lonMax)+3).toFixed(1)}" fill="var(--acc)" font-size="9" text-anchor="end">${dmsC(n360(lonMax)%30)} ${SABB[Math.floor(n360(lonMax)/30)]}</text>
+        <text x="${PLm-6}" y="${(yLon(lonMin)+3).toFixed(1)}" fill="var(--acc)" font-size="9" text-anchor="end">${dmsC(n360(lonMin)%30)} ${SABB[Math.floor(n360(lonMin)/30)]}</text>
+        <text x="${PLm+IW+6}" y="${(yLat(latAbs)+8).toFixed(1)}" fill="${PC.Moon}" font-size="9">+${latAbs.toFixed(1)}°</text>
+        <text x="${PLm+IW+6}" y="${yLat(-latAbs).toFixed(1)}" fill="${PC.Moon}" font-size="9">−${latAbs.toFixed(1)}°</text>
+        <text x="${PLm+IW+6}" y="${yLat(0).toFixed(1)}" fill="var(--tx3)" font-size="9">lat 0°</text>
+      </svg>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:10px;color:var(--tx2);margin-top:6px;align-items:center">
+        <span style="color:var(--acc);font-weight:700">— longitude (sidereal)</span>
+        <span style="color:${PC.Moon};font-weight:700">┄ latitude (shar)</span>
+        ${legend}
+      </div>
+      <div style="font-size:10px;color:var(--tx3);margin-top:4px">
+        Bands = planetary-hour bias per slot, aligned to your ${iv}-min chart timeframe. Pick any PAST date in the header to backtest: the full engine recomputes for that day, so bands show the bias that was forecast — compare against the actual ${iv}-min candles. 24H session covers US markets / commodities round the clock.
+      </div>
+    </div>
+  </div>`;
+}
 function tOverview(){
   const D=DATA,b=D.bias;
   const bCol=b.bias==='BULLISH'?'var(--bull)':b.bias==='BEARISH'?'var(--bear)':'var(--neut)';
@@ -5529,12 +5720,20 @@ function tOverview(){
   })();
   const curHB=curPH?hourBias(curPH.planet,D.planets):{bias:'N/A',col:'var(--tx3)',arrow:'?',ind:''};
   const curPl=curPH?D.planets.find(p=>p.name===curPH.planet):null;
+  // Moon's nakshatra-swami (nak lord) & rashi-swami (sign lord) + their bias
+  const _mSw=D.moon||D.planets.find(p=>p.name==='Moon');
+  const _nakSw=_mSw?_mSw.nakL:null, _rasSw=_mSw?SLRD[_mSw.s]:null;
+  const _nakHB=_nakSw?hourBias(_nakSw,D.planets):null;
+  const _rasHB=_rasSw?hourBias(_rasSw,D.planets):null;
+  const swChip=(lbl,name,hb)=>name?`<div><span style="font-size:10.5px;color:var(--tx3)">${lbl}</span> <b style="color:${pc(name)};font-size:13px">${name}</b> <span style="color:${hb.col};font-size:10px;font-weight:700" title="${hb.ind}">${hb.arrow} ${hb.bias}</span></div>`:'';
 
   return`
 <div class="pnl" style="padding:6px 12px;display:flex;gap:20px;align-items:center;flex-wrap:wrap">
   <div style="font-size:10.5px;color:var(--acc);letter-spacing:.1em;font-weight:700">▦ ${S.date}</div>
   <div><span style="font-size:10.5px;color:var(--tx3)">WEEKDAY</span> <b style="color:var(--tx0);font-size:13px">${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date(S.date+"T00:00:00").getDay()]}</b></div>
   <div><span style="font-size:10.5px;color:var(--tx3)">DAY LORD</span> <b style="color:${pc(D.dayLord)};font-size:13px">${D.dayLord}</b></div>
+  ${swChip('NAK SWAMI ('+(_mSw?_mSw.nak.slice(0,9):'')+')',_nakSw,_nakHB)}
+  ${swChip('RASHI SWAMI ('+(_mSw?_mSw.sign.slice(0,3):'')+')',_rasSw,_rasHB)}
   <div><span style="font-size:10.5px;color:var(--tx3)">LAGNA</span> <b style="color:var(--acc)">${D.ascSign.sign} ${dmsC(D.ascSign.deg)}</b></div>
   <div><span style="font-size:10.5px;color:var(--tx3)">SUNRISE</span> <b style="color:var(--tx1)">${mtt(D.rMin)}</b> &middot; <span style="font-size:10.5px;color:var(--tx3)">SUNSET</span> <b style="color:var(--tx1)">${mtt(D.sMin)}</b></div>
 </div>
@@ -5605,6 +5804,10 @@ function tOverview(){
       </div>
     </div>
   </div>
+  <div id="ovbcHost">${_ovbcPts.key===ovBiasKey()
+    ? ovBiasChart(D)
+    : (setTimeout(()=>{const el=document.getElementById('ovbcHost'); if(el&&DATA) el.innerHTML=ovBiasChart(DATA);},20),
+       '<div class="pnl"><div class="pb" style="color:var(--tx3);font-size:11px;padding:14px">◈ BIAS CHART — computing ephemeris slots…</div></div>')}</div>
 </div>
 <div style="display:flex;flex-direction:column;gap:10px">
   <div class="pnl">
@@ -8161,11 +8364,12 @@ function tTiming(){
   const D=DATA;
   const _hw=new Date(S.date+"T00:00:00").getDay(), _hp=D.ruleX?D.ruleX.horaNow.paksha:(D.rules?D.rules.tithi.paksha:'Shukla');
   const curMin=parseFloat(S.time)*60;
+  const SR=sessionRange();
   return`
 <div style="display:flex;flex-direction:column;gap:10px">
   <div class="pnl">
     <div class="ph">
-      <span class="dot"></span>15-MIN INTRADAY TIMING · ${S.date} · Sunrise ${mtt(D.rMin)} · Sunset ${mtt(D.sMin)} · Planet Hour = ${D.hlMin.toFixed(1)} min
+      <span class="dot"></span>15-MIN INTRADAY TIMING · ${S.date} · ${SR.label} ${mtt(SR.startMin)}→${mtt(SR.endMin)} · Sunrise ${mtt(D.rMin)} · Sunset ${mtt(D.sMin)}
     </div>
     <div class="ts">
       <table class="tbl">
@@ -8202,12 +8406,12 @@ function tTiming(){
     </div>
   </div>
   <div class="pnl">
-    <div class="ph"><span class="dot"></span>PLANETARY HOUR SCHEDULE · ${S.date} · Market Hours Only</div>
+    <div class="ph"><span class="dot"></span>PLANETARY HOUR SCHEDULE · ${S.date} · ${SR.is24?'Full Day 00:00–24:00 (☀ day-hours · ☾ night-hours)':'Market Hours Only'}</div>
     <div class="ts">
       <table class="tbl">
         <thead><tr><th>Start</th><th>End</th><th>Dur.</th><th>Hour Lord</th><th>Sign · Nak · House</th><th>Sub Lord</th><th>Market Bias</th><th>Indication</th></tr></thead>
         <tbody>
-          ${D.phpHours.filter(h=>h.em>555&&h.sm<930).map(h=>{
+          ${D.phpHours.filter(h=>SR.is24?true:(h.em>SR.startMin&&h.sm<SR.endMin)).map(h=>{
             const pl=D.planets.find(p=>p.name===h.planet);
             const hb=hourBias(h.planet,D.planets);
             const cur=curMin>=h.sm&&curMin<h.em;
@@ -8216,7 +8420,7 @@ function tTiming(){
               <td style="font-family:monospace;color:${cur?'var(--acc)':'var(--tx1)'};font-weight:${cur?700:400}">${mtt(h.sm)}${cur?' ◄':''}</td>
               <td style="font-family:monospace;color:var(--tx2)">${mtt(h.em)}</td>
               <td style="color:var(--tx3)">${(h.em-h.sm).toFixed(1)}m</td>
-              <td style="color:${PC[h.planet]};font-weight:700;font-size:13px">${h.planet}</td>
+              <td style="color:${PC[h.planet]};font-weight:700;font-size:13px">${h.planet} <span style="color:var(--tx3);font-weight:400;font-size:10px">${h.seg||''}</span></td>
               <td style="font-size:11.5px;color:var(--tx1)">${pl?`${pl.sign} · ${pl.nak.slice(0,9)} · H${pl.h}`:'-'}</td>
               <td style="color:${PC[pl?.sub]||'var(--tx3)'};font-size:11.5px">${pl?.sub||'-'}</td>
               <td style="font-weight:700;color:${hb.col}">${hb.arrow} ${hb.bias}</td>
@@ -10067,7 +10271,8 @@ function tKundali(){
   const t5 = S.time5 || S.time || '9.25';
   const mom = computeMomentChart(S.date, parseFloat(t5)||9.25, S.ayMode);
   // 5-min time options
-  const opts=[]; for(let m=9*60+15;m<=15*60+30;m+=5){const v=(m/60).toString();opts.push(`<option value="${v}" ${Math.abs(parseFloat(t5)-m/60)<0.001?'selected':''}>${mtt(m)}</option>`);}
+  const SRk=sessionRange();
+  const opts=[]; for(let m=SRk.startMin;m<=SRk.endMin;m+=5){const v=(m/60).toString();opts.push(`<option value="${v}" ${Math.abs(parseFloat(t5)-m/60)<0.001?'selected':''}>${mtt(m)}</option>`);}
   const natalRows = nat.planets.map(p=>`<tr><td style="color:${PC[p.name]};font-weight:700">${p.abbr} ${p.name}</td><td>${p.sign} ${dmsC(p.deg)}</td><td>H${p.h}</td><td>${p.nak}</td><td>${p.retro?'<span style="color:var(--bear)">℞</span>':''}</td></tr>`).join('');
   const tr = (D.natalTransit&&D.natalTransit.hits||[]).map(h=>`<tr><td style="color:${PC[h.planet]};font-weight:700">${h.planet}</td><td>natal H${h.house} ${BULL_HOUSES.has(h.house)?'<span style="color:var(--bull)">(bull)</span>':BEAR_HOUSES.has(h.house)?'<span style="color:var(--bear)">(bear)</span>':''}</td><td style="font-weight:700;color:${h.s>0?'var(--bull)':'var(--bear)'}">${h.s>0?'+':''}${h.s}</td><td style="font-size:11.5px;color:var(--tx2)">${h.note}</td></tr>`).join('');
   const slots=D.slots5||[];
@@ -10102,7 +10307,7 @@ function tKundali(){
       </div>
     </div>
   </div>
-  <div class="pnl"><div class="ph"><span class="dot"></span>⏱ INTRADAY 5-MIN LAGNA / MOON TRANSITIONS · 09:15→15:30 (⟲ = inflection: lagna or nakshatra change)</div>
+  <div class="pnl"><div class="ph"><span class="dot"></span>⏱ INTRADAY 5-MIN LAGNA / MOON TRANSITIONS · ${mtt(SRk.startMin)}→${mtt(SRk.endMin)} (⟲ = inflection: lagna or nakshatra change)</div>
     <div class="ts" style="max-height:340px;overflow:auto"><table class="tbl"><thead><tr><th>Time</th><th>Lagna</th><th>Moon Rashi</th><th>Nakshatra</th><th>Sub Lord</th><th>Pada</th></tr></thead><tbody>${slotRows}</tbody></table></div>
   </div>
 </div>`;
@@ -11025,7 +11230,7 @@ function tGann(){
 // ═══════════════════════════════════════════════════════════════════
 function rEvents(){
   const b=(id,evt,k)=>{const e=document.getElementById(id);if(e)e.addEventListener(evt,ev=>gs({[k]:ev.target.value}));};
-  b('iD','change','date');b('iT','change','time');
+  b('iD','change','date');b('iT','change','time');b('iSES','change','session');
   b('iNO','change','niftyOpen');b('iNC','change','niftyPC');
   b('iBO','change','bnOpen');b('iBC','change','bnPC');
   b('iNQO','change','nasdaqOpen');b('iNQC','change','nasdaqPC');
