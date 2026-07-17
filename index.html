@@ -5103,9 +5103,11 @@ function tV44(){
 window.PLAN = window.PLAN || {ohlc:{}, status:'idle', err:'', loadedKey:null, view:null, data:null, win:null, panMode:false, maximized:false, minimized:false, _rb:false};
 const PLAN_INST = {'NIFTY 50':'^NSEI','BANK NIFTY':'^NSEBANK','SENSEX':'^BSESN','NIFTY IT':'^CNXIT','NIFTY MIDCAP 100':'NIFTY_MIDCAP_100.NS',
   'NASDAQ':'^IXIC','SPX':'^GSPC','DOW':'^DJI',
-  'XAUUSD · GOLD':'XAUUSD=X','XAGUSD · SILVER':'XAGUSD=X','XNGUSD · NAT GAS':'NG=F','USOIL · WTI CRUDE':'CL=F'};
-// Yahoo fallbacks: if the FX-style spot symbol is unavailable on a proxy, retry with the futures contract
-const PLAN_INST_FB = {'XAUUSD · GOLD':'GC=F','XAGUSD · SILVER':'SI=F'};
+  'XAUUSD · GOLD':'GC=F','XAGUSD · SILVER':'SI=F','XNGUSD · NAT GAS':'NG=F','USOIL · WTI CRUDE':'CL=F'};
+// Yahoo fallbacks. Note: the FX-style spot symbols (XAUUSD=X / XAGUSD=X)
+// went dead on Yahoo (404 delisted), so the futures contracts are now the
+// primaries and spot is kept only as a fallback should it come back.
+const PLAN_INST_FB = {'XAUUSD · GOLD':'XAUUSD=X','XAGUSD · SILVER':'XAGUSD=X'};
 // ── F&O universe (from fno.csv) → Yahoo Finance tickers. NSE cash symbols use the
 //    .NS suffix; indices use their ^ / _.NS proxies. Merged into PLAN_INST below so
 //    every instrument dropdown (Planet Lat/Lon + Vyapaar Ratna charts) can select them.
@@ -5638,7 +5640,14 @@ async function ovbcLoadPrice(force){
   if(!prevBars){ const el0=document.getElementById('ovbcHost'); if(el0&&DATA) el0.innerHTML=ovBiasChart(DATA); }
   const iv=Math.max(1,parseInt(S.ovInt,10)||15);
   const ivStr=iv<=1?'1m':iv<=5?'5m':iv<=15?'15m':iv<=30?'30m':'60m';
-  const sym=PLAN_INST[ovInstKey()]||PLAN_INST_FB[ovInstKey()]||'^NSEI';
+  // symbol chain: primary, then Yahoo fallback (e.g. XAUUSD=X is dead on
+  // Yahoo — 404 'delisted' — while the GC=F futures feed works)
+  const syms=[PLAN_INST[ovInstKey()],PLAN_INST_FB[ovInstKey()]].filter(Boolean);
+  if(!syms.length) syms.push('^NSEI');
+  // remember which symbol actually served data, so auto-refreshes don't
+  // re-pay the failover cost of a dead primary every 60s
+  const _pref=(window._ovbcSymPref||{})[ovInstKey()];
+  if(_pref && syms.includes(_pref)) syms.sort((a,b)=>(a===_pref?-1:0)-(b===_pref?-1:0));
   // 1m payloads are huge (thousands of rows) and choke the free proxies —
   // request a tight window around the selected day for 1m, wider otherwise
   const _d0=Math.floor(planMs(S.date)/1000);
@@ -5664,7 +5673,7 @@ async function ovbcLoadPrice(force){
   // Race ALL proxies concurrently — first one that returns parseable bars
   // wins. Sequential retries took up to 40s when the first proxies were
   // down; the race answers in the latency of the fastest healthy proxy.
-  const tryIv=(ivS)=>{
+  const tryIv=(ivS,sym)=>{
     // 30s cache-buster bucket: the CORS proxies cache by full URL, which
     // otherwise keeps serving the same stale candles all session
     const target=`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?period1=${p1}&period2=${p2}&interval=${ivS}&ck=${Math.floor(Date.now()/30000)}`;
@@ -5695,12 +5704,19 @@ async function ovbcLoadPrice(force){
   // showing nothing. The note tells the user what they're actually seeing.
   const chain=[ivStr]; if(ivStr==='1m') chain.push('5m'); if(ivStr!=='60m') chain.push('60m');
   let ok=false;
+  outer:
   for(const ivS of chain){
-    try{
-      window.OVBC.bars=await tryIv(ivS); window.OVBC.status='ready';
-      if(ivS!==ivStr) window.OVBC.note=ivS+' bars shown — '+ivStr+' feed unavailable right now (proxy limits)';
-      ok=true; break;
-    }catch(e){ window.OVBC.err=((e&&e.message)||'fetch failed'); }
+    for(const sym of syms){
+      try{
+        window.OVBC.bars=await tryIv(ivS,sym); window.OVBC.status='ready';
+        const notes=[];
+        if(ivS!==ivStr) notes.push(ivS+' bars shown — '+ivStr+' feed unavailable right now');
+        if(sym!==PLAN_INST[ovInstKey()]) notes.push('via '+sym+' (primary symbol has no Yahoo data)');
+        window.OVBC.note=notes.join(' · ');
+        (window._ovbcSymPref=window._ovbcSymPref||{})[ovInstKey()]=sym;
+        ok=true; break outer;
+      }catch(e){ window.OVBC.err=((e&&e.message)||'fetch failed'); }
+    }
   }
   if(!ok) window.OVBC.status='error';
   if(window.OVBC.key!==ovPriceKey()) return; // selection changed mid-flight
