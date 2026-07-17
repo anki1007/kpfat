@@ -5690,7 +5690,7 @@ function ovBiasChart(D){
   if(pts.length<2) return '';
   // bias per slot from the (cheap) hour-lord condition at the selected moment
   pts=pts.map(p=>({...p,hb:hourBias(p.ph,D.planets)}));
-  const W=980,H=260,PLm=52,PRm=52,PT=16,PB=34,IW=W-PLm-PRm,IH=H-PT-PB;
+  const W=1560,H=430,PLm=62,PRm=62,PT=20,PB=40,IW=W-PLm-PRm,IH=H-PT-PB;
   const x=m=>PLm+(m-SR.startMin)/Math.max(1,SR.endMin-SR.startMin)*IW;
   const lonMin=Math.min(...pts.map(p=>p.lon)), lonMax=Math.max(...pts.map(p=>p.lon));
   const lonPad=Math.max(0.05,(lonMax-lonMin)*0.08);
@@ -5715,12 +5715,12 @@ function ovBiasChart(D){
   let axis='';
   for(let m=Math.ceil(SR.startMin/step)*step;m<=SR.endMin;m+=step){
     axis+=`<line x1="${x(m).toFixed(1)}" y1="${PT}" x2="${x(m).toFixed(1)}" y2="${PT+IH}" stroke="var(--bd)" stroke-width="0.5" stroke-dasharray="2,4"/>
-           <text x="${x(m).toFixed(1)}" y="${PT+IH+14}" fill="var(--tx3)" font-size="9" text-anchor="middle">${mtt(m)}</text>`;
+           <text x="${x(m).toFixed(1)}" y="${PT+IH+14}" fill="var(--tx3)" font-size="12" text-anchor="middle">${mtt(m)}</text>`;
   }
   const lonPath=pts.map((p,i)=>(i?'L':'M')+x(p.m).toFixed(1)+','+yLon(p.lon).toFixed(1)).join(' ');
   const latPath=pts.map((p,i)=>(i?'L':'M')+x(p.m).toFixed(1)+','+yLat(p.lat).toFixed(1)).join(' ');
   const cm=parseFloat(S.time)*60;
-  const nowMark=(cm>=SR.startMin&&cm<=SR.endMin)?`<line x1="${x(cm).toFixed(1)}" y1="${PT-4}" x2="${x(cm).toFixed(1)}" y2="${PT+IH}" stroke="var(--acc)" stroke-width="1.3"/><text x="${x(cm).toFixed(1)}" y="${PT-6}" fill="var(--acc)" font-size="9" text-anchor="middle">▼ ${mtt(cm)}</text>`:'';
+  const nowMark=(cm>=SR.startMin&&cm<=SR.endMin)?`<line x1="${x(cm).toFixed(1)}" y1="${PT-4}" x2="${x(cm).toFixed(1)}" y2="${PT+IH}" stroke="var(--acc)" stroke-width="1.3"/><text x="${x(cm).toFixed(1)}" y="${PT-6}" fill="var(--acc)" font-size="12" text-anchor="middle">▼ ${mtt(cm)}</text>`:'';
   const zeroLat=`<line x1="${PLm}" y1="${yLat(0).toFixed(1)}" x2="${PLm+IW}" y2="${yLat(0).toFixed(1)}" stroke="var(--tx3)" stroke-width="0.5" stroke-dasharray="1,4"/>`;
   // ── price candles of the selected instrument (async-loaded) ──
   const PK=ovPriceKey();
@@ -5740,8 +5740,8 @@ function ovBiasChart(D){
       return`<line x1="${cx.toFixed(1)}" y1="${yP(b.h).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${yP(b.l).toFixed(1)}" stroke="${col}" stroke-width="0.8"/>
         <rect x="${(cx-cw/2).toFixed(1)}" y="${top.toFixed(1)}" width="${cw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${col}" opacity="0.92"><title>${mtt(b.m)} · O ${b.o.toFixed(1)} H ${b.h.toFixed(1)} L ${b.l.toFixed(1)} C ${b.c.toFixed(1)}</title></rect>`;
     }).join('');
-    priceAxis=`<text x="${PLm+4}" y="${PT+10}" fill="var(--tx2)" font-size="9">${pHi.toFixed(1)}</text>
-      <text x="${PLm+4}" y="${PT+IH-3}" fill="var(--tx2)" font-size="9">${pLo.toFixed(1)}</text>`;
+    priceAxis=`<text x="${PLm+4}" y="${PT+10}" fill="var(--tx2)" font-size="12">${pHi.toFixed(1)}</text>
+      <text x="${PLm+4}" y="${PT+IH-3}" fill="var(--tx2)" font-size="12">${pLo.toFixed(1)}</text>`;
     priceStatus=_ov.note?`<span style="color:var(--sun)">⚠ ${_ov.note}</span>`:`<span style="color:var(--bull)">● ${bars.length} bars</span>`;
   }
   else if(_ov.key===PK && _ov.status==='loading') priceStatus='<span style="color:var(--acc)">⏳ fetching '+ovInstKey()+' price…</span>';
@@ -5772,11 +5772,11 @@ function ovBiasChart(D){
         <path d="${lonPath}" fill="none" stroke="var(--acc)" stroke-width="1.2" stroke-dasharray="7,3" opacity="0.85"/>
         ${candleSvg}${priceAxis}
         ${nowMark}
-        <text x="${PLm-6}" y="${(yLon(lonMax)+3).toFixed(1)}" fill="var(--acc)" font-size="9" text-anchor="end">${dmsC(n360(lonMax)%30)} ${SABB[Math.floor(n360(lonMax)/30)]}</text>
-        <text x="${PLm-6}" y="${(yLon(lonMin)+3).toFixed(1)}" fill="var(--acc)" font-size="9" text-anchor="end">${dmsC(n360(lonMin)%30)} ${SABB[Math.floor(n360(lonMin)/30)]}</text>
-        <text x="${PLm+IW+6}" y="${(yLat(latAbs)+8).toFixed(1)}" fill="${PC.Moon}" font-size="9">+${latAbs.toFixed(1)}°</text>
-        <text x="${PLm+IW+6}" y="${yLat(-latAbs).toFixed(1)}" fill="${PC.Moon}" font-size="9">−${latAbs.toFixed(1)}°</text>
-        <text x="${PLm+IW+6}" y="${yLat(0).toFixed(1)}" fill="var(--tx3)" font-size="9">lat 0°</text>
+        <text x="${PLm-6}" y="${(yLon(lonMax)+3).toFixed(1)}" fill="var(--acc)" font-size="12" text-anchor="end">${dmsC(n360(lonMax)%30)} ${SABB[Math.floor(n360(lonMax)/30)]}</text>
+        <text x="${PLm-6}" y="${(yLon(lonMin)+3).toFixed(1)}" fill="var(--acc)" font-size="12" text-anchor="end">${dmsC(n360(lonMin)%30)} ${SABB[Math.floor(n360(lonMin)/30)]}</text>
+        <text x="${PLm+IW+6}" y="${(yLat(latAbs)+8).toFixed(1)}" fill="${PC.Moon}" font-size="12">+${latAbs.toFixed(1)}°</text>
+        <text x="${PLm+IW+6}" y="${yLat(-latAbs).toFixed(1)}" fill="${PC.Moon}" font-size="12">−${latAbs.toFixed(1)}°</text>
+        <text x="${PLm+IW+6}" y="${yLat(0).toFixed(1)}" fill="var(--tx3)" font-size="12">lat 0°</text>
       </svg>
       <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:10px;color:var(--tx2);margin-top:6px;align-items:center">
         <span style="font-weight:700"><span style="color:var(--bull)">▮</span><span style="color:var(--bear)">▮</span> ${ovInstKey()} ${iv}-min candles</span>
@@ -5826,6 +5826,10 @@ function tOverview(){
   <div><span style="font-size:10.5px;color:var(--tx3)">LAGNA</span> <b style="color:var(--acc)">${D.ascSign.sign} ${dmsC(D.ascSign.deg)}</b></div>
   <div><span style="font-size:10.5px;color:var(--tx3)">SUNRISE</span> <b style="color:var(--tx1)">${mtt(D.rMin)}</b> &middot; <span style="font-size:10.5px;color:var(--tx3)">SUNSET</span> <b style="color:var(--tx1)">${mtt(D.sMin)}</b></div>
 </div>
+<div id="ovbcHost" style="margin:10px 0">${_ovbcPts.key===ovBiasKey()
+  ? ovBiasChart(D)
+  : (setTimeout(()=>{const el=document.getElementById('ovbcHost'); if(el&&DATA) el.innerHTML=ovBiasChart(DATA);},20),
+     '<div class="pnl"><div class="pb" style="color:var(--tx3);font-size:11px;padding:14px">◈ BIAS CHART — computing ephemeris slots…</div></div>')}</div>
 <div class="g2" style="align-items:start">
 <div style="display:flex;flex-direction:column;gap:10px">
   <div class="pnl" style="border-color:${bCol}55">
@@ -5893,10 +5897,6 @@ function tOverview(){
       </div>
     </div>
   </div>
-  <div id="ovbcHost">${_ovbcPts.key===ovBiasKey()
-    ? ovBiasChart(D)
-    : (setTimeout(()=>{const el=document.getElementById('ovbcHost'); if(el&&DATA) el.innerHTML=ovBiasChart(DATA);},20),
-       '<div class="pnl"><div class="pb" style="color:var(--tx3);font-size:11px;padding:14px">◈ BIAS CHART — computing ephemeris slots…</div></div>')}</div>
 </div>
 <div style="display:flex;flex-direction:column;gap:10px">
   <div class="pnl">
