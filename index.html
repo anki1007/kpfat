@@ -4354,7 +4354,7 @@ let S={date:todayStr(),time:nowTimeIST(),
        spxPDH:'',spxPDL:'',spxPWH:'',spxPWL:'',spxPMH:'',spxPML:'',
        tab:'overview',ayMode:'lahiri',gannAnchor:'open',loc:'Mumbai',
        session:'mkt',ovInt:'15',ovInst:'NIFTY 50',
-       gannInst:'NIFTY 50',gannGRange:'6mo',gannCycle:0,
+       gannInst:'NIFTY 50',gannGRange:'5y',gannCycle:0,gannFromY:null,gannToY:null,
        gannPlanets:'Sun,Mars,Jupiter,Saturn',gannAspBodies:'Sun,Mars,Jupiter,Saturn',
        gannShowAsp:true,gannHelio:false,
        spFrom:'',spTo:'',time5:'',calYear:0,calMonth:0};
@@ -11797,7 +11797,7 @@ const GANN_BODIES=['Sun','Moon','Mercury','Venus','Mars','Jupiter','Saturn','Ura
 const GANN_ASPECTS=[{d:0,g:'☌',c:'#d99a00'},{d:45,g:'∠',c:'#d97400'},{d:90,g:'□',c:'#d83a54'},
   {d:120,g:'△',c:'#1f9d55'},{d:135,g:'⚼',c:'#8f66d6'},{d:180,g:'☍',c:'#1596b8'}];
 function gannInstKey(){ return S.gannInst||'NIFTY 50'; }
-function gannGRange(){ return S.gannGRange||'3mo'; }
+function gannGRange(){ return '5y'; } // always pull max history; view window is separate
 function gannPlanetSet(){ return (S.gannPlanets||'').split(',').filter(Boolean); }
 function gannAspSet(){ return (S.gannAspBodies||'').split(',').filter(Boolean); }
 function gannPriceKey(){ return [gannInstKey(),gannGRange()].join('|'); }
@@ -11824,29 +11824,69 @@ function gannBodyLon(body,J,helio){
   if(body==='Chiron') return geoLon('Chiron',J);
   return geoLon(body,J);
 }
+// view window (absolute years) — planet lines & aspects are pure ephemeris,
+// so the window can run from decades back to decades ahead regardless of
+// where price data exists. Defaults: 2y back → 1y forward of the app date.
+function gannBaseYear(){ return parseInt((S.date||'2026').slice(0,4),10)||2026; }
+function gannFromY(){ return (S.gannFromY!=null)?S.gannFromY:gannBaseYear()-2; }
+function gannToY(){ return (S.gannToY!=null)?S.gannToY:gannBaseYear()+1; }
+function gannViewMs(){ return {v0:Date.UTC(gannFromY(),0,1), v1:Date.UTC(gannToY(),11,31)}; }
+function gannSetView(fromY,toY){
+  const lo=gannBaseYear()-25, hi=gannBaseYear()+25;
+  fromY=Math.max(lo,Math.min(hi-1,fromY)); toY=Math.max(fromY+1,Math.min(hi,toY));
+  gs({gannFromY:fromY,gannToY:toY});
+}
+function gannScrubDrag(which,ev){
+  const rail=document.getElementById('gann-scrub-rail'); if(!rail) return;
+  const lo=gannBaseYear()-25, hi=gannBaseYear()+25, span=hi-lo;
+  const move=e=>{ const cx=(e.touches?e.touches[0].clientX:e.clientX); const r=rail.getBoundingClientRect();
+    let f=Math.max(0,Math.min(1,(cx-r.left)/r.width)); const yr=Math.round(lo+f*span);
+    if(which==='a') gannSetView(yr,gannToY()); else gannSetView(gannFromY(),yr); };
+  const up=()=>{ ['mousemove','mouseup','touchmove','touchend'].forEach(evn=>window.removeEventListener(evn,evn.startsWith('mouse')?move:up)); window.removeEventListener('mousemove',move);window.removeEventListener('mouseup',up);window.removeEventListener('touchmove',move);window.removeEventListener('touchend',up); };
+  window.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
+  window.addEventListener('touchmove',move,{passive:false}); window.addEventListener('touchend',up);
+  ev.preventDefault();
+}
+function gannTimeline(){
+  const lo=gannBaseYear()-25, hi=gannBaseYear()+25, span=hi-lo;
+  const fy=gannFromY(), ty=gannToY();
+  const years=[]; for(let y=lo;y<=hi;y++) years.push(y);
+  const sel=(cur,onc)=>`<select onchange="${onc}" class="ci" style="font-size:11px;padding:1px 4px">${years.map(y=>`<option value="${y}" ${y===cur?'selected':''}>${y}</option>`).join('')}</select>`;
+  const af=(fy-lo)/span*100, bf=(ty-lo)/span*100, tf=(gannBaseYear()-lo)/span*100;
+  const presets=[['2y↔1y',gannBaseYear()-2,gannBaseYear()+1],['5y↔5y',gannBaseYear()-5,gannBaseYear()+5],['↔20y fwd',gannBaseYear(),gannBaseYear()+20],['10y back',gannBaseYear()-10,gannBaseYear()]];
+  return `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 12px;border-bottom:1px solid var(--bd);font-size:10.5px">
+    <span style="color:var(--acc);font-weight:700">VIEW</span>
+    ${sel(fy,`gannSetView(+this.value,${ty})`)}<span style="color:var(--tx3)">→</span>${sel(ty,`gannSetView(${fy},+this.value)`)}
+    <div id="gann-scrub-rail" style="position:relative;flex:1;min-width:240px;height:20px;background:var(--bg3);border-radius:10px;cursor:pointer">
+      <div style="position:absolute;top:0;bottom:0;width:1px;background:var(--neut2);left:${tf.toFixed(1)}%" title="today"></div>
+      <div style="position:absolute;top:3px;bottom:3px;left:${af.toFixed(1)}%;width:${Math.max(1,bf-af).toFixed(1)}%;background:var(--acc);opacity:.3;border-radius:8px"></div>
+      <div onmousedown="gannScrubDrag('a',event)" ontouchstart="gannScrubDrag('a',event)" style="position:absolute;top:0;bottom:0;left:${af.toFixed(1)}%;width:11px;margin-left:-5px;background:var(--acc);border-radius:5px;cursor:ew-resize"></div>
+      <div onmousedown="gannScrubDrag('b',event)" ontouchstart="gannScrubDrag('b',event)" style="position:absolute;top:0;bottom:0;left:${bf.toFixed(1)}%;width:11px;margin-left:-5px;background:var(--acc);border-radius:5px;cursor:ew-resize"></div>
+    </div>
+    <span style="color:var(--acc);white-space:nowrap;font-weight:700">${fy} → ${ty} · ${ty-fy}y</span>
+    ${presets.map(([l,a,b])=>`<span onclick="gannSetView(${a},${b})" style="cursor:pointer;padding:1px 7px;border-radius:8px;border:1px solid var(--bd2);color:var(--tx2)">${l}</span>`).join('')}
+  </div>`;
+}
 function gannAstroChart(){
   const PK=gannPriceKey(), _px=window.GANNPX||{};
   if(_px.key!==PK) setTimeout(gannLoadPrice,10);
   const helio=!!S.gannHelio;
-  // toggle chips
-  const chip=(name,on,key,list)=>{
+  const chip=(name,on,key)=>{
     const cur=(S[key]||'').split(',').filter(Boolean);
     const next=on?cur.filter(x=>x!==name):[...cur,name];
     return `<span onclick="gs({${key}:'${next.join(',')}'})" style="cursor:pointer;user-select:none;display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:700;border:1px solid ${on?pc(name):'var(--bd2)'};background:${on?pc(name)+'22':'transparent'};color:${on?pc(name):'var(--tx3)'}">${on?'✓':'○'} ${name}</span>`;
   };
   const planetChips=GANN_BODIES.map(b=>chip(b,gannPlanetSet().includes(b),'gannPlanets')).join(' ');
   const aspChips=GANN_BODIES.map(b=>chip(b,gannAspSet().includes(b),'gannAspBodies')).join(' ');
-  const rangeSel=['6mo','1y','2y','3y'].map(r=>{const m={'6mo':'6M','1y':'1Y','2y':'2Y','3y':'3Y'}[r];return `<option value="${r}" ${gannGRange()===r?'selected':''}>${m}</option>`;}).join('');
   const instSel=Object.keys(PLAN_INST).map(k=>`<option value="${k}" ${gannInstKey()===k?'selected':''}>${k}</option>`).join('');
   const controls=`
     <div class="ph" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
       <span><span class="dot"></span>⌇ GANN ASTRO CHART — ${gannInstKey()} · ${helio?'HELIOCENTRIC':'GEOCENTRIC'} planetary price-lines &amp; aspect time-lines</span>
       <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <select class="ci" style="font-size:11px;padding:2px 4px;max-width:150px" onchange="gs({gannInst:this.value})">${instSel}</select>
-        <select class="ci" style="font-size:11px;padding:2px 4px" onchange="gs({gannGRange:this.value})">${rangeSel}</select>
         <span onclick="gs({gannHelio:${!helio}})" style="cursor:pointer;font-size:11px;padding:2px 8px;border-radius:3px;border:1px solid var(--bd2);color:${helio?'var(--acc)':'var(--tx3)'}">${helio?'☉ Helio':'⊕ Geo'}</span>
         <span onclick="gs({gannShowAsp:${!S.gannShowAsp}})" style="cursor:pointer;font-size:11px;padding:2px 8px;border-radius:3px;border:1px solid ${S.gannShowAsp?'var(--acc)':'var(--bd2)'};color:${S.gannShowAsp?'var(--acc)':'var(--tx3)'}">${S.gannShowAsp?'✓':'○'} Aspects</span>
-        <button class="ci" style="font-size:11px;padding:2px 8px;cursor:pointer" onclick="gannLoadPrice(true)" title="Reload">↻</button>
+        <button class="ci" style="font-size:11px;padding:2px 8px;cursor:pointer" onclick="gannLoadPrice(true)" title="Reload price">↻</button>
       </span>
     </div>`;
   const togglesUI=`
@@ -11854,82 +11894,105 @@ function gannAstroChart(){
       <div style="margin-bottom:4px"><span style="color:var(--acc);font-weight:700">PLANET LINES:</span> ${planetChips}</div>
       <div><span style="color:var(--acc);font-weight:700">ASPECT BODIES:</span> ${aspChips}</div>
     </div>`;
-  if(_px.status!=='ready' || !_px.bars || _px.bars.length<3){
-    const msg=_px.status==='loading'?'⏳ fetching '+gannInstKey()+' daily candles…':_px.status==='error'?'price unavailable: '+(_px.err||''):'⏳ loading…';
-    return `<div class="pnl">${controls}${togglesUI}<div class="pb" style="color:var(--tx3);font-size:12px;padding:30px;text-align:center">${msg}</div></div>`;
-  }
-  const bars=_px.bars;
-  const W=1560,H=520,PL=64,PR=58,PT=20,PB=46,IW=W-PL-PR,IH=H-PT-PB;
-  const t0=bars[0].ms, t1=bars[bars.length-1].ms;
-  const x=ms=>PL+(ms-t0)/Math.max(1,t1-t0)*IW;
-  const lows=bars.map(b=>b.l).sort((a,b)=>a-b), highs=bars.map(b=>b.h).sort((a,b)=>a-b);
-  const pLo=lows[0], pHi=highs[highs.length-1], pad=(pHi-pLo)*0.06;
+  const {v0,v1}=gannViewMs();
+  const allBars=(_px.status==='ready'&&_px.bars)?_px.bars:[];
+  const bars=allBars.filter(b=>b.ms>=v0&&b.ms<=v1);
+  const priceLoading=_px.status==='loading', priceErr=_px.status==='error';
+  const W=1560,H=560,PL=64,PR=64,PT=20,PB=52,IW=W-PL-PR,IH=H-PT-PB;
+  const x=ms=>PL+(ms-v0)/Math.max(1,v1-v0)*IW;
+  // price scale from visible bars (fallback to full history if none in view)
+  let psrc=bars.length?bars:allBars;
+  let pLo,pHi;
+  if(psrc.length){ const lows=psrc.map(b=>b.l).sort((a,b)=>a-b), highs=psrc.map(b=>b.h).sort((a,b)=>a-b); pLo=lows[0]; pHi=highs[highs.length-1]; }
+  else { pLo=0; pHi=100; }
+  const pad=(pHi-pLo)*0.06||1;
   const y=v=>{const yy=PT+IH-((v-(pLo-pad))/((pHi-pLo)+2*pad||1))*IH; return Math.max(PT,Math.min(PT+IH,yy));};
-  const cw=Math.max(1.4,Math.min(9,IW/bars.length*0.6));
-  const candles=bars.map(b=>{const cx=x(b.ms),up=b.c>=b.o,col=up?'var(--bull)':'var(--bear)';
-    const yo=y(b.o),yc=y(b.c),top=Math.min(yo,yc),bh=Math.max(1,Math.abs(yo-yc));
-    return`<line x1="${cx.toFixed(1)}" y1="${y(b.h).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${y(b.l).toFixed(1)}" stroke="${col}" stroke-width="0.7"/>
-      <rect x="${(cx-cw/2).toFixed(1)}" y="${top.toFixed(1)}" width="${cw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${col}" opacity="0.9"/>`;}).join('');
-  // price axis
+  // candles (only where price exists in the window)
+  let candles='';
+  if(bars.length){
+    const cw=Math.max(0.8,Math.min(9,IW/Math.max(1,bars.length)*0.6));
+    candles=bars.map(b=>{const cx=x(b.ms),up=b.c>=b.o,col=up?'var(--bull)':'var(--bear)';
+      const yo=y(b.o),yc=y(b.c),top=Math.min(yo,yc),bh=Math.max(1,Math.abs(yo-yc));
+      return`<line x1="${cx.toFixed(1)}" y1="${y(b.h).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${y(b.l).toFixed(1)}" stroke="${col}" stroke-width="0.6"/>
+        <rect x="${(cx-cw/2).toFixed(1)}" y="${top.toFixed(1)}" width="${cw.toFixed(1)}" height="${bh.toFixed(1)}" fill="${col}" opacity="0.85"/>`;}).join('');
+  }
+  // price grid
   let axis=''; for(let g=0;g<=4;g++){const pv=pLo+((pHi-pLo)*g)/4,gy=y(pv);
     axis+=`<line x1="${PL}" y1="${gy.toFixed(1)}" x2="${PL+IW}" y2="${gy.toFixed(1)}" stroke="var(--bd)" stroke-width="0.4" stroke-dasharray="1,5"/>
       <text x="${PL-6}" y="${(gy+4).toFixed(1)}" fill="var(--tx2)" font-size="11" text-anchor="end">${pv.toFixed(pHi>9999?0:1)}</text>`;}
-  // date axis (~6 ticks)
-  for(let i=0;i<=6;i++){const ms=t0+(t1-t0)*i/6,d=new Date(ms),lbl=(d.getUTCMonth()+1)+'/'+d.getUTCDate();
-    axis+=`<line x1="${x(ms).toFixed(1)}" y1="${PT}" x2="${x(ms).toFixed(1)}" y2="${PT+IH}" stroke="var(--bd)" stroke-width="0.4" stroke-dasharray="2,5"/>
-      <text x="${x(ms).toFixed(1)}" y="${PT+IH+16}" fill="var(--tx3)" font-size="11" text-anchor="middle">${lbl}</text>`;}
+  // ── TIME AXIS with YEAR bands + month/quarter ticks ──
+  const spanY=(v1-v0)/(365.25*86400000);
+  const y0=gannFromY(), y1=gannToY();
+  // year boundary lines + bold year labels
+  for(let yr=y0;yr<=y1;yr++){ const ms=Date.UTC(yr,0,1); if(ms<v0||ms>v1)continue; const xx=x(ms);
+    axis+=`<line x1="${xx.toFixed(1)}" y1="${PT}" x2="${xx.toFixed(1)}" y2="${PT+IH+6}" stroke="var(--bd2)" stroke-width="0.9"/>
+      <text x="${xx.toFixed(1)}" y="${PT+IH+34}" fill="var(--acc)" font-size="12" font-weight="800" text-anchor="middle">${yr}</text>`;}
+  // intra-year month/quarter ticks (skip when too dense)
+  const monStep=spanY>16?0:spanY>8?6:spanY>4?3:spanY>1.5?2:1;
+  const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  if(monStep){ for(let yr=y0;yr<=y1;yr++){ for(let mo=monStep;mo<12;mo+=monStep){ const ms=Date.UTC(yr,mo,1); if(ms<v0||ms>v1)continue; const xx=x(ms);
+    axis+=`<line x1="${xx.toFixed(1)}" y1="${PT}" x2="${xx.toFixed(1)}" y2="${PT+IH}" stroke="var(--bd)" stroke-width="0.3" stroke-dasharray="2,6"/>
+      <text x="${xx.toFixed(1)}" y="${PT+IH+16}" fill="var(--tx3)" font-size="9" text-anchor="middle">${MON[mo]}</text>`;} } }
+  // today marker
+  const todayMs=planMs((typeof todayStr==='function')?todayStr():S.date);
+  if(todayMs>=v0&&todayMs<=v1){ const xx=x(todayMs);
+    axis+=`<line x1="${xx.toFixed(1)}" y1="${PT}" x2="${xx.toFixed(1)}" y2="${PT+IH}" stroke="var(--neut2)" stroke-width="1" stroke-dasharray="4,3"/><text x="${(xx-2).toFixed(1)}" y="${PT+11}" fill="var(--neut2)" font-size="9" text-anchor="end">◄today</text>`; }
+  // adaptive sample step across the whole view (planet curves are smooth)
+  const spanDays=(v1-v0)/86400000;
+  const stepDays=Math.max(1,Math.round(spanDays/1100));
+  const times=[]; for(let ms=v0;ms<=v1;ms+=stepDays*86400000) times.push(ms);
+  const lonCache={};
+  const lonSeries=body=>{ if(lonCache[body])return lonCache[body];
+    const arr=times.map(ms=>{const dp=planISO(ms).split('-').map(Number);const J=JD(dp[0],dp[1],dp[2],9.25);return gannBodyLon(body,J,helio);});
+    lonCache[body]=arr; return arr; };
   // ── PLANETARY PRICE LINES ──
-  const cycle=(S.gannCycle&&S.gannCycle>0)?S.gannCycle:(()=>{const span=pHi-pLo;const mag=Math.pow(10,Math.floor(Math.log10(span)));return Math.max(mag,Math.round(span/mag)*mag);})();
+  const cycle=(S.gannCycle&&S.gannCycle>0)?S.gannCycle:(()=>{const span=Math.max(1,pHi-pLo);const mag=Math.pow(10,Math.floor(Math.log10(span)));return Math.max(mag,Math.round(span/mag)*mag);})();
   let planetLines='',planetLbls='';
   gannPlanetSet().forEach(body=>{
-    const col=pc(body);
-    // sample longitude per bar
-    const lonAt=bars.map(b=>{const dp=planISO(b.ms).split('-').map(Number);const J=JD(dp[0],dp[1],dp[2],9.25);return gannBodyLon(body,J,helio);});
-    // base ladder offset so lines fall inside [pLo,pHi]; draw each harmonic k
+    const col=pc(body), lon=lonSeries(body);
     const kMin=Math.floor((pLo-pad)/cycle)-1, kMax=Math.ceil((pHi+pad)/cycle)+1;
     for(let k=kMin;k<=kMax;k++){
-      const pts=bars.map((b,i)=>{const price=k*cycle+(lonAt[i]/360)*cycle; return {ms:b.ms,price};})
-        .filter(p=>p.price>=pLo-pad&&p.price<=pHi+pad);
-      if(pts.length<2) continue;
-      const path=pts.map((p,i)=>(i?'L':'M')+x(p.ms).toFixed(1)+','+y(p.price).toFixed(1)).join(' ');
-      planetLines+=`<path d="${path}" fill="none" stroke="${col}" stroke-width="1.2" opacity="0.75"/>`;
-      const last=pts[pts.length-1];
-      planetLbls+=`<text x="${(x(last.ms)+3).toFixed(1)}" y="${(y(last.price)+3).toFixed(1)}" fill="${col}" font-size="10" font-weight="700">${PA[body]}</text>`;
+      let seg=[],dp='';
+      const flush=()=>{ if(seg.length>1){ dp=seg.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' '); planetLines+=`<path d="${dp}" fill="none" stroke="${col}" stroke-width="1.1" opacity="0.7"/>`;
+        const last=seg[seg.length-1]; planetLbls+=`<text x="${(last[0]+3).toFixed(1)}" y="${(last[1]+3).toFixed(1)}" fill="${col}" font-size="10" font-weight="700">${PA[body]}</text>`; } seg=[]; };
+      for(let i=0;i<times.length;i++){ const price=k*cycle+(lon[i]/360)*cycle;
+        if(price>=pLo-pad&&price<=pHi+pad) seg.push([x(times[i]),y(price)]); else flush(); }
+      flush();
     }
   });
-  // ── ASPECT TIME-LINES ── perfections among checked aspect bodies in window
+  // ── ASPECT TIME-LINES (crossing detection — catches perfections at any step) ──
   let aspLines='';
   if(S.gannShowAsp && gannAspSet().length>=2){
-    const abodies=gannAspSet();
-    const dayMs=86400000;
+    const abodies=gannAspSet(); const lonB={}; abodies.forEach(b=>lonB[b]=lonSeries(b));
     const marks=[];
-    for(let ms=t0;ms<=t1;ms+=dayMs){
-      const dp=planISO(ms).split('-').map(Number);const J=JD(dp[0],dp[1],dp[2],9.25);
-      const lon={}; abodies.forEach(b=>lon[b]=gannBodyLon(b,J,helio));
-      for(let a=0;a<abodies.length;a++)for(let b2=a+1;b2<abodies.length;b2++){
-        let sep=Math.abs(n360(lon[abodies[a]]-lon[abodies[b2]])); if(sep>180)sep=360-sep;
-        for(const asp of GANN_ASPECTS){ if(Math.abs(sep-asp.d)<=0.4){
-          marks.push({ms,a:abodies[a],b:abodies[b2],asp}); } }
+    for(let a=0;a<abodies.length;a++)for(let b2=a+1;b2<abodies.length;b2++){
+      const A=lonB[abodies[a]],B=lonB[abodies[b2]];
+      const sepAt=i=>{let s=Math.abs(n360(A[i]-B[i]));return s>180?360-s:s;};
+      for(let i=1;i<times.length;i++){ const s0=sepAt(i-1),s1=sepAt(i);
+        for(const asp of GANN_ASPECTS){ const d0=s0-asp.d,d1=s1-asp.d;
+          if((d0<=0&&d1>=0)||(d0>=0&&d1<=0)){ if(Math.abs(s1-s0)>30)continue; // skip 0/180 wrap artefacts
+            const frac=Math.abs(d0)/(Math.abs(d0)+Math.abs(d1)+1e-9);
+            marks.push({ms:times[i-1]+frac*(times[i]-times[i-1]),a:abodies[a],b:abodies[b2],asp}); } }
       }
     }
-    // dedupe consecutive same pair+aspect within 3 days
-    const seen={};
-    marks.forEach(m=>{const key=m.a+m.b+m.asp.d,day=Math.round(m.ms/dayMs);
-      if(seen[key]&&day-seen[key]<3){seen[key]=day;return;} seen[key]=day;
-      const xx=x(m.ms);
-      aspLines+=`<line x1="${xx.toFixed(1)}" y1="${PT}" x2="${xx.toFixed(1)}" y2="${PT+IH}" stroke="${m.asp.c}" stroke-width="1" stroke-dasharray="3,3" opacity="0.7"><title>${planISO(m.ms)} · ${PA[m.a]} ${m.asp.g} ${PA[m.b]} (${m.asp.d}°)</title></line>
-        <text x="${xx.toFixed(1)}" y="${PT+IH-2}" fill="${m.asp.c}" font-size="9" text-anchor="middle" transform="rotate(-90 ${xx.toFixed(1)} ${PT+IH-2})">${PA[m.a]}${m.asp.g}${PA[m.b]}</text>`;
+    marks.sort((m,n)=>m.ms-n.ms);
+    const minGap=Math.max(2,stepDays)*86400000*0.6;
+    let lastX=-99;
+    marks.forEach(m=>{ const xx=x(m.ms); const showLbl=xx-lastX>14; if(showLbl)lastX=xx;
+      aspLines+=`<line x1="${xx.toFixed(1)}" y1="${PT}" x2="${xx.toFixed(1)}" y2="${PT+IH}" stroke="${m.asp.c}" stroke-width="0.9" stroke-dasharray="3,3" opacity="0.6"><title>${planISO(m.ms)} · ${PA[m.a]} ${m.asp.g} ${PA[m.b]} (${m.asp.d}°)</title></line>`;
+      if(showLbl) aspLines+=`<text x="${xx.toFixed(1)}" y="${PT+IH-2}" fill="${m.asp.c}" font-size="8.5" text-anchor="middle" transform="rotate(-90 ${xx.toFixed(1)} ${PT+IH-2})">${PA[m.a]}${m.asp.g}${PA[m.b]}</text>`;
     });
   }
+  const priceNote=priceLoading?'<span style="color:var(--acc)">⏳ loading price…</span>':priceErr?'<span style="color:var(--bear)">price unavailable — planet lines still valid</span>':bars.length?`<span style="color:var(--bull)">● ${bars.length} candles in view</span>`:'<span style="color:var(--tx3)">no price in this window (ephemeris-only)</span>';
   const legend=GANN_ASPECTS.map(a=>`<span style="color:${a.c};font-weight:700">${a.g}${a.d}°</span>`).join(' · ');
-  return `<div class="pnl">${controls}${togglesUI}
+  return `<div class="pnl">${controls}${togglesUI}${gannTimeline()}
     <div class="pb">
       <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">
         <rect x="${PL}" y="${PT}" width="${IW}" height="${IH}" fill="var(--bg2)" stroke="var(--bd)"/>
         ${axis}${aspLines}${planetLines}${candles}${planetLbls}
       </svg>
       <div style="font-size:10px;color:var(--tx3);margin-top:6px">
-        Planetary price-line: price = k·cycle + (longitude/360)·cycle, cycle = <b>${cycle.toLocaleString()}</b> pts (auto; set S.gannCycle to override) — each planet draws a ladder of harmonic lines that drift as it moves; watch price reacting at a line. Aspect time-lines mark exact ${helio?'heliocentric':'geocentric'} perfections (${legend}) between the checked bodies. Chiron is a two-body approximation (±1–2°). All toggles above are live.
+        View <b style="color:var(--acc)">${y0} → ${y1}</b> (${(spanY).toFixed(1)}y, sampled every ${stepDays}d) · ${priceNote}. Planetary price-line: price = k·cycle + (longitude/360)·cycle, cycle = <b>${cycle.toLocaleString()}</b> pts — each planet is a drifting ladder of harmonic lines; candles appear only where price data exists, planet lines & aspects span the whole window (drag the slider or pick years to go decades back/forward). Aspect time-lines: exact ${helio?'heliocentric':'geocentric'} perfections (${legend}). Chiron ±1–2° (two-body). All toggles live.
       </div>
     </div></div>`;
 }
