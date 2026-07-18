@@ -4377,7 +4377,7 @@ let S={date:todayStr(),time:nowTimeIST(),
        spxPDH:'',spxPDL:'',spxPWH:'',spxPWL:'',spxPMH:'',spxPML:'',
        tab:'overview',ayMode:'lahiri',gannAnchor:'open',loc:'Mumbai',
        session:'mkt',ovInt:'15',ovInst:'NIFTY 50',
-       gannInst:'NIFTY 50',gannGRange:'5y',gannCycle:0,gannFromY:null,gannToY:null,
+       gannInst:'NIFTY 50',gannGRange:'5y',gannCycle:0,gannFromY:null,gannToY:null,panchakInst:'',
        gannPlanets:'Sun,Mars,Jupiter,Saturn',gannAspBodies:'Sun,Mars,Jupiter,Saturn',
        gannShowAsp:true,gannHelio:false,
        spFrom:'',spTo:'',time5:'',calYear:0,calMonth:0};
@@ -11445,8 +11445,86 @@ function panchakEngine(dateStr, ayDeg){
   let score=0; const w=(r,x)=>{ if(r.v==='BULLISH') score+=x; else if(r.v==='BEARISH') score-=x; };
   w(R.r345, R.r345.high?2:1.5); w(R.r67,1); w(R.r8, R.r8.v==='BULLISH'?2:0);
   const verdict = score>0.5?'BULLISH':score<-0.5?'BEARISH':'NEUTRAL';
+  // price-relevant window: the active Panchak, else the most recent COMPLETED
+  // one — its 5 days' high/low form the Panchak trading range (S/R afterward).
+  let priceWin=null;
+  const pastSegs=segs.filter(g=>g.s<=noonJ+step);
+  const pseg=pastSegs.length?pastSegs[pastSegs.length-1]:null;
+  if(pseg){
+    const ps=refine(pseg.s-step,pseg.s,inPan), pe=refine(pseg.e,pseg.e+step,J=>!inPan(J));
+    const A=jdToISTParts(ps), B=jdToISTParts(pe);
+    const sd=`${A.year}-${String(A.month).padStart(2,'0')}-${String(A.day).padStart(2,'0')}`;
+    const ed=`${B.year}-${String(B.month).padStart(2,'0')}-${String(B.day).padStart(2,'0')}`;
+    const dates=[]; let dt=new Date(sd+'T00:00:00Z'); const de=new Date(ed+'T00:00:00Z');
+    while(dt<=de){ dates.push(dt.toISOString().slice(0,10)); dt.setUTCDate(dt.getUTCDate()+1); }
+    priceWin={startDate:sd, endDate:ed, dates, active:(noonJ>=ps-step&&noonJ<=pe+step), startDisp:fmtIST(A), endDisp:fmtIST(B)};
+  }
   return {none:false, active, startDisp:fmtIST(sp), endDisp:fmtIST(jdToISTParts(endJ)),
-          wd, ghadi, srH, startHour, goodYoga, startYoga:yogaAt(startJ), days, R, score, verdict};
+          wd, ghadi, srH, startHour, goodYoga, startYoga:yogaAt(startJ), days, R, score, verdict, priceWin};
+}
+// ── PANCHAK TRADING RANGE — the high/low made during the (active or most
+// recent) Panchak window becomes support/resistance for the period after.
+// panchak High = max daily high, panchak Low = min daily low, range = H−L.
+window.PANCHAKLV={key:null,rows:null,status:'idle'};
+const PANCHAK_LV_DEFAULT=['NIFTY 50','BANK NIFTY','SENSEX','NASDAQ','DOW','SPX','XAUUSD · GOLD','XAGUSD · SILVER'];
+async function panchakLevelsLoad(force){
+  const D=DATA; if(!D) return;
+  const pw=panchakEngine(S.date,D.ay).priceWin;
+  if(!pw){ window.PANCHAKLV={key:'nopw',rows:[],status:'ready'}; const h0=document.getElementById('panchakLevelsHost'); if(h0)h0.innerHTML=panchakLevelsHTML(); return; }
+  const insts=[...PANCHAK_LV_DEFAULT];
+  if(S.panchakInst && !insts.includes(S.panchakInst)) insts.unshift(S.panchakInst);
+  const key=pw.startDate+'|'+pw.endDate+'|'+insts.join(',');
+  if(!force && window.PANCHAKLV.key===key && window.PANCHAKLV.status!=='idle') return;
+  if(window.PANCHAKLV.status==='loading' && window.PANCHAKLV.key===key) return;
+  window.PANCHAKLV={key,rows:null,status:'loading'};
+  const host=document.getElementById('panchakLevelsHost'); if(host) host.innerHTML=panchakLevelsHTML();
+  const rows=await Promise.all(insts.map(async name=>{
+    const syms=[PLAN_INST[name],PLAN_INST_FB[name]].filter(Boolean);
+    let bars=null;
+    for(const sym of syms){ try{ bars=await planFetchOHLC(sym,'6mo'); if(bars&&bars.length){break;} }catch(e){} }
+    if(!bars||!bars.length) return {name,err:true};
+    const win=bars.filter(b=>pw.dates.includes(b.date));
+    if(!win.length) return {name,noData:true};
+    const hi=Math.max(...win.map(b=>b.h)), lo=Math.min(...win.map(b=>b.l));
+    return {name,hi,lo,range:hi-lo,rangePct:(hi-lo)/lo*100,barsN:win.length,last:bars[bars.length-1].c};
+  }));
+  if(window.PANCHAKLV.key!==key) return; // superseded
+  window.PANCHAKLV={key,rows,status:'ready'};
+  const h2=document.getElementById('panchakLevelsHost'); if(h2) h2.innerHTML=panchakLevelsHTML();
+}
+function panchakLevelsHTML(){
+  const D=DATA; const pw=D?panchakEngine(S.date,D.ay).priceWin:null;
+  const instSel=Object.keys(PLAN_INST).map(k=>`<option value="${k}" ${S.panchakInst===k?'selected':''}>${k}</option>`).join('');
+  const ctrl=`<span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+    <select class="ci" style="font-size:11px;padding:2px 4px;max-width:150px" onchange="gs({panchakInst:this.value});setTimeout(function(){panchakLevelsLoad(true)},10)"><option value="">+ add stock/index…</option>${instSel}</select>
+    <button class="ci" style="font-size:11px;padding:2px 8px;cursor:pointer" onclick="panchakLevelsLoad(true)" title="Reload">↻</button></span>`;
+  const head=`<div class="ph" style="justify-content:space-between;flex-wrap:wrap;gap:6px"><span><span class="dot"></span>◧ PANCHAK TRADING RANGE — High / Low / Range per instrument</span>${ctrl}</div>`;
+  if(!pw) return `<div class="pnl">${head}<div class="pb" style="color:var(--tx3);font-size:11.5px">No completed Panchak window yet for this date — trading levels appear once a Panchak has occurred.</div></div>`;
+  const winInfo=`<div style="padding:5px 12px;font-size:10.5px;color:var(--tx3)">Window: <b style="color:var(--acc)">${pw.startDisp} → ${pw.endDisp}</b> (${pw.dates.length} days, ${pw.active?'<span style="color:var(--neut2)">ACTIVE — range still forming</span>':'completed'}). Panchak High = highest high, Panchak Low = lowest low across the window; the <b>range</b> and its edges act as support/resistance until the next Panchak. Break above High → bullish continuation; break below Low → bearish.</div>`;
+  const lv=window.PANCHAKLV||{};
+  if(lv.status!=='ready' || !lv.rows){
+    setTimeout(panchakLevelsLoad,10);
+    return `<div class="pnl">${head}${winInfo}<div class="pb" style="color:var(--acc);font-size:11.5px;padding:16px;text-align:center">⏳ fetching Panchak-window prices…</div></div>`;
+  }
+  const rows=lv.rows.map(r=>{
+    const us=['NASDAQ','DOW','SPX'].includes(r.name)||r.name.startsWith('X')||r.name.startsWith('US');
+    const loc=us?'en-US':'en-IN';
+    if(r.err) return `<tr><td style="font-weight:700">${r.name}</td><td colspan="6" style="color:var(--bear);font-size:11px">price unavailable</td></tr>`;
+    if(r.noData) return `<tr><td style="font-weight:700">${r.name}</td><td colspan="6" style="color:var(--tx3);font-size:11px">no bars in window</td></tr>`;
+    const pos = r.last>r.hi?{t:'▲ ABOVE HIGH',c:'var(--bull)'}:r.last<r.lo?{t:'▼ BELOW LOW',c:'var(--bear)'}:{t:'↔ INSIDE',c:'var(--neut)'};
+    const fm=v=>v.toLocaleString(loc,{maximumFractionDigits:v>1000?0:2});
+    return `<tr>
+      <td style="font-weight:700;color:var(--tx1);white-space:nowrap">${r.name}</td>
+      <td style="font-family:monospace;color:var(--bear);text-align:right">${fm(r.hi)}</td>
+      <td style="font-family:monospace;color:var(--bull2);text-align:right">${fm(r.lo)}</td>
+      <td style="font-family:monospace;color:var(--acc);text-align:right;font-weight:700">${fm(r.range)}</td>
+      <td style="font-family:monospace;color:var(--tx2);text-align:right">${r.rangePct.toFixed(2)}%</td>
+      <td style="font-family:monospace;color:var(--tx1);text-align:right">${fm(r.last)}</td>
+      <td style="font-weight:700;color:${pos.c};white-space:nowrap">${pos.t}</td></tr>`;
+  }).join('');
+  return `<div class="pnl">${head}${winInfo}
+    <div class="ts"><table class="tbl"><thead><tr><th>Instrument</th><th style="text-align:right">Panchak High</th><th style="text-align:right">Panchak Low</th><th style="text-align:right">Range</th><th style="text-align:right">Range %</th><th style="text-align:right">Last</th><th>Now vs Range</th></tr></thead>
+    <tbody>${rows}</tbody></table></div></div>`;
 }
 
 function marsBearishCombos(planets){
@@ -11499,6 +11577,7 @@ function tPanchak(){
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:5px">${P.days.map(d=>`<span class="pill pb-a" style="font-size:10px">${WDNAME[d.wd]} ${d.date.slice(5)} · ${d.nak}${PANCHAK_GOOD_YOGAS.has(d.yoga)?` · <b style="color:var(--bull)">${d.yoga}</b>`:''}</span>`).join('')}</div></div>
     </div>`;
   }
+  statusCard += `<div id="panchakLevelsHost">${panchakLevelsHTML()}</div>`;
   const rulesRef=`<div class="pnl"><div class="ph"><span class="dot"></span>PANCHAK RESULTS — the 8 rules (Parth Prophesies)</div>
     <div class="ts"><table class="tbl"><thead><tr><th>#</th><th>Condition</th><th>Result</th></tr></thead><tbody>
       ${[
