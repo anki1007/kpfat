@@ -658,12 +658,13 @@ function getAyanamsa(J,mode){
     case 'kp':     return kpAyanamsa(J);
     case 'kpold':  return kpOldAyanamsa(J);
     case 'raman':  return ramanAyanamsa(J);
+    case 'sayana': return 0; // tropical zodiac — no ayanamsa subtraction
     default:       return lahiriAyanamsa(J);
   }
 }
 function ayanamsaLabel(mode){
   return {lahiri:'Lahiri (Chitrapaksha)', kp:'KP New (Krishnamurti)',
-          kpold:'KP Old', raman:'Raman'}[mode] || 'Lahiri';
+          kpold:'KP Old', raman:'Raman', sayana:'Sayana (Tropical)'}[mode] || 'Lahiri';
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4404,6 +4405,7 @@ function rHdr(){
           <option value="kp" ${S.ayMode==='kp'?'selected':''}>KP New (KSK)</option>
           <option value="kpold" ${S.ayMode==='kpold'?'selected':''}>KP Old</option>
           <option value="raman" ${S.ayMode==='raman'?'selected':''}>Raman</option>
+          <option value="sayana" ${S.ayMode==='sayana'?'selected':''}>Sayana (Tropical)</option>
         </select>
       </div>
       <div class="cg"><span class="cl">LAT °N</span><input type="text" id="iLA" value="${LAT.toFixed(4)}" class="ci w80"></div>
@@ -5851,7 +5853,19 @@ function ovBuildSlots(D){
     else if(sc>=1.5){ bias='BULLISH'; arrow='▲'; }
     else if(sc<=-1.5){ bias='BEARISH'; arrow='▼'; }
     else { bias='NEUTRAL'; arrow='→'; }
-    slots.push({m,ph:HL,bias,arrow,score:Math.round(sc*10)/10,why:why.join(' · '),sub});
+    // composite line: the KP Astro Signal recomputed for THIS slot's sky —
+    // every planet's house taken from the slot lagna, Moon moved to its
+    // slot position — blended 50/50 with the day's combined score
+    let comp=0;
+    try{
+      const slotPlanets=D.planets.map(p=>{
+        if(p.name==='Moon'){ const ms=Math.floor(mLon/30);
+          return {...p, lon:mLon, s:ms, h:((ms-lagS+12)%12)+1}; }
+        return {...p, h:((p.s-lagS+12)%12)+1};
+      });
+      comp=Math.round(0.5*computeBias(slotPlanets).score + 0.5*(D.combinedScore||0));
+    }catch(e){ comp=D.combinedScore||0; }
+    slots.push({m,ph:HL,bias,arrow,score:Math.round(sc*10)/10,why:why.join(' · '),sub,comp});
   }
   _ovbcSlots={key,slots};
   return slots;
@@ -5861,7 +5875,7 @@ function ovBiasChart(D){
   const iv=Math.max(1,parseInt(S.ovInt,10)||15);
   const slots=ovBuildSlots(D);
   if(!slots || slots.length<2) return '';
-  const W=1560,H=430,PLm=64,PRm=20,PT=20,PB=40,IW=W-PLm-PRm,IH=H-PT-PB;
+  const W=1560,H=430,PLm=64,PRm=48,PT=20,PB=40,IW=W-PLm-PRm,IH=H-PT-PB;
   const x=m=>PLm+(m-SR.startMin)/Math.max(1,SR.endMin-SR.startMin)*IW;
   const BCOL={BULLISH:'var(--bull)',BEARISH:'var(--bear)',VOLATILE:'var(--sun)',NEUTRAL:'var(--tx3)'};
   const bands=[];
@@ -5955,6 +5969,18 @@ ${bd.why}${bd.res!=null?'\nRESULT: '+(bd.res?'✓ matched':'✗ missed')+' (net 
     return`<text x="${((x0+x1)/2).toFixed(1)}" y="${PT+15}" fill="${bd.col}" font-size="12" font-weight="700" text-anchor="middle" opacity="0.9">${bd.arrow} ${bd.ph}<tspan fill="${resCol}" font-weight="800">${resTag}</tspan></text>`;
   }).join('');
   const noPriceSvg=noPriceMsg?`<text x="${PLm+IW/2}" y="${PT+IH/2}" fill="var(--tx3)" font-size="14" text-anchor="middle">${noPriceMsg}</text>`:'';
+  // ── composite bias line: per-slot KP signal (±100) across the session ──
+  const yC=v=>PT+IH/2-(Math.max(-100,Math.min(100,v))/100)*(IH/2*0.92);
+  const compPath=slots.map((s,i)=>(i?'L':'M')+x(s.m).toFixed(1)+','+yC(s.comp||0).toFixed(1)).join(' ');
+  const lastSlot=slots[slots.length-1];
+  const compSvg=`
+    <line x1="${PLm}" y1="${yC(0).toFixed(1)}" x2="${PLm+IW}" y2="${yC(0).toFixed(1)}" stroke="var(--tx3)" stroke-width="0.6" stroke-dasharray="5,4"/>
+    <path d="${compPath}" fill="none" stroke="var(--moon)" stroke-width="2.2" opacity="0.95"/>
+    ${slots.filter((s,i)=>i%Math.max(1,Math.round(slots.length/24))===0).map(s=>`<circle cx="${x(s.m).toFixed(1)}" cy="${yC(s.comp||0).toFixed(1)}" r="2.4" fill="var(--moon)"><title>${mtt(s.m)} · composite ${s.comp>0?'+':''}${s.comp}</title></circle>`).join('')}
+    <text x="${PLm+IW+4}" y="${(yC(100)+4).toFixed(1)}" fill="var(--moon)" font-size="11">+100</text>
+    <text x="${PLm+IW+4}" y="${(yC(0)+4).toFixed(1)}" fill="var(--tx3)" font-size="11">0</text>
+    <text x="${PLm+IW+4}" y="${(yC(-100)+4).toFixed(1)}" fill="var(--moon)" font-size="11">−100</text>
+    <text x="${x(lastSlot.m).toFixed(1)}" y="${(yC(lastSlot.comp||0)-8).toFixed(1)}" fill="var(--moon)" font-size="12" font-weight="700" text-anchor="end">${lastSlot.comp>0?'+':''}${lastSlot.comp}</text>`;
   const dayCol=D.combinedLabel==='BULLISH'?'var(--bull)':D.combinedLabel==='BEARISH'?'var(--bear)':'var(--neut)';
   const instSel=Object.keys(PLAN_INST).map(k=>`<option value="${k}" ${ovInstKey()===k?'selected':''}>${k}</option>`).join('');
   const ivSel=[1,5,15,30,60].map(o=>`<option value="${o}" ${iv===o?'selected':''}>${o} min</option>`).join('');
@@ -5975,15 +6001,17 @@ ${bd.why}${bd.res!=null?'\nRESULT: '+(bd.res?'✓ matched':'✗ missed')+' (net 
         <rect x="${PLm}" y="${PT}" width="${IW}" height="${IH}" fill="var(--bg2)" stroke="var(--bd)"/>
         ${bandRects}${axis}${priceAxis}${bandLbls}
         ${candleSvg}${noPriceSvg}
+        ${compSvg}
         ${nowMark}
       </svg>
       <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:10px;color:var(--tx2);margin-top:6px;align-items:center">
         <span style="font-weight:700"><span style="color:var(--bull)">▮</span><span style="color:var(--bear)">▮</span> ${ovInstKey()} ${iv}-min candles</span>
+        <span style="color:var(--moon);font-weight:700">— composite bias line (±100, right axis)</span>
         ${legend}
         <span style="margin-left:auto">${priceStatus}</span>
       </div>
       <div style="font-size:10px;color:var(--tx3);margin-top:4px">
-        Bands = per-slot forecast from that slot's own sky: hour-lord house from the SLOT's lagna, real dignity (exalt/own/debil), Moon sub-lord at the slot, hora and day-trend tilt — hover a band for the full scoring. Bands are stable (they never repaint when you change the TIME picker). ✓/✗ on each completed band = forecast vs the band's actual net move (±0.08% threshold; VOLATILE ✓ = whipsaw range ≫ net). Yahoo history: 1m ≈ 30d, 5/15/30m ≈ 60d; older dates fall back to hourly, then bands-only. Today auto-refreshes every 60s; ↻ forces it. 24H session covers US markets / commodities.
+        Bands = per-slot forecast from that slot's own sky: hour-lord house from the SLOT's lagna, real dignity (exalt/own/debil), Moon sub-lord at the slot, hora and day-trend tilt — hover a band for the full scoring. Line = composite bias per slot (KP signal recomputed at each slot's lagna/Moon, blended with the day score; ±100 on the right axis, dots show values). Bands are stable (they never repaint when you change the TIME picker). ✓/✗ on each completed band = forecast vs the band's actual net move (±0.08% threshold; VOLATILE ✓ = whipsaw range ≫ net). Yahoo history: 1m ≈ 30d, 5/15/30m ≈ 60d; older dates fall back to hourly, then bands-only. Today auto-refreshes every 60s; ↻ forces it. 24H session covers US markets / commodities.
       </div>
     </div>
   </div>`;
