@@ -11486,7 +11486,17 @@ async function panchakLevelsLoad(force){
     const win=bars.filter(b=>pw.dates.includes(b.date));
     if(!win.length) return {name,noData:true};
     const hi=Math.max(...win.map(b=>b.h)), lo=Math.min(...win.map(b=>b.l));
-    return {name,hi,lo,range:hi-lo,rangePct:(hi-lo)/lo*100,barsN:win.length,last:bars[bars.length-1].c};
+    // post-window action: has price extended beyond the range and held, or
+    // poked out and failed back inside? (failed range extension = reversal)
+    const post=bars.filter(b=>b.date>pw.endDate);
+    const last=bars[bars.length-1].c;
+    let brokeAbove=false,brokeBelow=false,upBreakDate=null,dnBreakDate=null,maxH=-Infinity,minL=Infinity;
+    for(const b of post){ maxH=Math.max(maxH,b.h); minL=Math.min(minL,b.l);
+      if(b.h>hi){ brokeAbove=true; if(!upBreakDate)upBreakDate=b.date; }
+      if(b.l<lo){ brokeBelow=true; if(!dnBreakDate)dnBreakDate=b.date; } }
+    return {name,hi,lo,range:hi-lo,rangePct:(hi-lo)/lo*100,barsN:win.length,last,
+      postN:post.length,brokeAbove,brokeBelow,upBreakDate,dnBreakDate,
+      maxH:isFinite(maxH)?maxH:null,minL:isFinite(minL)?minL:null};
   }));
   if(window.PANCHAKLV.key!==key) return; // superseded
   window.PANCHAKLV={key,rows,status:'ready'};
@@ -11506,25 +11516,41 @@ function panchakLevelsHTML(){
     setTimeout(panchakLevelsLoad,10);
     return `<div class="pnl">${head}${winInfo}<div class="pb" style="color:var(--acc);font-size:11.5px;padding:16px;text-align:center">⏳ fetching Panchak-window prices…</div></div>`;
   }
-  const rows=lv.rows.map(r=>{
+  // classify each instrument's position vs the Panchak range
+  const statusOf=r=>{
+    const above=r.last>r.hi, below=r.last<r.lo;
+    if(above) return {t:'▲ ABOVE HIGH',sub:'holding above · +'+((r.last-r.hi)/r.hi*100).toFixed(2)+'%',c:'var(--bull)',ord:0};
+    if(below) return {t:'▼ BELOW LOW',sub:'holding below · −'+((r.lo-r.last)/r.lo*100).toFixed(2)+'%',c:'var(--bear)',ord:1};
+    if(r.brokeAbove&&r.brokeBelow) return {t:'↕ WHIPSAW',sub:'broke both, back inside',c:'var(--sun)',ord:2};
+    if(r.brokeAbove) return {t:'⤾ FAILED HIGH BREAK',sub:'poked '+(r.upBreakDate||'').slice(5)+' → back inside (bearish)',c:'var(--bear)',ord:3};
+    if(r.brokeBelow) return {t:'⤿ FAILED LOW BREAK',sub:'poked '+(r.dnBreakDate||'').slice(5)+' → recovered (bullish)',c:'var(--bull2)',ord:4};
+    return {t:'↔ INSIDE',sub:r.postN?'range intact':'window still active',c:'var(--neut)',ord:5};
+  };
+  const good=lv.rows.filter(r=>!r.err&&!r.noData).map(r=>({...r,st:statusOf(r)}));
+  good.sort((a,b)=>a.st.ord-b.st.ord);
+  const bad=lv.rows.filter(r=>r.err||r.noData);
+  // summary counts
+  const cnt=k=>good.filter(r=>r.st.t.includes(k)).length;
+  const summary=`<div class="pb" style="display:flex;gap:8px;flex-wrap:wrap;font-size:11px">
+    ${[['▲ ABOVE HIGH','var(--bull)',cnt('ABOVE HIGH')],['▼ BELOW LOW','var(--bear)',cnt('BELOW LOW')],['⤾ FAILED HIGH','var(--bear)',cnt('FAILED HIGH')],['⤿ FAILED LOW','var(--bull2)',cnt('FAILED LOW')],['↕ WHIPSAW','var(--sun)',cnt('WHIPSAW')],['↔ INSIDE','var(--neut)',cnt('INSIDE')]].map(([l,c,n])=>`<span style="padding:2px 9px;border-radius:10px;border:1px solid ${c}66;background:${c}14;color:${c};font-weight:700">${l} · ${n}</span>`).join('')}</div>`;
+  const rows=good.map(r=>{
     const us=['NASDAQ','DOW','SPX'].includes(r.name)||r.name.startsWith('X')||r.name.startsWith('US');
-    const loc=us?'en-US':'en-IN';
-    if(r.err) return `<tr><td style="font-weight:700">${r.name}</td><td colspan="6" style="color:var(--bear);font-size:11px">price unavailable</td></tr>`;
-    if(r.noData) return `<tr><td style="font-weight:700">${r.name}</td><td colspan="6" style="color:var(--tx3);font-size:11px">no bars in window</td></tr>`;
-    const pos = r.last>r.hi?{t:'▲ ABOVE HIGH',c:'var(--bull)'}:r.last<r.lo?{t:'▼ BELOW LOW',c:'var(--bear)'}:{t:'↔ INSIDE',c:'var(--neut)'};
-    const fm=v=>v.toLocaleString(loc,{maximumFractionDigits:v>1000?0:2});
-    return `<tr>
+    const loc=us?'en-US':'en-IN'; const fm=v=>v.toLocaleString(loc,{maximumFractionDigits:v>1000?0:2});
+    const ext = r.st.t.includes('ABOVE')&&r.maxH!=null ? ` <span style="color:var(--tx3)">max +${((r.maxH-r.hi)/r.range*100).toFixed(0)}% of range</span>`
+              : r.st.t.includes('BELOW')&&r.minL!=null ? ` <span style="color:var(--tx3)">max −${((r.lo-r.minL)/r.range*100).toFixed(0)}% of range</span>` : '';
+    return `<tr style="background:${r.st.ord<=1?r.st.c+'0e':r.st.ord===3||r.st.ord===4?r.st.c+'0a':'transparent'}">
       <td style="font-weight:700;color:var(--tx1);white-space:nowrap">${r.name}</td>
       <td style="font-family:monospace;color:var(--bear);text-align:right">${fm(r.hi)}</td>
       <td style="font-family:monospace;color:var(--bull2);text-align:right">${fm(r.lo)}</td>
       <td style="font-family:monospace;color:var(--acc);text-align:right;font-weight:700">${fm(r.range)}</td>
       <td style="font-family:monospace;color:var(--tx2);text-align:right">${r.rangePct.toFixed(2)}%</td>
       <td style="font-family:monospace;color:var(--tx1);text-align:right">${fm(r.last)}</td>
-      <td style="font-weight:700;color:${pos.c};white-space:nowrap">${pos.t}</td></tr>`;
-  }).join('');
-  return `<div class="pnl">${head}${winInfo}
-    <div class="ts"><table class="tbl"><thead><tr><th>Instrument</th><th style="text-align:right">Panchak High</th><th style="text-align:right">Panchak Low</th><th style="text-align:right">Range</th><th style="text-align:right">Range %</th><th style="text-align:right">Last</th><th>Now vs Range</th></tr></thead>
-    <tbody>${rows}</tbody></table></div></div>`;
+      <td style="font-weight:700;color:${r.st.c};white-space:nowrap">${r.st.t}<div style="font-size:9.5px;font-weight:400;color:var(--tx3)">${r.st.sub}${ext}</div></td></tr>`;
+  }).join('') + bad.map(r=>`<tr><td style="font-weight:700">${r.name}</td><td colspan="6" style="color:${r.err?'var(--bear)':'var(--tx3)'};font-size:11px">${r.err?'price unavailable':'no bars in window'}</td></tr>`).join('');
+  return `<div class="pnl">${head}${winInfo}${summary}
+    <div class="ts"><table class="tbl"><thead><tr><th>Instrument</th><th style="text-align:right">Panchak High</th><th style="text-align:right">Panchak Low</th><th style="text-align:right">Range</th><th style="text-align:right">Range %</th><th style="text-align:right">Last</th><th>Now vs Range (crossings & failed breaks)</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+    <div style="padding:6px 12px;font-size:10px;color:var(--tx3)">Rows sorted by signal: sustained breakouts (▲/▼) first, then failed range extensions (⤾/⤿ = price poked past the Panchak edge but closed back inside → classic reversal), whipsaw, then untouched ranges. Extension % measures how far the max excursion ran versus the Panchak range width.</div></div>`;
 }
 
 function marsBearishCombos(planets){
