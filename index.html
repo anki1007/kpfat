@@ -11407,13 +11407,18 @@ function panchakEngine(dateStr, ayDeg){
   const sidMoon=J=>n360(moonLon(J)-ayDeg);
   const sidSun =J=>n360(sunLon(J)-ayDeg);
   const inPan=J=>sidMoon(J)>=DHAN; // Panchak arc [293.33°,360°)
-  const baseJ=JD(Y,Mo,Dy,0), noonJ=JD(Y,Mo,Dy,12), step=1/24;
+  // Scan a wide window so the nearest Panchak is always found: Panchak
+  // (Moon in the last 5 nakshatras) recurs every sidereal month (~27.3d)
+  // and lasts ~5d, so gaps reach ~22d — a ±30d sweep guarantees at least
+  // one complete Panchak period on either side of any date. (Old ±8d
+  // window returned "none" whenever the Moon sat mid-gap, e.g. in Magha.)
+  const baseJ=JD(Y,Mo,Dy,0), noonJ=JD(Y,Mo,Dy,12), step=1/12;
   const segs=[]; let cur=null;
-  for(let d=-8; d<=8; d+=step){ const J=baseJ+d;
+  for(let d=-30; d<=30; d+=step){ const J=baseJ+d;
     if(inPan(J)){ if(!cur) cur={s:J,e:J}; else cur.e=J; }
     else if(cur){ segs.push(cur); cur=null; } }
   if(cur) segs.push(cur);
-  if(!segs.length) return {none:true};
+  if(!segs.length) return {none:true}; // effectively unreachable now
   let seg=segs.find(g=>noonJ>=g.s-step && noonJ<=g.e+step) || segs.find(g=>g.s>noonJ) || segs[segs.length-1];
   const active = noonJ>=seg.s-step && noonJ<=seg.e+step;
   const refine=(a,b,cond)=>{ for(let i=0;i<44;i++){ const m=(a+b)/2; if(cond(m)) b=m; else a=m; } return b; };
