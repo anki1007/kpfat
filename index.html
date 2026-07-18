@@ -550,7 +550,37 @@ const LOCATIONS={
                deshPanchak:{letter:'न', varnaCell:'7,6', svara:'उ', svaraCell:'1,1', tithiGrp:'JAYA',  nakRing:16, nakPada:1, rashi:7}},
   'Chicago':  {lat:41.8781, lon:-87.6298, tz:-5,  abbr:'CDT', mkt:'CME/CBOT',    open:8.5,  close:15,
                deshPanchak:{letter:'श≡स', varnaCell:'5,1', svara:'ए', svaraCell:'6,6', tithiGrp:'RIKTA', nakRing:24, nakPada:1, rashi:10}},
+  // London — LSE trades 08:00–16:30 local. tz here is the summer (BST)
+  // value; locTzFor() below flips BST/GMT by date. लंदन → first letter ल.
+  'London':   {lat:51.5074, lon:-0.1278,  tz:1,   abbr:'BST', mkt:'LSE',         open:8,    close:16.5,
+               deshPanchak:{letter:'ल', varnaCell:'2,7', svara:'अ', svaraCell:'1,2', tithiGrp:'NANDA', nakRing:0, nakPada:2, rashi:3}},
 };
+// ── SEASONAL DST ───────────────────────────────────────────────────
+// The static tz above is the summer value; these return the correct
+// offset for any date. US: 2nd Sun Mar → 1st Sun Nov. UK/EU: last Sun
+// Mar → last Sun Oct. (usEtTz is defined near the overview chart.)
+function ukTzFor(dateStr){
+  const y=+dateStr.slice(0,4);
+  const lastSun=mo=>{ const d=new Date(Date.UTC(y,mo+1,0)); return Date.UTC(y,mo,d.getUTCDate()-d.getUTCDay()); };
+  const t=Date.UTC(y,+dateStr.slice(5,7)-1,+dateStr.slice(8,10));
+  return (t>=lastSun(2)&&t<lastSun(9))?1:0;   // BST +1 / GMT 0
+}
+function locTzFor(locName,dateStr){
+  switch(locName){
+    case 'New York': return usEtTz(dateStr);      // EDT −4 / EST −5
+    case 'Chicago':  return usEtTz(dateStr)-1;    // CDT −5 / CST −6
+    case 'London':   return ukTzFor(dateStr);     // BST +1 / GMT 0
+    default: return (LOCATIONS[locName]||LOCATIONS['Mumbai']).tz;
+  }
+}
+function locAbbrFor(locName,dateStr){
+  switch(locName){
+    case 'New York': return usEtTz(dateStr)===-4?'EDT':'EST';
+    case 'Chicago':  return usEtTz(dateStr)===-4?'CDT':'CST';
+    case 'London':   return ukTzFor(dateStr)===1?'BST':'GMT';
+    default: return (LOCATIONS[locName]||LOCATIONS['Mumbai']).abbr;
+  }
+}
 // ── SESSION RANGE ─────────────────────────────────────────────────
 // 'mkt'  → exchange hours of the selected location (NSE 09:15–15:30,
 //          NYSE 09:30–16:00, CME 08:30–15:00, …)
@@ -4337,6 +4367,9 @@ function toggleTheme(){
 window.toggleTheme=toggleTheme;
 
 function render(){
+  // keep the UTC offset DST-correct for the selected location AND date
+  // (New York EDT/EST, Chicago CDT/CST, London BST/GMT flip seasonally)
+  IST=locTzFor(S.loc||'Mumbai',S.date);
   try{DATA=computeAll(S.date,parseFloat(S.time)||9.25,S.ayMode);}
   catch(e){console.error('Compute error:',e);document.getElementById('MAIN').innerHTML='<div style="color:var(--bear);padding:20px">Error: '+e.message+'</div>';return;}
   rHdr();
@@ -4378,12 +4411,12 @@ function rHdr(){
       <button class="navtoggle" onclick="toggleTheme()" title="Toggle dark / light theme" aria-label="Toggle theme">${document.body&&document.body.classList.contains('light')?'☀':'☾'}</button>
       <div>
       <div class="brand">⬡ FINANCIAL ASTROLOGY TERMINAL</div>
-      <div class="brand-sub">${(S.loc||'Mumbai').toUpperCase()} ${Math.abs(LAT).toFixed(4)}°${LAT>=0?'N':'S'} ${Math.abs(LON).toFixed(4)}°${LON>=0?'E':'W'} · ${_loc.mkt} · ${ayLabel.toUpperCase()} ${dms(D.ay,2)} · ${days[dateObj.getDay()]} ${mons[dateObj.getMonth()]} ${dateObj.getDate()} ${dateObj.getFullYear()} · ${_loc.abbr} ${mtt(parseFloat(S.time)*60)} → UTC ${mtt(((((parseFloat(S.time)-_loc.tz)%24)+24)%24)*60)} · EPH ${D.ephSrc}</div>
+      <div class="brand-sub">${(S.loc||'Mumbai').toUpperCase()} ${Math.abs(LAT).toFixed(4)}°${LAT>=0?'N':'S'} ${Math.abs(LON).toFixed(4)}°${LON>=0?'E':'W'} · ${_loc.mkt} · ${ayLabel.toUpperCase()} ${dms(D.ay,2)} · ${days[dateObj.getDay()]} ${mons[dateObj.getMonth()]} ${dateObj.getDate()} ${dateObj.getFullYear()} · ${locAbbrFor(S.loc||'Mumbai',S.date)} ${mtt(parseFloat(S.time)*60)} → UTC ${mtt(((((parseFloat(S.time)-_loc.tz)%24)+24)%24)*60)} · EPH ${D.ephSrc}</div>
     </div>
     </div>
     <div class="ctrl-row">
       <div class="cg"><span class="cl">DATE</span><input type="date" id="iD" value="${S.date}" class="ci w130"></div>
-      <div class="cg"><span class="cl">TIME (${_loc.abbr})</span>
+      <div class="cg"><span class="cl">TIME (${locAbbrFor(S.loc||'Mumbai',S.date)})</span>
         <select id="iT" class="ci">
           ${times.map(([v,l])=>`<option value="${v}" ${Math.abs(parseFloat(S.time)-parseFloat(v))<0.004?'selected':''}>${l}</option>`).join('')}
         </select>
@@ -5105,11 +5138,12 @@ function tV44(){
 window.PLAN = window.PLAN || {ohlc:{}, status:'idle', err:'', loadedKey:null, view:null, data:null, win:null, panMode:false, maximized:false, minimized:false, _rb:false};
 const PLAN_INST = {'NIFTY 50':'^NSEI','BANK NIFTY':'^NSEBANK','SENSEX':'^BSESN','NIFTY IT':'^CNXIT','NIFTY MIDCAP 100':'NIFTY_MIDCAP_100.NS',
   'NASDAQ':'^IXIC','SPX':'^GSPC','DOW':'^DJI',
-  'XAUUSD · GOLD':'GC=F','XAGUSD · SILVER':'SI=F','XNGUSD · NAT GAS':'NG=F','USOIL · WTI CRUDE':'CL=F'};
+  'XAUUSD · GOLD':'GC=F','GOLD · LONDON':'PHAU.L','XAGUSD · SILVER':'SI=F','XNGUSD · NAT GAS':'NG=F','USOIL · WTI CRUDE':'CL=F'};
 // Yahoo fallbacks. Note: the FX-style spot symbols (XAUUSD=X / XAGUSD=X)
 // went dead on Yahoo (404 delisted), so the futures contracts are now the
 // primaries and spot is kept only as a fallback should it come back.
-const PLAN_INST_FB = {'XAUUSD · GOLD':'XAUUSD=X','XAGUSD · SILVER':'XAGUSD=X'};
+const PLAN_INST_FB = {'XAUUSD · GOLD':'XAUUSD=X','XAGUSD · SILVER':'XAGUSD=X',
+  'GOLD · LONDON':'SGLN.L'};  // WisdomTree PHAU.L (USD) primary, iShares SGLN.L (GBp) fallback
 // ── F&O universe (from fno.csv) → Yahoo Finance tickers. NSE cash symbols use the
 //    .NS suffix; indices use their ^ / _.NS proxies. Merged into PLAN_INST below so
 //    every instrument dropdown (Planet Lat/Lon + Vyapaar Ratna charts) can select them.
@@ -5615,9 +5649,10 @@ function usEtTz(dateStr){
 // in the overview chart, the whole chart (axis, session, bars, bands)
 // runs on THAT market's local time instead of the selected location's.
 const OV_US_MKT={
-  'NASDAQ':ds=>({tz:usEtTz(ds),open:9.5,close:16,label:'NASDAQ MARKET HOURS (ET)'}),
-  'SPX':   ds=>({tz:usEtTz(ds),open:9.5,close:16,label:'S&P 500 MARKET HOURS (ET)'}),
-  'DOW':   ds=>({tz:usEtTz(ds),open:9.5,close:16,label:'DOW JONES MARKET HOURS (ET)'}),
+  'NASDAQ':ds=>({tz:usEtTz(ds),open:9.5,close:16,label:'NASDAQ MARKET HOURS (ET)',venue:'New York'}),
+  'SPX':   ds=>({tz:usEtTz(ds),open:9.5,close:16,label:'S&P 500 MARKET HOURS (ET)',venue:'New York'}),
+  'DOW':   ds=>({tz:usEtTz(ds),open:9.5,close:16,label:'DOW JONES MARKET HOURS (ET)',venue:'New York'}),
+  'GOLD · LONDON':ds=>({tz:ukTzFor(ds),open:8,close:16.5,label:'LSE MARKET HOURS (UK)',venue:'London'}),
 };
 function ovMkt(){
   const us=OV_US_MKT[ovInstKey()];
@@ -5632,12 +5667,18 @@ const OV_CMDTY=new Set(['XAUUSD · GOLD','XAGUSD · SILVER','XNGUSD · NAT GAS',
 // Mumbai market hours.
 window.ovSelInst=function(v){
   const upd={ovInst:v};
-  if(OV_US_MKT[v]||OV_CMDTY.has(v)){
-    const L=LOCATIONS['New York']; LAT=L.lat; LON=L.lon; IST=L.tz;
-    upd.loc='New York'; upd.session='24h';
-    if(S.loc!=='New York') upd.time='9.5'; // snap picker to 09:30 ET open
-  }else if(S.loc==='New York'||S.loc==='Chicago'){
-    const L=LOCATIONS['Mumbai']; LAT=L.lat; LON=L.lon; IST=L.tz;
+  const mkFn=OV_US_MKT[v];
+  if(mkFn||OV_CMDTY.has(v)){
+    const mk=mkFn?mkFn(S.date):null;
+    const venue=(mk&&mk.venue)||'New York';
+    const L=LOCATIONS[venue]; LAT=L.lat; LON=L.lon; IST=locTzFor(venue,S.date);
+    upd.loc=venue;
+    // exchange-listed instruments (London gold ETC) follow their exchange
+    // hours; US indices & 24h commodities go round-the-clock
+    upd.session=(venue==='London')?'mkt':'24h';
+    if(S.loc!==venue) upd.time=String(mk?mk.open:9.5); // snap picker to the venue's open
+  }else if(S.loc==='New York'||S.loc==='Chicago'||S.loc==='London'){
+    const L=LOCATIONS['Mumbai']; LAT=L.lat; LON=L.lon; IST=locTzFor('Mumbai',S.date);
     upd.loc='Mumbai'; upd.session='mkt'; upd.time='9.25';
   }
   gs(upd);
@@ -11558,7 +11599,7 @@ function rEvents(){
   b('iA','change','ayMode');b('iGA','change','gannAnchor');
   // Location → sets lat/lon + UTC offset, snaps the time picker to that market's open
   const eLOC=document.getElementById('iLOC');
-  if(eLOC)eLOC.addEventListener('change',ev=>{const L=LOCATIONS[ev.target.value];if(!L)return;LAT=L.lat;LON=L.lon;IST=L.tz;gs({loc:ev.target.value,time:String(L.open)});});
+  if(eLOC)eLOC.addEventListener('change',ev=>{const L=LOCATIONS[ev.target.value];if(!L)return;LAT=L.lat;LON=L.lon;IST=locTzFor(ev.target.value,S.date);gs({loc:ev.target.value,time:String(L.open)});});
   // Lat/Lon binding — these mutate the module-level constants and re-render
   const eLA=document.getElementById('iLA');
   if(eLA)eLA.addEventListener('change',ev=>{const v=parseFloat(ev.target.value);if(!isNaN(v)&&v>=-90&&v<=90){LAT=v;render();}else{ev.target.value=LAT.toFixed(4);}});
