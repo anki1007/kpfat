@@ -902,7 +902,11 @@ function computeAsc(J){
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// SUNRISE / SUNSET (Mumbai) — verified accurate to ~30s
+// SUNRISE / SUNSET — location-exact (uses LAT/LON/IST of the selected
+// place), iterated to the second. Standard −0.8333° horizon (refraction
+// + solar semidiameter). Returns rise/set in float minutes (seconds-
+// accurate) plus hl = one-twelfth of the daytime arc = the length of a
+// day-hora (Vedic horas are anchored at THIS sunrise; see buildPlanetHours24).
 // ═══════════════════════════════════════════════════════════════════
 function sunriseSunset(dateStr){
   const dp=dateStr.split('-').map(Number);
@@ -910,26 +914,37 @@ function sunriseSunset(dateStr){
   let Y=yr,M=mo;
   if(M<=2){Y--;M+=12;}
   const A=Math.floor(Y/100),B=2-A+Math.floor(A/4);
-  const JDnoon=Math.floor(365.25*(Y+4716))+Math.floor(30.6001*(M+1))+dy+0.5+B-1524.5;
-  const n=JDnoon-2451545.0;
-  const L=((280.460+0.9856474*n)%360+360)%360;
-  const g=((357.528+0.9856003*n)%360+360)%360;
-  const gr=g*DEG;
-  const lam=(L+1.915*Math.sin(gr)+0.020*Math.sin(2*gr))*DEG;
-  const eps=(23.439-0.0000004*n)*DEG;
-  const RA=((Math.atan2(Math.cos(eps)*Math.sin(lam),Math.cos(lam)))/DEG+360)%360;
-  const decl=Math.asin(Math.sin(eps)*Math.sin(lam));
-  let EoT=(L-RA)*4;
-  if(EoT>20)EoT-=1440;
-  if(EoT<-20)EoT+=1440;
-  const cosH=(Math.sin(-0.8333*DEG)-Math.sin(LAT*DEG)*Math.sin(decl))
-            /(Math.cos(LAT*DEG)*Math.cos(decl));
-  if(Math.abs(cosH)>1)return{rise:6*60,set:18*60,hl:60};
-  const H=Math.acos(cosH)/DEG;
-  const noonIST=(12-EoT/60-LON/15)+IST;  // local clock noon at selected timezone
-  const riseH=noonIST-H/15;
-  const setH =noonIST+H/15;
-  return{rise:riseH*60,set:setH*60,hl:(setH-riseH)*60/12};
+  const JDmid=Math.floor(365.25*(Y+4716))+Math.floor(30.6001*(M+1))+dy+0.5+B-1524.5; // 00h UT
+  // Solar apparent declination & equation-of-time at a given UT fraction of the day
+  function solar(hUT){
+    const n=(JDmid+hUT/24)-2451545.0;
+    const L=n360(280.460+0.9856474*n);
+    const g=n360(357.528+0.9856003*n), gr=g*DEG;
+    const lam=(L+1.915*Math.sin(gr)+0.020*Math.sin(2*gr))*DEG;
+    const eps=(23.439-0.00000036*n)*DEG;
+    const RA=n360(toD(Math.atan2(Math.cos(eps)*Math.sin(lam),Math.cos(lam))));
+    const decl=Math.asin(Math.sin(eps)*Math.sin(lam));
+    let EoT=(L-RA)*4; if(EoT>20)EoT-=1440; if(EoT<-20)EoT+=1440; // minutes
+    return {decl,EoT};
+  }
+  // iterate: evaluate the Sun at the event time, not just at noon
+  function event(sign){ // sign −1 = rise, +1 = set
+    let hLoc=12; // local clock guess (noon)
+    for(let it=0;it<3;it++){
+      const hUT=hLoc-IST;                 // UT hour of the guess
+      const {decl,EoT}=solar(hUT);
+      const cosH=(Math.sin(-0.8333*DEG)-Math.sin(LAT*DEG)*Math.sin(decl))
+                /(Math.cos(LAT*DEG)*Math.cos(decl));
+      if(Math.abs(cosH)>1) return sign<0?6*60:18*60; // polar day/night fallback
+      const H=toD(Math.acos(cosH));
+      const noonLoc=12-EoT/60-LON/15+IST;
+      hLoc=noonLoc+sign*H/15;
+    }
+    return hLoc*60;
+  }
+  const rise=event(-1), set=event(1);
+  if(!isFinite(rise)||!isFinite(set)||set<=rise) return {rise:6*60,set:18*60,hl:60};
+  return {rise,set,hl:(set-rise)/12};
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4267,6 +4282,8 @@ function computeAll(dateStr,timeIST,ayMode){
 }
 
 function mtt(m){let h=Math.floor(m/60),mn=Math.floor(m%60);return`${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}`;}
+// HH:MM:SS — for sunrise/sunset & hora boundaries (location-exact, to the second)
+function mtts(m){m=((m%1440)+1440)%1440;let h=Math.floor(m/60),mn=Math.floor(m%60),s=Math.round((m-Math.floor(m))*60);if(s===60){s=0;mn++;}if(mn===60){mn=0;h++;}return`${String(h).padStart(2,'0')}:${String(mn).padStart(2,'0')}:${String(s).padStart(2,'0')}`;}
 function pc(p){return PC[p]||'var(--tx1)';}
 
 // ── DMS FORMATTING (degree · minute · second) ──────────────────────
@@ -5453,10 +5470,19 @@ function planDrawSVG(kind){
 
   window.PLAN.view={W,H,PADL,PADR,PADT,HP,GAP,HB,topB,IW,vt0,vt1,kind,pmin,pmax,lmin,lmax};
 
-  const clip=`<clipPath id="plan-clip"><rect x="${PADL}" y="${PADT}" width="${IW}" height="${(topB+HB-PADT).toFixed(1)}"/></clipPath>`;
+  // Three clips: price panel, planet panel, and the full span (for the
+  // vertical aspect/conj lines that legitimately cross both). This stops
+  // planet curves (esp. latitude near forecast) leaking into the price
+  // pane and keeps everything strictly inside the plot area.
+  const clip=`<clipPath id="plan-clip-price"><rect x="${PADL}" y="${PADT}" width="${IW}" height="${HP}"/></clipPath>`
+    +`<clipPath id="plan-clip-plan"><rect x="${PADL}" y="${topB}" width="${IW}" height="${HB}"/></clipPath>`
+    +`<clipPath id="plan-clip-all"><rect x="${PADL}" y="${PADT}" width="${IW}" height="${(topB+HB-PADT).toFixed(1)}"/></clipPath>`;
   return `<svg id="plan-svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;background:var(--bg2);border:1px solid #0d3848;border-radius:4px;cursor:crosshair;touch-action:none">
     <defs>${clip}</defs>${deco}${pGrid}${bGrid}${xAxis}
-    <g clip-path="url(#plan-clip)">${conjLines}${sjBands}${priceSVG}${curves}${markers}${sjLines}</g>
+    <g clip-path="url(#plan-clip-all)">${conjLines}${sjBands}</g>
+    <g clip-path="url(#plan-clip-price)">${priceSVG}</g>
+    <g clip-path="url(#plan-clip-plan)">${curves}${markers}</g>
+    <g clip-path="url(#plan-clip-all)">${sjLines}</g>
     ${legend}${titles}<g id="plan-cross"></g></svg>`;
 }
 
@@ -5468,7 +5494,7 @@ function planTogglePan(){ window.PLAN.panMode=!window.PLAN.panMode; planRedraw()
 function planMaximize(){ window.PLAN.maximized=!window.PLAN.maximized; if(window.PLAN.maximized) window.PLAN.minimized=false; planPaint(); setTimeout(planRedraw,40); }
 function planMinimize(){ window.PLAN.minimized=!window.PLAN.minimized; if(window.PLAN.minimized) window.PLAN.maximized=false; planPaint(); setTimeout(planRedraw,40); }
 
-function planRedraw(){ const wrap=document.getElementById('plan-svg-wrap'); if(!wrap||!window.PLAN.data)return; wrap.innerHTML=planDrawSVG(window.PLAN.data.kind); planAttachInteract(); }
+function planRedraw(){ const wrap=document.getElementById('plan-svg-wrap'); if(!wrap||!window.PLAN.data)return; wrap.innerHTML=planDrawSVG(window.PLAN.data.kind); const tl=document.getElementById('plan-timeline'); if(tl) tl.innerHTML=planTimeline(); planAttachInteract(); }
 
 let _planDrag=null, _planRAF=null;
 function planAttachInteract(){
@@ -5519,6 +5545,62 @@ function planMetrics(){
     ${card('FORECAST TO', fdate, planFwd()+' days ahead', 'var(--neut2)')}</div>`;
 }
 
+// ── TIMELINE NAVIGATOR — dropdowns + draggable dual-thumb scrubber to
+//    jump the visible window to any year span (past ↔ up to +10y future) ──
+function planSetWinFrac(aFrac,bFrac){
+  const D=window.PLAN.data; if(!D) return;
+  let a=D.t0+(D.t1-D.t0)*Math.max(0,Math.min(1,aFrac));
+  let b=D.t0+(D.t1-D.t0)*Math.max(0,Math.min(1,bFrac));
+  if(b-a<20*PLAN_DAYMS) b=a+20*PLAN_DAYMS;
+  window.PLAN.win={t0:Math.max(D.t0,Math.min(a,b)),t1:Math.min(D.t1,Math.max(a,b))};
+  planRedraw();
+}
+function planSetWinYears(fromY,toY){
+  const D=window.PLAN.data; if(!D) return;
+  let a=Date.UTC(fromY,0,1), b=Date.UTC(toY,11,31);
+  window.PLAN.win={t0:Math.max(D.t0,a),t1:Math.min(D.t1,b)};
+  planRedraw();
+}
+function planScrubDrag(which,ev){
+  const D=window.PLAN.data; if(!D) return;
+  const rail=document.getElementById('plan-scrub-rail'); if(!rail) return;
+  const move=e=>{ const cx=(e.touches?e.touches[0].clientX:e.clientX); const r=rail.getBoundingClientRect();
+    let f=Math.max(0,Math.min(1,(cx-r.left)/r.width));
+    const w=window.PLAN.win||{t0:D.t0,t1:D.t1};
+    let af=(w.t0-D.t0)/(D.t1-D.t0), bf=(w.t1-D.t0)/(D.t1-D.t0);
+    if(which==='a') af=f; else bf=f;
+    planSetWinFrac(af,bf); };
+  const up=()=>{ window.removeEventListener('mousemove',move); window.removeEventListener('mouseup',up);
+    window.removeEventListener('touchmove',move); window.removeEventListener('touchend',up); };
+  window.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
+  window.addEventListener('touchmove',move,{passive:false}); window.addEventListener('touchend',up);
+  ev.preventDefault();
+}
+function planTimeline(){
+  const D=window.PLAN.data; if(!D) return '';
+  const w=window.PLAN.win||{t0:D.t0,t1:D.t1};
+  const y0=new Date(D.t0).getUTCFullYear(), y1=new Date(D.t1).getUTCFullYear();
+  const wy0=new Date(w.t0).getUTCFullYear(), wy1=new Date(w.t1).getUTCFullYear();
+  const years=[]; for(let y=y0;y<=y1;y++) years.push(y);
+  const yrSel=(id,cur,onc)=>`<select onchange="${onc}" class="ci" style="font-size:11px;padding:1px 4px">${years.map(y=>`<option value="${y}" ${y===cur?'selected':''}>${y}</option>`).join('')}</select>`;
+  const af=((w.t0-D.t0)/(D.t1-D.t0)*100), bf=((w.t1-D.t0)/(D.t1-D.t0)*100);
+  const todayMs=(typeof todayStr==='function')?planMs(todayStr()):D.tLastP;
+  const tf=Math.max(0,Math.min(100,(todayMs-D.t0)/(D.t1-D.t0)*100));
+  return `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px;padding:5px 8px;background:var(--bg2);border:1px solid #104858;border-radius:4px">
+    <span style="font-size:10.5px;color:var(--tx3)">VIEW</span>
+    ${yrSel('fy',wy0,`planSetWinYears(+this.value,${wy1})`)}
+    <span style="font-size:10.5px;color:var(--tx3)">→</span>
+    ${yrSel('ty',wy1,`planSetWinYears(${wy0},+this.value)`)}
+    <div id="plan-scrub-rail" style="position:relative;flex:1;min-width:220px;height:22px;background:var(--bg3);border-radius:11px;cursor:pointer">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:1px;background:var(--neut2);left:${tf.toFixed(1)}%" title="today"></div>
+      <div style="position:absolute;top:3px;bottom:3px;left:${af.toFixed(1)}%;width:${Math.max(1,bf-af).toFixed(1)}%;background:var(--acc);opacity:.3;border-radius:8px"></div>
+      <div onmousedown="planScrubDrag('a',event)" ontouchstart="planScrubDrag('a',event)" style="position:absolute;top:0;bottom:0;left:${af.toFixed(1)}%;width:12px;margin-left:-6px;background:var(--acc);border-radius:6px;cursor:ew-resize" title="drag start"></div>
+      <div onmousedown="planScrubDrag('b',event)" ontouchstart="planScrubDrag('b',event)" style="position:absolute;top:0;bottom:0;left:${bf.toFixed(1)}%;width:12px;margin-left:-6px;background:var(--acc);border-radius:6px;cursor:ew-resize" title="drag end"></div>
+    </div>
+    <span style="font-size:10.5px;color:var(--acc);white-space:nowrap">${planISO(w.t0)} → ${planISO(w.t1)}</span>
+    <button onclick="planResetZoom()" style="background:var(--bg3);color:var(--tx1);border:1px solid #104858;border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer">Full span</button>
+  </div>`;
+}
 function planChart(kind){
   const key=planInstKey()+'|'+planRange(); const st=window.PLAN.status, ohlc=window.PLAN.ohlc[key];
   if(st==='loading' || (!ohlc && st!=='error'))
@@ -5571,7 +5653,7 @@ function planChart(kind){
   const _hostStyle=_MAX?'position:fixed;inset:0;z-index:9999;background:var(--bg2);padding:10px 14px 18px;overflow:auto':'';
   const _chartBody=_MIN
     ? `<div style="padding:14px;border:1px dashed #104858;border-radius:4px;color:var(--tx3);font-size:11px;text-align:center">Chart minimized — click <b style="color:var(--tx1)">🗗 Restore</b> in the toolbar to expand.</div><div id="plan-svg-wrap" style="display:none"></div>`
-    : `<div style="position:relative"><div id="plan-svg-wrap">${planDrawSVG(kind)}</div>
+    : `<div id="plan-timeline">${planTimeline()}</div><div style="position:relative"><div id="plan-svg-wrap">${planDrawSVG(kind)}</div>
     <div id="plan-tip" style="position:absolute;display:none;pointer-events:none;background:var(--bg2);border:1px solid var(--bd2);border-radius:4px;padding:5px 7px;font-size:11.5px;color:var(--tx1);z-index:5;white-space:nowrap"></div></div>${conjTable}${sjTable}${raw}`;
   return `<div id="plan-host" style="${_hostStyle}">${toolbar}${_chartBody}</div>`;
 }
@@ -5590,7 +5672,8 @@ function planControls(kind){
   const instOpts=Object.keys(PLAN_INST).map(k=>`<option value="${k}" ${planInstKey()===k?'selected':''}>${k}</option>`).join('');
   const grp=(lab,html)=>`<div style="display:flex;gap:4px;align-items:center"><span style="font-size:10.5px;color:var(--tx3)">${lab}</span>${html}</div>`;
   const ranges=Object.keys(PLAN_RANGES).map(k=>planBtn(planRange()===k,`gs({planRange:'${k}'})`,PLAN_RANGES[k])).join('');
-  const fwds=[0,30,90,180,365].map(n=>planBtn(planFwd()===n,`gs({planFwd:${n}})`,n+'d')).join('');
+  const FWD_OPTS=[[0,'0'],[90,'3M'],[365,'1Y'],[730,'2Y'],[1825,'5Y'],[3650,'10Y']];
+  const fwds=FWD_OPTS.map(([n,l])=>planBtn(planFwd()===n,`gs({planFwd:${n}})`,l)).join('');
   const ptype=planBtn(planChartType()==='candle',"gs({planChart:'candle'})",'Candle')+planBtn(planChartType()==='line',"gs({planChart:'line'})",'Line');
   const sel=planBodies(); const chips=PLAN_ORDER.map(b=>planBtn(sel.includes(b),`planToggle('${b}')`,b,PLAN_COL[b])).join('');
   let conjCtrl='', sjCtrl='';
@@ -6122,7 +6205,7 @@ function tOverview(){
   ${swChip('NAK SWAMI ('+(_mSw?_mSw.nak.slice(0,9):'')+')',_nakSw,_nakHB)}
   ${swChip('RASHI SWAMI ('+(_mSw?_mSw.sign.slice(0,3):'')+')',_rasSw,_rasHB)}
   <div><span style="font-size:10.5px;color:var(--tx3)">LAGNA</span> <b style="color:var(--acc)">${D.ascSign.sign} ${dmsC(D.ascSign.deg)}</b></div>
-  <div><span style="font-size:10.5px;color:var(--tx3)">SUNRISE</span> <b style="color:var(--tx1)">${mtt(D.rMin)}</b> &middot; <span style="font-size:10.5px;color:var(--tx3)">SUNSET</span> <b style="color:var(--tx1)">${mtt(D.sMin)}</b></div>
+  <div><span style="font-size:10.5px;color:var(--tx3)">SUNRISE</span> <b style="color:var(--tx1)" title="Location-exact, ${(S.loc||'Mumbai')}">${mtts(D.rMin)}</b> &middot; <span style="font-size:10.5px;color:var(--tx3)">SUNSET</span> <b style="color:var(--tx1)">${mtts(D.sMin)}</b> <span style="font-size:9px;color:var(--tx3)" title="Vedic horas are anchored at this sunrise; day-hora length = ${(D.hlMin||0).toFixed(1)} min">⟲ hora ${(D.hlMin||0).toFixed(1)}m</span></div>
 </div>
 <div id="ovbcHost" style="margin:10px 0">${ovBiasChart(D)}</div>
 <div class="g2" style="align-items:start">
@@ -8753,7 +8836,7 @@ function tTiming(){
 <div style="display:flex;flex-direction:column;gap:10px">
   <div class="pnl">
     <div class="ph">
-      <span class="dot"></span>15-MIN INTRADAY TIMING · ${S.date} · ${SR.label} ${mtt(SR.startMin)}→${mtt(SR.endMin)} · Sunrise ${mtt(D.rMin)} · Sunset ${mtt(D.sMin)}
+      <span class="dot"></span>15-MIN INTRADAY TIMING · ${S.date} · ${SR.label} ${mtt(SR.startMin)}→${mtt(SR.endMin)} · Sunrise ${mtts(D.rMin)} · Sunset ${mtts(D.sMin)} (sunrise-anchored horas)
     </div>
     <div class="ts">
       <table class="tbl">
