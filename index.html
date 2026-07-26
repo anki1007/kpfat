@@ -5966,6 +5966,62 @@ window._ovbcTimer=window._ovbcTimer||setInterval(()=>{ try{
 // all day and honest for forecast-vs-real backtesting.
 let _ovbcSlots={key:null,slots:null};
 function ovSlotKey(){ const mk=ovMkt(); return [S.date,S.ayMode,S.session||'mkt',S.ovInt||'15',S.loc||'Mumbai',LAT,LON,mk.tz,mk.open,isAELoaded()?'ae':'kep'].join('|'); }
+// ── ✦ KP ASTRO SIGNAL per slot — the PURE panel score ────────────────
+// The Overview panel's /±100 KP Astro Signal (computeBias) re-evaluated
+// at each slot instant: lagna recomputed → every planet's HOUSE reassigned
+// from that slot's ascendant, and the Moon's longitude moved to its slot
+// position (it travels ~0.55°/hr, so its nakshatra — and hence the
+// Nak-swami factor — can flip intraday). Slow planets keep the day's
+// longitudes: they move arc-minutes across a session, so it is the HOUSE
+// rotation that drives intraday variation.
+// NOTE this is deliberately NOT slots[].comp — that one is blended 50/50
+// with the day's combined score, so it never equals the panel reading.
+// This series does: at the TIME-picker slot it reproduces the panel's
+// KP ASTRO SIGNAL score exactly.
+let _ovKpSlots={key:null,slots:null};
+function ovKpSignalSlots(){
+  const key=ovSlotKey()+'|purekp';
+  if(_ovKpSlots.key===key) return _ovKpSlots.slots;
+  const D=DATA; if(!D||!D.planets) return null;
+  const SR=ovSessionRange();
+  const iv=Math.max(1,parseInt(S.ovInt,10)||15);
+  const _mkShift=(IST-ovMkt().tz)*60;
+  const dp=S.date.split('-').map(Number);
+  const out=[];
+  for(let m=SR.startMin;m<=SR.endMin;m+=iv){
+    const J=JD(dp[0],dp[1],dp[2],(m+_mkShift)/60);
+    const ay=getAyanamsa(J,S.ayMode);
+    // IMPORTANT: houses must use the SAME system as the panel —
+    // houseOf() is equal-house measured from the exact ascendant DEGREE,
+    // not whole-sign from the lagna sign index. Using the sign index here
+    // silently shifts planets by one house whenever a planet sits between
+    // the ascendant degree and the end of its sign, which is what made the
+    // plotted value disagree with the panel reading.
+    const ascSid=n360(computeAsc(J).asc-ay);
+    const mLon=n360(geoLon('Moon',J)-ay);
+    let b;
+    try{
+      const slotPlanets=D.planets.map(p=>{
+        if(p.name==='Moon'){
+          return {...p, lon:mLon, s:Math.floor(mLon/30), h:houseOf(mLon,ascSid), nakL:getNak(mLon).l}; }
+        return {...p, h:houseOf(p.lon,ascSid)};
+      });
+      b=computeBias(slotPlanets);
+    }catch(e){ b={score:0,bias:'NEUTRAL',F:[]}; }
+    out.push({m,score:b.score,bias:b.bias,
+      top:(b.F||[]).slice(0,6).map(f=>(f.d>0?'▲ ':'▼ ')+f.l+' ('+(f.d>0?'+':'−')+f.w+')').join('\n')});
+  }
+  _ovKpSlots={key,slots:out};
+  return out;
+}
+// ── overlay line toggles ────────────────────────────────────────────
+// OV_KP   ✦ pure KP Astro Signal   (default ON)
+// OV_COMP ◈ blended composite line (default ON — pre-existing series)
+// OV_SLOT ⌁ hour-lord slot score   (default OFF — declutter)
+function ovRepaintBC(){ const el=document.getElementById('ovbcHost'); if(el&&DATA) el.innerHTML=ovBiasChart(DATA); }
+window.ovToggleKp  =function(){ window.OV_KP  =(window.OV_KP===false);   ovRepaintBC(); };
+window.ovToggleComp=function(){ window.OV_COMP=(window.OV_COMP===false); ovRepaintBC(); };
+window.ovToggleSlot=function(){ window.OV_SLOT=(window.OV_SLOT!==true);  ovRepaintBC(); };
 function ovBuildSlots(D){
   const key=ovSlotKey();
   if(_ovbcSlots.key===key) return _ovbcSlots.slots;
@@ -6150,16 +6206,59 @@ ${bd.why}${bd.res!=null?'\nRESULT: '+(bd.res?'✓ matched':'✗ missed')+' (net 
   const noPriceSvg=noPriceMsg?`<text x="${PLm+IW/2}" y="${PT+IH/2}" fill="var(--tx3)" font-size="14" text-anchor="middle">${noPriceMsg}</text>`:'';
   // ── composite bias line: per-slot KP signal (±100) across the session ──
   const yC=v=>PT+IH/2-(Math.max(-100,Math.min(100,v))/100)*(IH/2*0.92);
+  const showComp=window.OV_COMP!==false;
+  const showKp  =window.OV_KP  !==false;
+  const showSlot=window.OV_SLOT===true;
+  // ── ✦ PURE KP ASTRO SIGNAL — the panel's /±100 score per slot ────────
+  // Same ±100 units as the composite, so it shares the yC axis: the two
+  // lines are then directly comparable (pure signal vs day-blended). Drawn
+  // as a STEP (the score holds for its slot and jumps when the lagna
+  // rotates a house) to distinguish it from the composite's smooth line.
+  let kpSvg='';
+  if(showKp){
+    let kp=null; try{ kp=ovKpSignalSlots(); }catch(e){ kp=null; }
+    if(kp&&kp.length>=2){
+      let d='';
+      kp.forEach((s,i)=>{
+        const x0=x(s.m),x1=x(Math.min(s.m+iv,SR.endMin)),yy=yC(s.score);
+        d+=(i===0?`M ${x0.toFixed(1)} ${yy.toFixed(1)}`:` L ${x0.toFixed(1)} ${yy.toFixed(1)}`)+` L ${x1.toFixed(1)} ${yy.toFixed(1)}`;
+      });
+      const dots=kp.map(s=>`<circle cx="${x(s.m+iv/2).toFixed(1)}" cy="${yC(s.score).toFixed(1)}" r="3.2" fill="${BCOL[s.bias]||'var(--acc)'}" stroke="var(--acc)" stroke-width="1.5"><title>${mtt(s.m)}–${mtt(Math.min(s.m+iv,SR.endMin))} · ✦ KP ASTRO SIGNAL ${s.score>0?'+':''}${s.score} /±100 · ${s.bias}
+${s.top}</title></circle>`).join('');
+      const kLast=kp[kp.length-1];
+      kpSvg=`<path d="${d}" fill="none" stroke="var(--acc)" stroke-width="4" opacity="0.16" stroke-linejoin="round"/>
+        <path d="${d}" fill="none" stroke="var(--acc)" stroke-width="1.9" opacity="0.97" stroke-linejoin="round"/>${dots}
+        <text x="${(x(kLast.m)-4).toFixed(1)}" y="${(yC(kLast.score)+16).toFixed(1)}" fill="var(--acc)" font-size="12" font-weight="700" text-anchor="end">✦ ${kLast.score>0?'+':''}${kLast.score}</text>`;
+    }
+  }
+  // ── ⌁ SLOT SCORE — the hour-lord composite behind the bands (own scale)
+  let slotSvg='';
+  if(showSlot){
+    const sMax=Math.max(3,...slots.map(s=>Math.abs(s.score||0)));
+    const yS=v=>PT+IH/2-(v/sMax)*(IH/2*0.92);
+    let d='';
+    slots.forEach((s,i)=>{
+      const x0=x(s.m),x1=x(Math.min(s.m+iv,SR.endMin)),yy=yS(s.score||0);
+      d+=(i===0?`M ${x0.toFixed(1)} ${yy.toFixed(1)}`:` L ${x0.toFixed(1)} ${yy.toFixed(1)}`)+` L ${x1.toFixed(1)} ${yy.toFixed(1)}`;
+    });
+    const dots=slots.map(s=>`<circle cx="${x(s.m+iv/2).toFixed(1)}" cy="${yS(s.score||0).toFixed(1)}" r="2.3" fill="var(--sun)"><title>${mtt(s.m)} · ${s.ph} hour · SLOT ${s.score>0?'+':''}${s.score} · ${s.bias}
+${s.why}</title></circle>`).join('');
+    slotSvg=`<path d="${d}" fill="none" stroke="var(--sun)" stroke-width="1.3" opacity="0.9" stroke-dasharray="6,3" stroke-linejoin="round"/>${dots}
+      <text x="${(PLm+IW-4).toFixed(1)}" y="${(yS(sMax)+11).toFixed(1)}" fill="var(--sun)" font-size="10" text-anchor="end" opacity="0.85">⌁ ±${Math.round(sMax*10)/10}</text>`;
+  }
   const compPath=slots.map((s,i)=>(i?'L':'M')+x(s.m).toFixed(1)+','+yC(s.comp||0).toFixed(1)).join(' ');
   const lastSlot=slots[slots.length-1];
-  const compSvg=`
+  // shared ±100 axis — drawn whenever ANY ±100 series is on, since the pure
+  // KP signal and the composite both live on it
+  const axisC=(showComp||showKp)?`
     <line x1="${PLm}" y1="${yC(0).toFixed(1)}" x2="${PLm+IW}" y2="${yC(0).toFixed(1)}" stroke="var(--tx3)" stroke-width="0.6" stroke-dasharray="5,4"/>
+    <text x="${PLm+IW+4}" y="${(yC(100)+4).toFixed(1)}" fill="var(--tx2)" font-size="11">+100</text>
+    <text x="${PLm+IW+4}" y="${(yC(0)+4).toFixed(1)}" fill="var(--tx3)" font-size="11">0</text>
+    <text x="${PLm+IW+4}" y="${(yC(-100)+4).toFixed(1)}" fill="var(--tx2)" font-size="11">−100</text>`:'';
+  const compSvg=showComp?`
     <path d="${compPath}" fill="none" stroke="var(--moon)" stroke-width="2.2" opacity="0.95"/>
     ${slots.filter((s,i)=>i%Math.max(1,Math.round(slots.length/24))===0).map(s=>`<circle cx="${x(s.m).toFixed(1)}" cy="${yC(s.comp||0).toFixed(1)}" r="2.4" fill="var(--moon)"><title>${mtt(s.m)} · composite ${s.comp>0?'+':''}${s.comp}</title></circle>`).join('')}
-    <text x="${PLm+IW+4}" y="${(yC(100)+4).toFixed(1)}" fill="var(--moon)" font-size="11">+100</text>
-    <text x="${PLm+IW+4}" y="${(yC(0)+4).toFixed(1)}" fill="var(--tx3)" font-size="11">0</text>
-    <text x="${PLm+IW+4}" y="${(yC(-100)+4).toFixed(1)}" fill="var(--moon)" font-size="11">−100</text>
-    <text x="${x(lastSlot.m).toFixed(1)}" y="${(yC(lastSlot.comp||0)-8).toFixed(1)}" fill="var(--moon)" font-size="12" font-weight="700" text-anchor="end">${lastSlot.comp>0?'+':''}${lastSlot.comp}</text>`;
+    <text x="${x(lastSlot.m).toFixed(1)}" y="${(yC(lastSlot.comp||0)-8).toFixed(1)}" fill="var(--moon)" font-size="12" font-weight="700" text-anchor="end">${lastSlot.comp>0?'+':''}${lastSlot.comp}</text>`:'';
   const dayCol=D.combinedLabel==='BULLISH'?'var(--bull)':D.combinedLabel==='BEARISH'?'var(--bear)':'var(--neut)';
   const instSel=Object.keys(PLAN_INST).map(k=>`<option value="${k}" ${ovInstKey()===k?'selected':''}>${k}</option>`).join('');
   const ivSel=[1,5,15,30,60].map(o=>`<option value="${o}" ${iv===o?'selected':''}>${o} min</option>`).join('');
@@ -6172,6 +6271,9 @@ ${bd.why}${bd.res!=null?'\nRESULT: '+(bd.res?'✓ matched':'✗ missed')+' (net 
       <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <select class="ci" style="font-size:11px;padding:2px 4px;max-width:160px" onchange="ovSelInst(this.value)">${instSel}</select>
         <select class="ci" style="font-size:11px;padding:2px 4px" onchange="gs({ovInt:this.value})">${ivSel}</select>
+        <button class="ci" style="font-size:11px;padding:2px 8px;cursor:pointer;color:${showKp?'var(--acc)':'var(--tx3)'};font-weight:700" onclick="ovToggleKp()" title="Pure KP ASTRO SIGNAL (/±100) re-evaluated at each slot's own lagna — at the TIME-picker slot this equals the Overview panel score exactly">✦ KP ${showKp?'ON':'OFF'}</button>
+        <button class="ci" style="font-size:11px;padding:2px 8px;cursor:pointer;color:${showComp?'var(--moon)':'var(--tx3)'};font-weight:700" onclick="ovToggleComp()" title="Composite line: per-slot KP signal blended 50/50 with the day's combined score">◈ COMP ${showComp?'ON':'OFF'}</button>
+        <button class="ci" style="font-size:11px;padding:2px 8px;cursor:pointer;color:${showSlot?'var(--sun)':'var(--tx3)'};font-weight:700" onclick="ovToggleSlot()" title="Hour-lord slot score — the numeric twin of the coloured bias bands (own auto scale)">⌁ SLOT ${showSlot?'ON':'OFF'}</button>
         <button class="ci" style="font-size:11px;padding:2px 8px;cursor:pointer" onclick="ovbcLoadPrice(true)" title="Re-fetch price">↻</button>
       </span>
     </div>
@@ -6180,17 +6282,19 @@ ${bd.why}${bd.res!=null?'\nRESULT: '+(bd.res?'✓ matched':'✗ missed')+' (net 
         <rect x="${PLm}" y="${PT}" width="${IW}" height="${IH}" fill="var(--bg2)" stroke="var(--bd)"/>
         ${bandRects}${axis}${priceAxis}${bandLbls}
         ${candleSvg}${noPriceSvg}
-        ${compSvg}
+        ${axisC}${slotSvg}${compSvg}${kpSvg}
         ${nowMark}
       </svg>
       <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:10px;color:var(--tx2);margin-top:6px;align-items:center">
         <span style="font-weight:700"><span style="color:var(--bull)">▮</span><span style="color:var(--bear)">▮</span> ${ovInstKey()} ${iv}-min candles</span>
-        <span style="color:var(--moon);font-weight:700">— composite bias line (±100, right axis)</span>
+        ${showKp?'<span style="color:var(--acc);font-weight:700">▬ ✦ KP ASTRO SIGNAL — pure panel score (±100, right axis)</span>':''}
+        ${showComp?'<span style="color:var(--moon);font-weight:700">— ◈ composite (KP blended 50/50 with day score, ±100)</span>':''}
+        ${showSlot?'<span style="color:var(--sun);font-weight:700">┄ ⌁ slot score (hour-lord, own scale)</span>':''}
         ${legend}
         <span style="margin-left:auto">${priceStatus}</span>
       </div>
       <div style="font-size:10px;color:var(--tx3);margin-top:4px">
-        Bands = per-slot forecast from that slot's own sky: hour-lord house from the SLOT's lagna, real dignity (exalt/own/debil), Moon sub-lord at the slot, hora and day-trend tilt — hover a band for the full scoring. Line = composite bias per slot (KP signal recomputed at each slot's lagna/Moon, blended with the day score; ±100 on the right axis, dots show values). Bands are stable (they never repaint when you change the TIME picker). ✓/✗ on each completed band = forecast vs the band's actual net move (±0.08% threshold; VOLATILE ✓ = whipsaw range ≫ net). Yahoo history: 1m ≈ 30d, 5/15/30m ≈ 60d; older dates fall back to hourly, then bands-only. Today auto-refreshes every 60s; ↻ forces it. 24H session covers US markets / commodities.
+        Bands = per-slot forecast from that slot's own sky: hour-lord house from the SLOT's lagna, real dignity (exalt/own/debil), Moon sub-lord at the slot, hora and day-trend tilt — hover a band for the full scoring. <strong style="color:var(--acc)">✦ KP ASTRO SIGNAL</strong> (cyan step) = the Overview panel's <em>pure</em> /±100 score, recomputed at every slot with that instant's lagna and Moon position — at the TIME-picker slot it equals the panel reading exactly, and it steps whenever the rising sign rotates a planet into a new house or the Moon changes nakshatra. <strong style="color:var(--moon)">◈ composite</strong> (blue smooth) = that same per-slot signal blended 50/50 with the day's combined score, so it is deliberately damped and will <em>not</em> match the panel number. Both share the ±100 right axis, so the gap between them is the day-score drag. <strong style="color:var(--sun)">⌁ slot</strong> (amber dashed, off by default) = the hour-lord score behind the bands, on its own auto scale. Hover any dot for the factor breakdown. Bands are stable (they never repaint when you change the TIME picker). ✓/✗ on each completed band = forecast vs the band's actual net move (±0.08% threshold; VOLATILE ✓ = whipsaw range ≫ net). Yahoo history: 1m ≈ 30d, 5/15/30m ≈ 60d; older dates fall back to hourly, then bands-only. Today auto-refreshes every 60s; ↻ forces it. 24H session covers US markets / commodities.
       </div>
     </div>
   </div>`;
