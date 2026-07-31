@@ -11309,6 +11309,63 @@ function tBhavphal(){
 }
 
 
+// ── MOON INTRADAY RULES (चंद्रमा — इंट्राडे ट्रेडिंग नियम) ─────────────
+// 7 classical Moon checks for intraday trading, evaluated LIVE for the
+// selected date/time, + planetary-speed & Paap Kartari observations.
+function moonIntradayRules(D){
+  const P=D.planets, moon=P.find(p=>p.name==='Moon'), sun=P.find(p=>p.name==='Sun');
+  if(!moon||!sun) return null;
+  const sep=(a,b)=>{const d=Math.abs(n360(a)-n360(b))%360;return d>180?360-d:d;};
+  const out=[];
+  const add=(n,hi,en,ok,st,det)=>out.push({n,hi,en,ok,st,det});
+  // 1 — strong Moon: kendra (1,4,7,10) or trikona (1,5,9) house
+  const kendra=[1,4,7,10].includes(moon.h), trikon=[1,5,9].includes(moon.h);
+  add(1,'मजबूत चंद्रमा','Strong Moon',(kendra||trikon)?1:0,
+    kendra||trikon?(kendra?'केंद्र H'+moon.h+' — शुभ':'त्रिकोण H'+moon.h+' — शुभ'):'H'+moon.h+' — केंद्र/त्रिकोण में नहीं',
+    'केंद्र (1,4,7,10) या त्रिकोण (1,5,9) भाव में चंद्रमा इंट्राडे के लिए शुभ। Moon in Kendra/Trikon houses is favorable.');
+  // 2 — combust Moon (within 12° of Sun)
+  const dSun=sep(moon.lon,sun.lon);
+  add(2,'अस्त (Combust) चंद्रमा','Combust Moon',dSun<12?-1:1,
+    dSun<12?'सूर्य से '+dSun.toFixed(1)+'° — अस्त ⚠':'सूर्य से '+dSun.toFixed(1)+'° — अस्त नहीं',
+    'सूर्य के 12° के भीतर चंद्रमा अस्त — ट्रेडिंग के लिए शुभ नहीं। Moon within 12° of Sun is combust — unfavorable.');
+  // 3 — Moon conjunct malefics (Rahu/Saturn/Ketu/Sun within 8°)
+  const mal=['Rahu','Saturn','Ketu','Sun'].map(n=>{const q=P.find(x=>x.name===n);return q?{n,d:sep(moon.lon,q.lon)}:null;}).filter(x=>x&&x.d<8);
+  add(3,'पाप ग्रहों के साथ चंद्रमा','Moon + Malefics',mal.length?-1:1,
+    mal.length?mal.map(m=>m.n+' '+m.d.toFixed(1)+'°').join(', ')+' ⚠':'कोई पाप ग्रह निकट अंशों में नहीं',
+    'राहु, शनि, केतु या सूर्य के साथ निकट अंश (≤8°) — अनुकूल नहीं। Close conjunction with Rahu/Saturn/Ketu/Sun is challenging.');
+  // 4 — Kemadruma yoga: no planet (excl Sun/Rahu/Ketu) in 2nd/12th sign from Moon or with Moon
+  const others=P.filter(p=>!['Moon','Sun','Rahu','Ketu','Uranus','Neptune','Pluto'].includes(p.name));
+  const s2=(moon.s+1)%12, s12=(moon.s+11)%12;
+  const kem=!others.some(p=>p.s===s2||p.s===s12||p.s===moon.s);
+  add(4,'केमद्रुम योग','Kemadruma Yoga',kem?-1:1,
+    kem?'चंद्रमा के 2/12 भाव में कोई ग्रह नहीं — केमद्रुम ⚠':'केमद्रुम नहीं — चंद्रमा को सहारा प्राप्त',
+    'चंद्रमा के आसपास (2nd/12th राशि) ग्रहों का अभाव अशुभ। No planets around the Moon is unfavorable.');
+  // 5 — Gandmool nakshatra + rashi-sandhi (water 29° / fire 1°)
+  const nakIdx=Math.floor(n360(moon.lon)/NAK_SPAN)%27;
+  const gm=(typeof GAND_MOOL!=='undefined')?GAND_MOOL.has(nakIdx):[0,8,9,17,18,26].includes(nakIdx);
+  const water=[3,7,11].includes(moon.s)&&moon.deg>=29, fire=[0,4,8].includes(moon.s)&&moon.deg<=1;
+  add(5,'गंडमूल नक्षत्र / संधि','Gandmool / Sandhi',(gm||water||fire)?-1:1,
+    gm?moon.nak+' — गंडमूल ⚠'+(water||fire?' + राशि-संधि':''):(water||fire)?moon.sign+' '+moon.deg.toFixed(1)+'° — राशि-संधि ⚠':moon.nak+' — सामान्य',
+    'गंडमूल नक्षत्र या कर्क→सिंह / वृश्चिक→धनु / मीन→मेष संधि (जल 29° / अग्नि 1°) — सावधानी। Gandmool or sign-junction Moon needs caution.');
+  // 6 — Moon transit speed (gochar) + Mercury/Venus speed (>1.5°/day = momentum)
+  let spd={};
+  try{
+    const dp=(D.dateStr||S.date).split('-').map(Number), t=parseFloat(S.time)||10;
+    const J=JD(dp[0],dp[1],dp[2],t);
+    for(const n of ['Moon','Mercury','Venus']) spd[n]=n360(geoLon(n,J+0.5)-geoLon(n,J-0.5)+180)-180;
+  }catch(e){}
+  const mspd=spd.Moon||0, fastM=mspd>13.5;
+  add(6,'चंद्र गोचर (गति)','Moon Transit Speed',fastM?1:0,
+    'चंद्र '+mspd.toFixed(2)+'°/दिन ('+(fastM?'तेज़ — momentum':'मध्यम/धीमा')+') · बुध '+(spd.Mercury!=null?spd.Mercury.toFixed(2):'—')+'°/दिन · शुक्र '+(spd.Venus!=null?spd.Venus.toFixed(2):'—')+'°/दिन',
+    'गोचर से अच्छे/कमजोर दिन पहचानें। बुध-शुक्र की गति 1.5°/दिन (90 कला) से अधिक = बेहतर momentum; धीमी गति = sideways + premium decay. Stationary planets = choppy, low RR.');
+  // 7 — Moon in Ashtakavarga (BAV bindus in Moon's sign)
+  const AV=D.ashtaka, bav=AV?AV.moonBAV:null, sav=AV?AV.moonSAV:null;
+  add(7,'अष्टकवर्ग में चंद्रमा','Moon in Ashtakavarga',bav==null?0:(bav>=4?1:bav<=2?-1:0),
+    bav==null?'—':('BAV '+bav+' बिंदु'+(bav>=4?' — अच्छा ✅':bav<=2?' — कमजोर ⚠':' — मध्यम')+' · SAV '+sav),
+    '4+ बिंदु = supportive · 2 या कम = weak. 4+ points good, 2 or fewer weak.');
+  return out;
+}
+
 function tRuleBook(){
   const D=DATA, R=D.ruleX;
   if(!R) return '<div style="padding:20px;color:var(--tx3)">Rule engine not available.</div>';
@@ -11415,6 +11472,26 @@ function tRuleBook(){
       </div>
     </div>
   </div>
+  ${(()=>{
+    const MR=moonIntradayRules(D); if(!MR) return '';
+    const good=MR.filter(r=>r.ok>0).length, bad=MR.filter(r=>r.ok<0).length;
+    const rows=MR.map(r=>`<tr>
+      <td style="text-align:center;font-weight:800;color:var(--acc)">${r.n}</td>
+      <td><div style="font-weight:700;color:var(--tx0)">${r.hi}</div><div style="font-size:10px;color:var(--tx3)">${r.en}</div></td>
+      <td style="font-weight:700;color:${r.ok>0?'var(--bull)':r.ok<0?'var(--bear)':'var(--neut)'}">${r.ok>0?'✅ शुभ':r.ok<0?'⚠ अशुभ':'◐ तटस्थ'}</td>
+      <td style="color:var(--tx1)">${r.st}</td>
+      <td style="font-size:10.5px;color:var(--tx3)">${r.det}</td></tr>`).join('');
+    return `<div class="pnl"><div class="ph"><span class="dot"></span>🌙 चंद्रमा — इंट्राडे ट्रेडिंग नियम · MOON INTRADAY RULES · <span style="color:var(--bull)">${good} शुभ</span> / <span style="color:var(--bear)">${bad} अशुभ</span></div>
+      <div style="padding:4px 12px;font-size:10.5px;color:var(--tx2)">फाइनेंशियल एस्ट्रोलॉजी में इंट्राडे ट्रेडिंग के लिए चंद्रमा सबसे महत्वपूर्ण ग्रह है। In Financial Astrology, the Moon is the most important planet for intraday trading. (सभी नियम चयनित दिनांक/समय पर LIVE जाँचे गए)</div>
+      <div class="ts"><table class="tbl"><thead><tr><th>#</th><th>नियम / Rule</th><th>स्थिति</th><th>आज की जाँच (Live)</th><th>विवरण</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="pb" style="font-size:10.5px;color:var(--tx3);display:flex;flex-direction:column;gap:4px">
+        <div>🪐 <b style="color:var(--tx2)">ग्रह-गति नियम:</b> दैनिक ट्रेडिंग हेतु चंद्रमा; मध्यम-अवधि हेतु बुध व शुक्र। गति 1.5°/दिन (90 कला) से अधिक → बेहतर reward, तेज़ momentum, trending moves। धीमी/स्थिर (stationary) गति → sideways बाज़ार, option premium decay, कमजोर risk-reward। Stationary प्रभाव समाप्त होते ही volatility व momentum सुधरते हैं।</div>
+        <div>🔭 <b style="color:var(--tx2)">पापकर्तरी (Paap Kartari):</b> सेक्टर/इंडेक्स की मजबूती-कमजोरी हेतु सभी ग्रहों की पापकर्तरी स्थिति देखें — चंद्रमा को छोड़कर कोई ग्रह पापकर्तरी में हो तो उससे संबंधित सेक्टर कमजोर रह सकता है। शॉर्ट टर्म: चंद्र-बुध-शुक्र · लॉन्ग टर्म: मंगल-सूर्य-गुरु।</div>
+        <div>📌 <b style="color:var(--tx2)">समय-खिड़की:</b> Opening Hour (9:15–10:15) व Last Hour (14:30–15:30) — गति/वक्री/stationary परिवर्तनों का प्रभाव इन्हीं अवधियों में सबसे तीव्र होता है। शनि stationary→वक्री जैसे बड़े astro events पर sharp reversals व trend change संभव।</div>
+        <div>🌙 <b style="color:var(--tx2)">चंद्र-शुक्र राशि परिवर्तन योग:</b> Moon exchange अवधियों में प्रायः strong sentiment-driven moves; BankNifty में upside trend व निचले स्तरों पर support देखा गया (2025–26 observations)।</div>
+      </div>
+    </div>`;
+  })()}
 </div>`;
 }
 
