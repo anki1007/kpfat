@@ -3147,9 +3147,60 @@ function findReversalWindows(D){
       });
     }
   }
-  // Keep the highest-strength events; cap at 8 so the list is digestible
-  windows.sort((x,y) => y.strength - x.strength);
-  const final = windows.slice(0, 8);
+  // 4. MOON-RULE CROSSINGS (चंद्रमा नियम) — the Moon moves ~0.55°/hr, so the
+  //    intraday rules switch on/off mid-session. Each toggle is a genuine
+  //    inflection in the KP signal curve, so it is listed as a named window.
+  const _mrPlanets = D.planets;
+  if(_mrPlanets && _mrPlanets.length && D.dateStr){
+    const _dp = D.dateStr.split('-').map(Number);
+    const _ayM = D.ayMode || (typeof S!=='undefined' ? S.ayMode : 'lahiri');
+    const _sp = (x,y)=>{const d=Math.abs(n360(x)-n360(y))%360;return d>180?360-d:d;};
+    const _sun=_mrPlanets.find(p=>p.name==='Sun');
+    const _states = slots.map(s=>{
+      let h=null;
+      try{
+        const Js=JD(_dp[0],_dp[1],_dp[2],s.min/60);
+        h=houseOf(s.moonLon, n360(computeAsc(Js).asc-getAyanamsa(Js,_ayM)));
+      }catch(e){}
+      const deg=n360(s.moonLon)%30, sg=Math.floor(n360(s.moonLon)/30);
+      const st={ kendra:[1,4,7,10].includes(h),
+        combust:_sun?_sp(s.moonLon,_sun.lon)<12:false,
+        gandmool:(typeof GAND_MOOL!=='undefined')&&GAND_MOOL.has(Math.floor(n360(s.moonLon)/NAK_SPAN)%27),
+        sandhi:([3,7,11].includes(sg)&&deg>=29)||([0,4,8].includes(sg)&&deg<=1) };
+      for(const mn of ['Rahu','Saturn','Ketu']){
+        const q=_mrPlanets.find(p=>p.name===mn);
+        st['conj'+mn]= q ? _sp(s.moonLon,q.lon)<8 : false;
+      }
+      return st;
+    });
+    const MRDEF = {
+      kendra:      {on:'Moon enters kendra — bull support switches ON', off:'Moon exits kendra — bull support lost', dOn:+1, str:80},
+      combust:     {on:'Moon combustion begins (<12° Sun)',             off:'Moon out of combustion',              dOn:-1, str:85},
+      gandmool:    {on:'Moon enters Gandmool nakshatra',                off:'Moon leaves Gandmool',                dOn:-1, str:85},
+      sandhi:      {on:'Moon enters rashi-sandhi (जल 29°/अग्नि 1°)',    off:'Moon clears rashi-sandhi',            dOn:-1, str:88},
+      conjRahu:    {on:'Moon enters Rahu orb (≤8°)',                    off:'Moon clears Rahu orb',                dOn:-1, str:82},
+      conjSaturn:  {on:'Moon enters Saturn orb (≤8°)',                  off:'Moon clears Saturn orb',              dOn:-1, str:82},
+      conjKetu:    {on:'Moon enters Ketu orb (≤8°)',                    off:'Moon clears Ketu orb',                dOn:-1, str:82}
+    };
+    for(let i=1;i<_states.length;i++){
+      for(const k of Object.keys(MRDEF)){
+        if(_states[i][k] === _states[i-1][k]) continue;
+        const turnedOn=_states[i][k], def=MRDEF[k];
+        windows.push({ time: slots[i].time, strength: def.str, type:'MOON_RULE',
+          from: turnedOn?'off':'on', to: turnedOn?'on':'off',
+          reason: turnedOn?def.on:def.off,
+          dir: turnedOn ? def.dOn : -def.dOn });
+      }
+    }
+  }
+  // Keep the highest-strength events; cap at 12 so the Moon-rule crossings
+  // do not crowd out the sub-lord / hora flips (was 8 before rules were added).
+  // In 24H session mode the overnight slots would otherwise monopolise the
+  // list, so market-hours (09:15-15:30) events always rank first — those are
+  // the ones that are actually tradeable.
+  const _inMkt = t => { const [hh,mm]=t.split(':').map(Number); const v=hh*60+mm; return v>=555&&v<=930; };
+  windows.sort((x,y) => (_inMkt(y.time)-_inMkt(x.time)) || (y.strength - x.strength));
+  const final = windows.slice(0, 12);
   // Re-sort by time for display
   final.sort((x,y) => x.time.localeCompare(y.time));
   return final;
@@ -4314,7 +4365,7 @@ function computeAll(dateStr,timeIST,ayMode){
   const rulesScore = rules ? rules.composite.score : 0;
 
   // ── FORECAST ENGINE (pattern-match → specific outcomes) ──────
-  const dummyD = { slots, dateStr, ascSign };  // partial D for forecast helpers
+  const dummyD = { slots, dateStr, ascSign, planets, ayMode };  // partial D for forecast helpers
   const forecast = rules ? buildForecast(planets, aspects, rules, dummyD, J) : null;
   const forecastDirScore = forecast ? forecast.directionScore : 0;
 
@@ -9198,7 +9249,7 @@ function tRules(){
     <div class="ph"><span class="dot"></span>INTRADAY REVERSAL WINDOWS · ${F.reversals.length} computed</div>
     <div class="pb">
       <div style="font-size:11.5px;color:var(--tx3);margin-bottom:8px;line-height:1.5">
-        Computed from Moon sub-lord transitions, planetary hour flips, and nakshatra changes during the session. The highest-strength events are inflections where intraday direction often pivots.
+        Computed from Moon sub-lord transitions, planetary hour flips, nakshatra changes, and 🌙 Moon-rule crossings (kendra entry/exit, combustion, Rahu/Saturn/Ketu orb, Gandmool, rashi-sandhi) during the session. The highest-strength events are inflections where intraday direction often pivots — Moon-rule crossings also step the ✦ KP Astro Signal line on the Overview chart.
       </div>
       ${F.reversals.length === 0 ? `<div style="color:var(--tx3);font-size:11px;padding:6px">No major intraday inflections detected.</div>` : `
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px">
@@ -9207,7 +9258,7 @@ function tRules(){
             const rMin = h*60+m;
             const past = curMin > rMin;
             const upcoming = !past && (rMin - curMin) <= 30;
-            const baseCol = r.strength >= 90 ? 'var(--acc)' : r.strength >= 75 ? 'var(--acc)' : 'var(--tx2)';
+            const baseCol = r.type === 'MOON_RULE' ? (PC.Moon||'var(--acc)') : r.strength >= 75 ? 'var(--acc)' : 'var(--tx2)';
             const col = upcoming ? 'var(--acc)' : past ? 'var(--tx3)' : baseCol;
             const bg  = upcoming ? 'rgba(0,200,255,0.15)' : past ? 'var(--bg2)' : 'var(--bg2)';
             const dirA = r.dir > 0 ? '▲' : r.dir < 0 ? '▼' : '◆';
