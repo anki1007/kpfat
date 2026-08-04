@@ -6041,10 +6041,18 @@ async function ovbcLoadPrice(force){
 // Live auto-refresh: while viewing TODAY's overview during the active
 // session, re-fetch candles every 60s so the chart tracks the live market
 // without manual ↻. Past dates never re-fetch (data is final).
-// After the Indian session ends (15:30 IST), hand the overview over to the
+// After the Indian session fully ends, hand the overview over to the
 // US market: DOW as default index, New York timezone, 24H session. Fires
 // once per close (so a manual switch back to an NSE instrument sticks),
 // re-arms while the Indian market is open, and only touches today's view.
+// HANDOVER = 16:00 IST, not the 15:30 continuous-trading close: under
+// SEBI's Closing Auction Session (CAS) the Indian market is still live
+// past 15:30 — 15:15 normal close for CAS symbols, order entry 15:20-15:30,
+// matching 15:30-15:35 and the post-close session 15:50-16:00, so effective
+// trading runs to ~15:40. Switching at 15:30 would drop the NSE view while
+// the auction is still printing prices. US pre-market is unaffected: NYSE
+// opens 09:30 ET = 19:00 IST, hours after this handover.
+const IN_US_HANDOVER_MIN = 16*60;   // 16:00 IST — after CAS/post-close ends
 function ovAutoVenue(){
   try{
     if((S.tab||'overview')!=='overview') return;
@@ -6055,7 +6063,7 @@ function ovAutoVenue(){
     const ds=now.getUTCFullYear()+'-'+String(now.getUTCMonth()+1).padStart(2,'0')+'-'+String(now.getUTCDate()).padStart(2,'0');
     if(S.date!==ds) return;                                       // don't touch backtest views
     const m=now.getUTCHours()*60+now.getUTCMinutes();
-    if(m<=Math.round((L.close||15.5)*60)){ window._ovAutoUS=false; return; }
+    if(m<=IN_US_HANDOVER_MIN){ window._ovAutoUS=false; return; }
     if(window._ovAutoUS) return;
     window._ovAutoUS=true;
     ovSelInst('DOW');
